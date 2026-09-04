@@ -39,7 +39,7 @@ Founder / Product Owner
 
 ## G1 — Architecture Ready
 
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ### Entry Criteria
 - product direction approved
@@ -72,7 +72,7 @@ Founder / Product Owner
 
 ## G2 — Governance Foundation Ready
 
-**Status:** IN PROGRESS
+**Status:** COMPLETE
 
 ### Entry Criteria
 - G1 architecture substantially defined
