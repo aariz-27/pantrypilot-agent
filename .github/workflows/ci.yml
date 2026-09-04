@@ -32,10 +32,6 @@ jobs:
     name: Backend Checks
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: backend
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,7 +44,7 @@ jobs:
       - name: Check whether backend exists
         id: backend_exists
         run: |
-          if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+          if [ -f "backend/requirements.txt" ] || [ -f "backend/pyproject.toml" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -56,6 +52,7 @@ jobs:
 
       - name: Install backend dependencies
         if: steps.backend_exists.outputs.exists == 'true'
+        working-directory: backend
         run: |
           python -m pip install --upgrade pip
           if [ -f "requirements.txt" ]; then
@@ -66,6 +63,7 @@ jobs:
 
       - name: Run backend tests
         if: steps.backend_exists.outputs.exists == 'true'
+        working-directory: backend
         run: |
           if [ -d "tests" ]; then
             python -m pytest
