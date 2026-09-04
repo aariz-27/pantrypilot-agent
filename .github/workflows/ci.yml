@@ -1,0 +1,125 @@
+name: PantryPilot CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "fix/**"
+      - "chore/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  governance:
+    name: Governance Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run governance validation
+        run: python scripts/validate_governance.py
+
+  backend:
+    name: Backend Checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check whether backend exists
+        id: backend_exists
+        run: |
+          if [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install backend dependencies
+        if: steps.backend_exists.outputs.exists == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          elif [ -f "pyproject.toml" ]; then
+            pip install .
+          fi
+
+      - name: Run backend tests
+        if: steps.backend_exists.outputs.exists == 'true'
+        run: |
+          if [ -d "tests" ]; then
+            python -m pytest
+          else
+            echo "No backend tests directory yet."
+          fi
+
+      - name: Backend not created yet
+        if: steps.backend_exists.outputs.exists == 'false'
+        run: echo "Backend scaffold not created yet. Skipping backend checks."
+
+  frontend:
+    name: Frontend Checks
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check whether frontend exists
+        id: frontend_exists
+        run: |
+          if [ -f "package.json" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install frontend dependencies
+        if: steps.frontend_exists.outputs.exists == 'true'
+        run: npm install
+
+      - name: Run frontend tests if configured
+        if: steps.frontend_exists.outputs.exists == 'true'
+        run: |
+          if npm run | grep -q " test"; then
+            npm test -- --run
+          else
+            echo "No frontend test script configured yet."
+          fi
+
+      - name: Run frontend build
+        if: steps.frontend_exists.outputs.exists == 'true'
+        run: npm run build
+
+      - name: Frontend not created yet
+        if: steps.frontend_exists.outputs.exists == 'false'
+        run: echo "Frontend scaffold not created yet. Skipping frontend checks."
