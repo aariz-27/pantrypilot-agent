@@ -1,0 +1,29 @@
+[
+  {
+    "decision_id": "DEC-010",
+    "trigger_kind": "manual",
+    "trigger_ref": "M03 Agent Orchestrator",
+    "trigger_text": "The exact competition LLM model must be approved before M03 Agent Orchestrator implementation begins.",
+    "state": "ARMED_NOT_YET_CROSSED",
+    "blocking_scope": "Agent runtime configuration",
+    "verification_note": "Founder approval required before implementation ticket touching production agent runtime."
+  },
+  {
+    "decision_id": "DEC-011",
+    "trigger_kind": "manual",
+    "trigger_ref": "Production deployment",
+    "trigger_text": "Deployment platform must be approved before production deployment configuration begins.",
+    "state": "ARMED_NOT_YET_CROSSED",
+    "blocking_scope": "Production deployment",
+    "verification_note": "Staging/local work may continue before this trigger is crossed."
+  },
+  {
+    "decision_id": "DEC-012",
+    "trigger_kind": "manual",
+    "trigger_ref": "LocalCuratedRecipeProvider completion",
+    "trigger_text": "The final curated recipe dataset must be approved before the local curated provider can be declared complete.",
+    "state": "ARMED_NOT_YET_CROSSED",
+    "blocking_scope": "Regional recipe provider completeness",
+    "verification_note": "Provider scaffolding may be implemented earlier, but completion requires approved dataset content."
+  }
+]
