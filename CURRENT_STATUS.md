@@ -21,11 +21,18 @@ None currently recorded
 ## Capability Maturity
 DESIGNED
 
-## Authoritative Source Documents
+## ## Authoritative Source Documents
 
-- `PantryPilot_Master_Project_Blueprint_v3.1_REVISED_FINAL.docx`
-- `TECHNICAL_SPEC.md`
-- `docs/AGENTS.md`
+* `PantryPilot_Master_Project_Blueprint_v3.1_REVISED_FINAL.docx`
+* `TECHNICAL_SPEC.md`
+* `docs/AGENTS.md`
+* approved decision records, including active DEC items
+* `SPRINT_BOARD.md`
+* `CURRENT_STATUS.md`
+* the currently authorized implementation ticket and its acceptance criteria
+
+Where documents conflict, approved governance rules and explicit approved decisions take precedence over older or more general wording. Claude must not rely on a single document in isolation when the authoritative project set provides additional constraints.
+
 
 ## Real-Data Restrictions
 - No runtime grocery scraping

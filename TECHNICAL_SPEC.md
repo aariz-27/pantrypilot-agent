@@ -19,7 +19,7 @@ PantryPilot never generates recipes. Recipe names, ingredients, measurements, in
 ### Architectural style
 
 - React 19.2.7 + Vite 8.x frontend
-- Python 3.12 + FastAPI 0.141.x backend
+- Python 3.11+ + FastAPI 0.141.x backend
 - Pydantic v2 for contracts and validation
 - SQLite for local reference pricing, aliases, cache metadata, and optional provider usage counters
 - Direct LLM tool/function calling
@@ -239,8 +239,9 @@ Before final serialization every recommendation must have provider name, provide
 
 ### Runtime LLM recommendation
 
-Primary runtime model: **Anthropic Claude Sonnet 5**, behind an `LLMProvider` adapter. The model ID is configurable through environment variables so it can be replaced without redesign.
+The exact competition runtime LLM is OPEN under DEC-010.
 
+Anthropic Claude Sonnet 5 is currently a candidate model only. The runtime model must remain configurable through environment variables and accessed through an LLMProvider adapter so the final approved model can be changed without redesigning PantryPilot's agent orchestration, deterministic decision logic, or provider architecture.
 ---
 
 
@@ -1258,7 +1259,7 @@ Production health green, demo path rehearsed, final tag created, demo explanatio
 | Frontend | React + Vite | rapid SPA build |
 | Backend | FastAPI | typed Python API |
 | Agent framework | direct tool calling | minimal overhead |
-| Runtime model | Claude Sonnet 5 via adapter | agent/tool-use balance |
+| Runtime model | OPEN under DEC-010; Claude Sonnet 5 is a candidate via adapter | final model not yet locked; preserve tool-use compatibility |
 | Training | none | unnecessary |
 | Multi-agent | no | unnecessary complexity |
 | Live grocery pricing | no | avoid brittle runtime scraping |
@@ -1301,7 +1302,7 @@ As of 2026-08-23:
 - August testing confirmed that `limit` behaves as page size, page 2 can still be relevant, and specific supported cuisine filters can materially improve relevance.
 - August testing confirmed that RecipeAPI.io `max_prep_time` does not represent total meal duration; PantryPilot must enforce any total-time constraint locally using prep time + cook time.
 - RecipeAPI.io coverage for Indian/Pakistani/desi dish-name searches was limited in testing, motivating the small local curated regional library.
-- Anthropic documents Claude Sonnet 5 and tool use; runtime model remains configurable.
+- Anthropic documents Claude Sonnet 5 and tool use; Claude Sonnet 5 is a candidate only, the exact runtime model remains OPEN under DEC-010, and the runtime model remains configurable.
 - Vercel documents Vite deployment and Render documents FastAPI web-service deployment.
 
 These service/version facts are implementation-time assumptions, not architectural invariants. Re-verify on Day 2 before pinning dependencies or publishing the competition build.
