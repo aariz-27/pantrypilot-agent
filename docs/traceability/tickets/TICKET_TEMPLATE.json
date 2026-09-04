@@ -1,0 +1,71 @@
+{
+  "ticket_id": "PP-XXX",
+  "title": "Short ticket title",
+  "status": "DRAFT",
+  "authorized": false,
+  "authorized_by": "Founder / Product Owner",
+  "branch_name": "feature/pp-xxx-short-title",
+  "objective": "Describe the single outcome this ticket must deliver.",
+  "in_scope": [
+    "Exact item 1",
+    "Exact item 2"
+  ],
+  "out_of_scope": [
+    "Explicitly excluded item 1",
+    "Explicitly excluded item 2"
+  ],
+  "requirements": [
+    "FR-XX",
+    "AR-XX"
+  ],
+  "decisions": [
+    "DEC-XXX"
+  ],
+  "decision_triggers_checked": true,
+  "blocking_decisions": [],
+  "affected_modules": [
+    "Module name"
+  ],
+  "allowed_paths": [
+    "backend/example/",
+    "tests/example/"
+  ],
+  "forbidden_paths": [
+    "frontend/",
+    "docs/unrelated/"
+  ],
+  "acceptance_criteria": [
+    "Criterion 1",
+    "Criterion 2"
+  ],
+  "security_acceptance": [
+    "Relevant security condition or N/A with reason"
+  ],
+  "performance_reliability_acceptance": [
+    "Relevant performance/reliability condition or N/A with reason"
+  ],
+  "data_integrity_acceptance": [
+    "Relevant data integrity condition or N/A with reason"
+  ],
+  "required_tests": [
+    "Unit test requirement",
+    "Integration test requirement"
+  ],
+  "migration_impact": "NONE",
+  "configuration_impact": "NONE",
+  "observability_impact": "NONE",
+  "known_dependencies": [],
+  "known_risks": [],
+  "implementation_notes": "Claude must not expand scope beyond this ticket.",
+  "review_required": {
+    "claude_self_review": true,
+    "chatgpt_independent_review": true,
+    "founder_merge": true
+  },
+  "completion_evidence": {
+    "pull_request": null,
+    "test_summary": null,
+    "review_result": null,
+    "merge_commit": null
+  }
+}
