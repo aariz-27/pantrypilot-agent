@@ -13,7 +13,10 @@ None
 None currently recorded
 
 ## Open Decisions
-To be populated in DECISION_REGISTER.md
+
+- DEC-010 — Competition LLM model
+- DEC-011 — Deployment platform
+- DEC-012 — Final local curated recipe dataset size/content
 
 ## Capability Maturity
 DESIGNED
@@ -32,4 +35,4 @@ DESIGNED
 - Pricing is based on local reference data, not live supermarket pricing
 
 ## Next Authorized Work
-Create repository governance foundation documents before any product coding.
+Authorize and create the first bounded implementation ticket for the application foundation.
