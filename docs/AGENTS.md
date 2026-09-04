@@ -112,7 +112,7 @@ Apify is development-only and must never be called by the live recommendation pa
 
 ## Python conventions
 
-- Python 3.12 target
+- Python 3.11+ target, consistent with DEC-008
 - type hints required for public functions
 - Pydantic v2 for API/data validation
 - one clear responsibility per module
