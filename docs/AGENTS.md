@@ -224,4 +224,11 @@ Do not implement:
 - multi-agent architecture
 - voice interface
 
-Do not ask the user for clarification on scope — refer to spec.md. If truly blocked, list the specific blocking question at the end of the session instead of pausing mid-build.
+Before asking the Founder/Product Owner for clarification, first consult the authoritative project documentation, especially `TECHNICAL_SPEC.md`, the active ticket, governance documents, and approved decisions.
+
+Do not ask questions that are already answered by those sources.
+
+If a genuine material ambiguity remains and proceeding would require an undocumented assumption that could affect architecture, data integrity, provenance, constraints, acceptance criteria, or implementation correctness, STOP and request a specific Founder/Product Owner decision before continuing.
+
+Minor implementation details that are already implied by the technical specification, established project conventions, or the active ticket should be resolved without unnecessary interruption and documented in the implementation notes.
+
