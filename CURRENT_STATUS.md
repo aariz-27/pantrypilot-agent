@@ -19,9 +19,10 @@ To be populated in DECISION_REGISTER.md
 DESIGNED
 
 ## Authoritative Source Documents
-- docs/PantryPilot_Master_Project_Blueprint_v3.1_REVISED_FINAL.docx
-- docs/TECHNICAL_SPEC.md
-- docs/AGENTS.md
+
+- `PantryPilot_Master_Project_Blueprint_v3.1_REVISED_FINAL.docx`
+- `TECHNICAL_SPEC.md`
+- `docs/AGENTS.md`
 
 ## Real-Data Restrictions
 - No runtime grocery scraping
