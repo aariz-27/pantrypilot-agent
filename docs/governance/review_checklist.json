@@ -1,0 +1,193 @@
+{
+  "name": "PantryPilot Independent Review Checklist",
+  "version": "1.0",
+  "review_order": [
+    {
+      "order": 1,
+      "area": "authorization",
+      "required": true,
+      "checks": [
+        "PR maps to an authorized ticket",
+        "branch and scope match the authorized work",
+        "no unrelated cleanup or hidden feature work is included"
+      ]
+    },
+    {
+      "order": 2,
+      "area": "decision_compliance",
+      "required": true,
+      "checks": [
+        "implementation does not cross an unresolved decision trigger",
+        "relevant DECISION_REGISTER entries are followed",
+        "no material architectural or product decision was invented in code"
+      ]
+    },
+    {
+      "order": 3,
+      "area": "requirements",
+      "required": true,
+      "checks": [
+        "affected requirement IDs are identified",
+        "implementation satisfies the stated requirement",
+        "requirement meaning has not been silently changed"
+      ]
+    },
+    {
+      "order": 4,
+      "area": "scope",
+      "required": true,
+      "checks": [
+        "changed files are necessary for the ticket",
+        "no unauthorized module is modified",
+        "no unnecessary framework or infrastructure is introduced"
+      ]
+    },
+    {
+      "order": 5,
+      "area": "architecture",
+      "required": true,
+      "checks": [
+        "module boundaries remain intact",
+        "provider-specific structures do not leak beyond adapters",
+        "frontend does not own authoritative business logic",
+        "LLM responsibilities remain separated from deterministic logic",
+        "new dependencies are justified"
+      ]
+    },
+    {
+      "order": 6,
+      "area": "correctness",
+      "required": true,
+      "checks": [
+        "normal path behaves correctly",
+        "edge cases are handled",
+        "error handling is explicit",
+        "types and contracts are consistent",
+        "no silent fallback creates incorrect business results"
+      ]
+    },
+    {
+      "order": 7,
+      "area": "data_integrity",
+      "required": true,
+      "checks": [
+        "unknown values are not converted to false certainty",
+        "unknown price is never treated as zero",
+        "recipe provenance is preserved",
+        "canonical identifiers remain consistent",
+        "database/application validation is appropriate"
+      ]
+    },
+    {
+      "order": 8,
+      "area": "security",
+      "required": true,
+      "checks": [
+        "inputs are validated",
+        "secrets remain server-side",
+        "arbitrary outbound URLs are not introduced",
+        "provider content is treated as untrusted",
+        "model output cannot bypass tool validation",
+        "public errors do not leak sensitive internals"
+      ]
+    },
+    {
+      "order": 9,
+      "area": "performance",
+      "required": true,
+      "checks": [
+        "external calls have bounded latency",
+        "candidate counts remain bounded",
+        "pagination remains bounded",
+        "unnecessary repeated provider/database work is avoided",
+        "change does not obviously violate target latency without justification"
+      ]
+    },
+    {
+      "order": 10,
+      "area": "reliability",
+      "required": true,
+      "checks": [
+        "timeouts are explicit",
+        "retry behavior is bounded",
+        "provider failures map to typed outcomes",
+        "partial failures do not corrupt authoritative data",
+        "startup/runtime failure behavior is understandable"
+      ]
+    },
+    {
+      "order": 11,
+      "area": "concurrency",
+      "required": true,
+      "checks": [
+        "shared mutable state is identified",
+        "duplicate execution does not create inconsistent state",
+        "cache/database writes are safe for expected concurrency",
+        "N/A is explicitly justified where the change is read-only and stateless"
+      ]
+    },
+    {
+      "order": 12,
+      "area": "tests",
+      "required": true,
+      "checks": [
+        "tests map to the implemented requirement",
+        "normal path is tested",
+        "relevant failure paths are tested",
+        "confirmed defects receive regression tests where practical",
+        "tests assert behavior rather than only implementation details",
+        "test results are provided"
+      ]
+    },
+    {
+      "order": 13,
+      "area": "escape_paths",
+      "required": true,
+      "mandatory_question": "Does another path exist that can bypass this control or reproduce the same defect?",
+      "checks": [
+        "alternate API routes considered",
+        "alternate providers considered",
+        "cache path considered",
+        "direct repository/database path considered",
+        "agent tool path considered",
+        "frontend bypass considered where relevant"
+      ]
+    },
+    {
+      "order": 14,
+      "area": "operability",
+      "required": true,
+      "checks": [
+        "important failures are observable",
+        "request IDs/logging remain usable",
+        "no secrets are logged",
+        "configuration requirements are documented",
+        "migration/release impact is identified where relevant"
+      ]
+    },
+    {
+      "order": 15,
+      "area": "governance_closure",
+      "required": true,
+      "checks": [
+        "REQUIREMENTS_TRACEABILITY is updated where required",
+        "MASTER_REMEDIATION_REGISTER contains confirmed findings",
+        "CURRENT_STATUS is updated when project state changes",
+        "decision documents are updated if decisions changed",
+        "PR is not recommended for merge with unresolved blocking findings"
+      ]
+    }
+  ],
+  "finding_rule": {
+    "confirmed_finding_destination": "docs/MASTER_REMEDIATION_REGISTER.md",
+    "self_review_is_independent_review": false,
+    "merge_authority": "Founder / Product Owner"
+  },
+  "review_outcomes": [
+    "APPROVE",
+    "APPROVE_WITH_NON_BLOCKING_FINDINGS",
+    "CHANGES_REQUIRED",
+    "BLOCKED_BY_DECISION",
+    "BLOCKED_BY_SCOPE"
+  ]
+}
