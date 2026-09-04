@@ -75,13 +75,9 @@ jobs:
         if: steps.backend_exists.outputs.exists == 'false'
         run: echo "Backend scaffold not created yet. Skipping backend checks."
 
-  frontend:
+    frontend:
     name: Frontend Checks
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: frontend
 
     steps:
       - name: Checkout repository
@@ -95,7 +91,7 @@ jobs:
       - name: Check whether frontend exists
         id: frontend_exists
         run: |
-          if [ -f "package.json" ]; then
+          if [ -f "frontend/package.json" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -103,10 +99,12 @@ jobs:
 
       - name: Install frontend dependencies
         if: steps.frontend_exists.outputs.exists == 'true'
+        working-directory: frontend
         run: npm install
 
       - name: Run frontend tests if configured
         if: steps.frontend_exists.outputs.exists == 'true'
+        working-directory: frontend
         run: |
           if npm run | grep -q " test"; then
             npm test -- --run
@@ -116,6 +114,7 @@ jobs:
 
       - name: Run frontend build
         if: steps.frontend_exists.outputs.exists == 'true'
+        working-directory: frontend
         run: npm run build
 
       - name: Frontend not created yet
