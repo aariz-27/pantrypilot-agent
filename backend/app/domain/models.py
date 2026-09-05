@@ -52,6 +52,15 @@ class Recipe(BaseModel):
     prep_time_minutes: int | None = None
     cook_time_minutes: int | None = None
     fetched_at: datetime | None = None
+    # PP-002 addition (backward-compatible, optional, defaults preserve
+    # PP-001 behavior for RecipeAPI.io-derived recipes): TECHNICAL_SPEC.md's
+    # CuratedRecipe schema mandates explicit source_label/provenance_note
+    # for every local curated recipe (DEC-003). The shared Recipe DTO had
+    # no field to carry that, so these were added here rather than
+    # inventing a parallel curated-only DTO that would defeat "same
+    # internal Recipe DTO as RecipeAPI.io" (DEC-003).
+    source_label: str | None = None
+    provenance_note: str | None = None
 
 
 class CostConfidence(str, Enum):
