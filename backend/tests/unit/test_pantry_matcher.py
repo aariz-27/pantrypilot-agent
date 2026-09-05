@@ -56,16 +56,67 @@ def test_duplicate_recipe_lines_count_once():
     assert result.pantry_coverage == 1.0
 
 
-def test_unknown_ingredient_never_counts_as_match_or_denominator():
+def test_unknown_required_ingredient_never_counts_as_match_but_reduces_coverage():
+    # Regression for defect: an UNKNOWN required ingredient must never be
+    # assumed matched, must never be fabricated a canonical ID, must stay
+    # visible in unresolved_ingredients, must never appear in the
+    # canonical-only missing_ingredients list, and must reduce coverage
+    # (TECHNICAL_SPEC.md section 11).
     pantry = frozenset({"rice"})
     recipe_ingredients = [
         ingredient("rice", "rice"),
         ingredient("dried lotus root shavings", None),
     ]
     result = match_pantry(pantry, recipe_ingredients)
-    assert result.pantry_coverage == 1.0
+    assert result.pantry_coverage == 0.5
     assert result.unresolved_ingredients == ("dried lotus root shavings",)
     assert "dried lotus root shavings" not in result.missing_ingredients
+    assert "dried lotus root shavings" not in result.matched_ingredients
+
+
+def test_resolved_plus_unresolved_required_ingredient_reduces_coverage_below_one():
+    pantry = frozenset({"rice"})
+    recipe_ingredients = [
+        ingredient("rice", "rice"),
+        ingredient("some unmapped exotic spice", None),
+    ]
+    result = match_pantry(pantry, recipe_ingredients)
+    assert result.pantry_coverage < 1.0
+    assert result.pantry_coverage == 0.5
+
+
+def test_only_required_ingredient_unresolved_is_not_full_coverage():
+    pantry = frozenset({"rice"})
+    recipe_ingredients = [ingredient("some unmapped exotic spice", None)]
+    result = match_pantry(pantry, recipe_ingredients)
+    assert result.pantry_coverage != 1.0
+    assert result.pantry_coverage == 0.0
+    assert result.unresolved_ingredients == ("some unmapped exotic spice",)
+
+
+def test_optional_unresolved_ingredient_excluded_from_denominator():
+    pantry = frozenset({"rice"})
+    recipe_ingredients = [
+        ingredient("rice", "rice"),
+        ingredient("some unmapped exotic spice", None, optional=True),
+    ]
+    result = match_pantry(pantry, recipe_ingredients)
+    # The optional unresolved ingredient must not reduce coverage, but it
+    # must remain visible for display.
+    assert result.pantry_coverage == 1.0
+    assert result.unresolved_ingredients == ("some unmapped exotic spice",)
+
+
+def test_duplicate_unresolved_required_ingredients_count_once_in_denominator():
+    pantry = frozenset({"rice"})
+    recipe_ingredients = [
+        ingredient("rice", "rice"),
+        ingredient("Some Unmapped Spice", None),
+        ingredient("some unmapped spice", None),  # same item, different casing/whitespace
+    ]
+    result = match_pantry(pantry, recipe_ingredients)
+    # If the duplicate were not deduplicated, coverage would be 1/3.
+    assert result.pantry_coverage == 0.5
 
 
 def test_optional_ingredient_excluded_from_denominator():

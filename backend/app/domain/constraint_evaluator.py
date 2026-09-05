@@ -74,12 +74,20 @@ def evaluate_constraints(
                 reasons.append(RejectionReason.MAX_TOTAL_TIME_EXCEEDED)
 
     # Budget enforcement. Incomplete cost is never treated as zero and
-    # never hard-fails on its own -- it remains explicitly incomplete.
+    # never fabricated. When a budget is supplied (including a zero
+    # budget) and cost is incomplete with no defensible conservative
+    # upper bound, the candidate cannot be declared definitively within
+    # budget (TECHNICAL_SPEC.md section 14) -- it is marked indeterminate
+    # rather than feasible. This is distinct from a confirmed overage
+    # (BUDGET_EXCEEDED) and does not assert the recipe is unaffordable.
     cost_incomplete = not cost.price_complete
-    if constraints.budget_aed is not None and cost.price_complete:
-        assert cost.estimated_purchase_cost_aed is not None
-        if cost.estimated_purchase_cost_aed > constraints.budget_aed:
-            reasons.append(RejectionReason.BUDGET_EXCEEDED)
+    if constraints.budget_aed is not None:
+        if cost.price_complete:
+            assert cost.estimated_purchase_cost_aed is not None
+            if cost.estimated_purchase_cost_aed > constraints.budget_aed:
+                reasons.append(RejectionReason.BUDGET_EXCEEDED)
+        else:
+            reasons.append(RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE)
 
     return ConstraintEvaluationResult(
         hard_constraint_pass=len(reasons) == 0,

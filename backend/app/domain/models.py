@@ -97,6 +97,10 @@ class RejectionReason(str, Enum):
     EXCLUDED_INGREDIENT_PRESENT = "excluded_ingredient_present"
     STRICT_CUISINE_MISMATCH = "strict_cuisine_mismatch"
     BUDGET_EXCEEDED = "budget_exceeded"
+    # A budget was supplied but cost is incomplete/unknown with no
+    # defensible conservative upper bound -- distinct from BUDGET_EXCEEDED
+    # (a confirmed overage). Never implies the cost is treated as zero.
+    BUDGET_INDETERMINATE_COST_INCOMPLETE = "budget_indeterminate_cost_incomplete"
     MAX_TOTAL_TIME_EXCEEDED = "max_total_time_exceeded"
     TIME_INCOMPLETE_WITH_CONSTRAINT = "time_incomplete_with_constraint"
     INSTRUCTIONS_UNUSABLE = "instructions_unusable"

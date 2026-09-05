@@ -107,9 +107,54 @@ def test_zero_budget_positive_cost_hard_fails():
     assert RejectionReason.BUDGET_EXCEEDED in result.rejection_reasons
 
 
-def test_incomplete_cost_with_budget_never_hard_fails_and_never_treated_as_zero():
+def test_positive_budget_plus_incomplete_cost_is_indeterminate_not_feasible():
+    # Regression for defect: a supplied positive budget with incomplete
+    # cost must not be classified as fully feasible. It must also never
+    # be treated as if the cost were zero or fabricated.
     cost = CostEvaluation()  # price_complete=False, cost=None -- CostEvaluation.UNKNOWN
     constraints = UserConstraints(budget_aed=10.0)
+    result = evaluate_constraints(make_recipe(), constraints, cost)
+    assert result.hard_constraint_pass is False
+    assert RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE in result.rejection_reasons
+    assert RejectionReason.BUDGET_EXCEEDED not in result.rejection_reasons
+    assert result.cost_incomplete is True
+    assert cost.estimated_purchase_cost_aed is None
+
+
+def test_zero_budget_plus_incomplete_cost_is_indeterminate_not_feasible():
+    # A zero budget is still "a budget supplied" -- incomplete cost must
+    # not be silently accepted as within a zero budget.
+    cost = CostEvaluation()
+    constraints = UserConstraints(budget_aed=0.0)
+    result = evaluate_constraints(make_recipe(), constraints, cost)
+    assert result.hard_constraint_pass is False
+    assert RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE in result.rejection_reasons
+    assert result.cost_incomplete is True
+
+
+def test_complete_known_cost_within_budget_is_feasible():
+    cost = CostEvaluation(estimated_purchase_cost_aed=5.0, price_complete=True, cost_confidence=CostConfidence.HIGH)
+    constraints = UserConstraints(budget_aed=10.0)
+    result = evaluate_constraints(make_recipe(), constraints, cost)
+    assert result.hard_constraint_pass is True
+    assert result.rejection_reasons == ()
+    assert result.cost_incomplete is False
+
+
+def test_complete_known_cost_exceeding_budget_is_rejected():
+    cost = CostEvaluation(estimated_purchase_cost_aed=15.0, price_complete=True, cost_confidence=CostConfidence.HIGH)
+    constraints = UserConstraints(budget_aed=10.0)
+    result = evaluate_constraints(make_recipe(), constraints, cost)
+    assert result.hard_constraint_pass is False
+    assert RejectionReason.BUDGET_EXCEEDED in result.rejection_reasons
+    assert RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE not in result.rejection_reasons
+
+
+def test_incomplete_cost_without_any_budget_remains_feasible():
+    # No budget was supplied at all, so cost incompleteness is not a
+    # budget-feasibility concern -- this must remain unaffected by the fix.
+    cost = CostEvaluation()
+    constraints = UserConstraints(budget_aed=None)
     result = evaluate_constraints(make_recipe(), constraints, cost)
     assert result.hard_constraint_pass is True
     assert result.cost_incomplete is True
