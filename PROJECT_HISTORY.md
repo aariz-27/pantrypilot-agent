@@ -135,3 +135,32 @@ The following governance/architecture documents were established:
 - `docs/REQUIREMENTS_TRACEABILITY.md`
 
 No product implementation had been authorized at this stage.
+
+---
+
+## 2026-09-05 — PP-001 Merged: Application Foundation and Deterministic Core
+
+The first authorized implementation ticket, PP-001 — Application Foundation and Deterministic Core, was implemented on `feature/pp-001-foundation-deterministic-core`, reviewed, corrected, and merged into `main` via PR #1.
+
+Delivered:
+
+- FastAPI backend scaffold with typed configuration (`SecretStr`-protected API keys) and a `GET /api/health` endpoint
+- shared provider-neutral domain models (Recipe, RecipeIngredient, CandidateEvaluation, CostEvaluation, UserConstraints)
+- ingredient normalizer (M08 foundation) with a seed canonical/alias vocabulary
+- deterministic pantry matcher (M09): coverage, missing ingredients, duplicate-safe matching, UNKNOWN handling
+- constraint evaluator (M12 subset): exclusions, strict cuisine, optional max-total-time, recipe usability/provenance foundations
+- deterministic ranker (M13): approved 45/30/15/10 weighted score with full deterministic tie-breaking
+- typed `PantryPilotError` / `InvalidInputError` application errors
+- 79 unit/integration tests
+
+ChatGPT independent review identified three correctness/security findings during this cycle, all fixed on the same branch before merge:
+
+1. UNKNOWN required recipe ingredients were not reducing pantry coverage (excluded from the coverage denominator entirely) — fixed so they count in the denominator without being fabricated a canonical ID or counted as matched.
+2. Incomplete cost with a supplied budget was classified as feasible — fixed by rejecting that state as indeterminate (`RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE`) rather than scoring it.
+3. `rank_candidates()` could be reached with a `hard_constraint_pass=True` candidate whose own cost/budget fields contradicted that flag, bypassing `evaluate_constraints()` via an alternate call sequence — closed with a second-line defensive re-check inside the ranker.
+
+Explicitly out of scope for this ticket: RecipeAPI.io integration, LocalCuratedRecipeProvider, real grocery pricing repository/cost engine, LLM/agent orchestration, frontend, deployment. `/api/health`'s `database` status remains `not_configured` until the reference DB exists. One documented soft ranking assumption remains: no cuisine preference scores a neutral 1.0.
+
+Merge commit: `acb527823550de5aa1e88bebae866ec8d73a573f`. Implementation head (pre-merge): `5865b79ba25e03a22b86757894968047aa83bddc`. Final verification: 79 backend tests passed (2 warnings), governance validation passed, CI passed, working tree clean, local `main` synchronized with `origin/main`.
+
+`APPROVAL_GATES.md` G3 (Implementation Foundation Ready) is not marked complete: the frontend scaffold does not yet exist. G3 remains IN PROGRESS pending that condition and explicit Founder/Product Owner gate approval.

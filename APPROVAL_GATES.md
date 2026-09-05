@@ -100,30 +100,34 @@ Founder / Product Owner
 
 ## G3 — Implementation Foundation Ready
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS — NOT COMPLETE
 
 ### Entry Criteria
-- G2 complete
-- first implementation ticket explicitly authorized
+- G2 complete — met
+- first implementation ticket explicitly authorized — met (PP-001)
 
 ### Exit Criteria
-- repository/application scaffold exists
-- backend boots
-- frontend boots
-- health endpoint works
-- baseline tests run
-- CI baseline passes
-- no unauthorized scope added
+- repository/application scaffold exists — partially met: `backend/` scaffold exists; `frontend/` does not exist
+- backend boots — met
+- frontend boots — **not met** (frontend does not exist yet)
+- health endpoint works — met (`GET /api/health`)
+- baseline tests run — met (79 backend tests passed)
+- CI baseline passes — met (`.github/workflows/ci.yml`: Backend Checks, Frontend Checks, Governance Validation all pass; Frontend Checks currently no-ops since no `frontend/` exists)
+- no unauthorized scope added — met
+
+**Remaining condition to close this gate:** a frontend scaffold must exist and boot before G3 can be marked COMPLETE. This gate is intentionally left IN PROGRESS rather than forced COMPLETE.
 
 ### Evidence
-- implementation ticket
-- PR
-- test results
-- GitHub merge
-- post-merge reconciliation
+- Implementation ticket: PP-001 — Application Foundation and Deterministic Core
+- PR: #1
+- Merge commit: `acb527823550de5aa1e88bebae866ec8d73a573f`
+- Implementation head (pre-merge): `5865b79ba25e03a22b86757894968047aa83bddc`
+- Test results: 79 backend tests passed, 2 warnings
+- GitHub merge: confirmed (`main`, fast-forwarded, working tree clean)
+- Post-merge reconciliation: this update (`CURRENT_STATUS.md`, `SPRINT_BOARD.md`, `docs/REQUIREMENTS_TRACEABILITY.md`, `PROJECT_HISTORY.md`)
 
 ### Approver
-Founder / Product Owner
+Founder / Product Owner (gate completion, once the frontend condition above is met, still requires explicit Founder/Product Owner approval per the Gate Rules below)
 
 ---
 
