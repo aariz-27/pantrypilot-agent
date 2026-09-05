@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+
+# Node / frontend
+node_modules/
+dist/
+
+# OS
+.DS_Store
+
+# Data (runtime-generated, not source-controlled reference data)
+*.db-journal
