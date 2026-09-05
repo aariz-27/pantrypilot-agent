@@ -133,57 +133,59 @@ Founder / Product Owner (gate completion, once the frontend condition above is m
 
 ## G4 — Core Deterministic Engine Ready
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS — NOT COMPLETE
 
 ### Entry Criteria
-- application foundation stable
+- application foundation stable — met (PP-001)
 
 ### Exit Criteria
 The following are implemented and tested:
 
-- ingredient normalization
-- pantry matching
-- price repository
-- cost engine
-- hard constraints
-- deterministic ranking
+- ingredient normalization — met (PP-001)
+- pantry matching — met (PP-001)
+- price repository — **not met** (explicitly out of scope for PP-001/PP-002; no SQLite reference DB exists yet)
+- cost engine — **not met** (PP-001/PP-002 only established the typed `CostEvaluation` input plug-point; no real purchase-cost calculation exists)
+- hard constraints — met (PP-001)
+- deterministic ranking — met (PP-001; PP-002 validated the ranking formula/weights are unchanged via a dedicated A+B integration test)
+
+**Remaining condition to close this gate:** the price repository and cost engine (a future pricing module) must be implemented and tested before G4 can be marked COMPLETE.
 
 ### Evidence
-- module PRs
-- unit tests
-- integration tests
-- regression fixtures
+- PP-001 PR #1 (merge commit `acb5278`), PP-002 PR #3 (merge commit `7cde50c`)
+- unit tests (PP-001/PP-002 backend suite)
+- integration tests (`backend/tests/integration/test_module_a_b_integration.py`, added during PP-002 post-merge validation)
+- regression fixtures — pending the pricing module
 
 ### Approver
-Founder / Product Owner
+Founder / Product Owner (gate completion still requires explicit Founder/Product Owner approval per the Gate Rules below)
 
 ---
 
 ## G5 — Recipe Sources Ready
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS — NOT COMPLETE
 
 ### Entry Criteria
-- provider abstraction exists
+- provider abstraction exists — met (PP-002, `app/recipe/provider.py`)
 
 ### Exit Criteria
-- RecipeAPI.io adapter implemented
-- provider contract tests pass
-- local curated provider implemented
-- provenance controls pass
-- provider failure handling tested
-- bounded request behavior verified
+- RecipeAPI.io adapter implemented — met (PP-002)
+- provider contract tests pass — met (PP-002; cross-provider contract test parametrized over both providers)
+- local curated provider implemented — **foundation only**; the provider class/mapping mechanism is implemented and tested, but ships with zero production recipe data
+- provenance controls pass — met (PP-002; mandatory `source_label`/`provenance_note` enforced and tested)
+- provider failure handling tested — met (PP-002; timeout/429/5xx/malformed-response/config-error all typed and tested)
+- bounded request behavior verified — met (PP-002; bounded page size, bounded retry, bounded constructor overrides)
 
 ### Decision Prerequisites
-- DEC-012 satisfied before local curated provider is declared complete
+- **DEC-012 remains OPEN and is not resolved by this update.** Per its own text, this gate cannot be marked COMPLETE until DEC-012 (final curated dataset size/content) is satisfied — the local curated provider is intentionally left at "foundation only."
 
 ### Evidence
-- provider PRs
-- tests
-- live smoke evidence where appropriate
+- PP-002 PR #3 (merge commit `7cde50c`)
+- tests (`backend/tests/unit/test_recipeapi_io_adapter.py`, `test_local_curated_provider.py`, `test_provider_contract.py`)
+- live smoke evidence: RecipeAPI.io live smoke test completed during PP-002 (4 requests: search, detail fetch, cuisine-filter discrepancy found and fixed, re-verified) — see `CURRENT_STATUS.md`
 
 ### Approver
-Founder / Product Owner
+Founder / Product Owner (gate completion still requires explicit Founder/Product Owner approval per the Gate Rules below, and cannot occur before DEC-012 resolves)
 
 ---
 

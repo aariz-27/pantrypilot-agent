@@ -44,29 +44,31 @@ None.
 
 ## Ready Queue
 
-None. PP-001 has been completed and merged (see Done section below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
+None. PP-001 and PP-002 have been completed and merged (see Done section below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
 ## Backlog
 
-Delivered by PP-001 (see Done section below): repository/application scaffold, backend health endpoint, shared domain DTOs, ingredient normalization, pantry matching, constraint evaluator (subset), deterministic ranker. Real price data and full cost calculation are still outstanding — PP-001 only delivered the typed `CostEvaluation` input plug-point, not the Cost Engine/Price Repository themselves.
+Delivered by PP-001 (see Done section below): repository/application scaffold, backend health endpoint, shared domain DTOs, ingredient normalization, pantry matching, constraint evaluator (subset), deterministic ranker.
+
+Delivered by PP-002 (see Done section below): `RecipeProvider` abstraction, RecipeAPI.io adapter, `LocalCuratedRecipeProvider` foundation (zero production data — DEC-012 still open).
+
+Real price data and full cost calculation are still outstanding — PP-001/PP-002 only delivered the typed `CostEvaluation` input plug-point, not the Cost Engine/Price Repository themselves.
 
 Remaining planned implementation areas include:
 
 - frontend scaffold
 - price repository
 - cost engine
-- RecipeProvider abstraction
-- RecipeAPI.io adapter
-- LocalCuratedRecipeProvider
 - agent tool layer
 - agent orchestrator
-- recommendation API
+- recommendation API (`/api/recommend` end-to-end wiring)
 - frontend/backend integration
 - observability
 - deployment
 - release verification
+- final curated recipe dataset content (blocked on DEC-012)
 
 These are implementation areas, not automatically authorized tickets.
 
@@ -91,6 +93,22 @@ None.
 ---
 
 ## Completed
+
+### PP-002 — Grounded Recipe Retrieval Layer
+
+**Status:** DONE
+**Priority:** P0
+**Requirements:** FR-08, FR-09, FR-19, FR-20, AR-03, AR-04, AR-13 (implemented); FR-16, AR-05 (foundation only)
+**Decision Dependencies:** DEC-012 (remains OPEN; not resolved by this ticket)
+**Branch:** `feature/pp-002-grounded-recipe-retrieval` (merged)
+
+**Objective:**
+Provider-neutral `RecipeProvider` abstraction, the RecipeAPI.io adapter (primary live provider), and the `LocalCuratedRecipeProvider` foundation, so PantryPilot can search and retrieve real existing recipes and map them into the shared `Recipe` domain model. The future agent (search strategy, pagination/reformulation, stop decisions) is explicitly not part of this ticket.
+
+**Notes:**
+Merged via PR #3 (merge commit `7cde50c`, implementation head `521a482`). 151 backend tests passed at merge; a subsequent comprehensive Module A+B validation pass added 9 A+B integration tests (160 total), finding no defects, architectural drift, or scope drift. Governance validation and CI passed. An old API key committed to git history predating this ticket (`bfdde3e`) was found; `backend/.env` was removed from tracking (`eb50929`), though the revoked credential remains visible in that commit's historical deletion diff since history was not rewritten. The Founder rotated/revoked the exposed credential; the current key is not committed. Live-verified against the real RecipeAPI.io API (4 requests) during implementation, including a cuisine-filter case-sensitivity discrepancy that was found, fixed, and re-verified live; live-verified again (3 requests) with the rotated key during post-merge closure. Explicitly out of scope: pricing/cost engine, LLM/agent orchestration, `/api/recommend` end-to-end wiring, frontend, deployment, TheMealDB, bulk-inventing the final curated dataset. See `docs/REQUIREMENTS_TRACEABILITY.md` and `CURRENT_STATUS.md` for full evidence.
+
+---
 
 ### PP-001 — Application Foundation and Deterministic Core
 
