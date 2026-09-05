@@ -6,7 +6,8 @@
 **Development method:** Module-by-module AI-assisted engineering  
 **Last reviewed:** 2026-08-23
 
-> This document is the technical contract for PantryPilot. It is not an instruction to build the whole application in one pass. Each implementation task must be scoped to one module or one explicitly approved integration checkpoint.
+> This document is the technical contract for PantryPilot. It is not an instruction to build the whole application in one pass.Each implementation task must be scoped to one explicitly authorized major module or integration milestone. A major module may include multiple tightly coupled Mxx technical modules defined in this specification when the Founder/Product Owner authorizes them as one bounded implementation ticket. Do not split a major module into smaller tickets unless a genuine dependency, blocker, context limitation, or review risk makes that necessary.
+
 
 ---
 

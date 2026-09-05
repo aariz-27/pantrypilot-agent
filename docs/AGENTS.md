@@ -18,28 +18,14 @@ Read `TECHNICAL_SPEC.md` before making architectural changes.
 Do not silently change architecture.
 
 ## Development method
+Implement one explicitly authorized major module or integration milestone at a time.
 
-Implement one assigned module at a time.
+A major module may include multiple tightly coupled technical Mxx modules from `TECHNICAL_SPEC.md` when the Founder/Product Owner explicitly authorizes them as one bounded implementation ticket.
 
-Do not build the entire application in one pass.
+Do not split an authorized major module into smaller tickets unless a genuine dependency, technical blocker, context limit, safety/review concern, or material ambiguity makes a single implementation pass impractical.
 
-Do not automatically begin the next module after finishing the current one.
+Do not automatically begin the next major module after finishing the current one.
 
-The user/project controller starts each new module.
-
-Before editing:
-- identify the relevant specification section
-- state the planned change briefly
-- confirm allowed files
-
-After editing:
-- run relevant tests
-- fix failures within scope
-- summarize changed files
-- summarize tests run and results
-- recommend/create a focused Git checkpoint
-
-Do not modify unrelated modules.
 
 ## Strict agentic rule
 
