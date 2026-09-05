@@ -110,7 +110,7 @@ Use:
 | AR-10 | External provider calls have explicit timeout and bounded retry | PERFORMANCE_RELIABILITY_POLICY | RecipeAPI adapter | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-11 | Candidate and search attempt counts remain bounded | TECHNICAL_ARCHITECTURE | M03 / Recipe Service | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-12 | Unknown price is never treated as zero | DATA_INTEGRITY_POLICY | Price Repository / Cost Engine | PP-001 | backend/tests/unit/test_constraint_evaluator.py, test_ranker.py | #1 | acb5278 (merge); 5865b79 (impl head) — enforced at the `CostEvaluation`/constraint-evaluator/ranker boundary; no live Price Repository yet | IMPLEMENTED |
-| AR-13 | Recipe provenance is preserved | DATA_ARCHITECTURE | Recipe Service / local provider | PP-001 | backend/tests/unit/test_constraint_evaluator.py | #1 | acb5278 (merge); 5865b79 (impl head) — provenance-validation foundation only; no Recipe Service/provider adapters yet | IMPLEMENTED |
+| AR-13 | Recipe provenance is preserved | DATA_ARCHITECTURE | Recipe Service / local provider | PP-001 | backend/tests/unit/test_constraint_evaluator.py | #1 | acb5278 (merge); 5865b79 (impl head) — provenance-validation foundation only; no Recipe Service/provider adapters yet | IN_IMPLEMENTATION |
 | AR-14 | No secrets are exposed to frontend or Git | Threat Model / Security Matrix | Config / deployment | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-15 | Raw external provider content is treated as untrusted data | Threat Model | Agent / adapters / frontend | TBD | TBD | TBD | TBD | DESIGNED |
 
