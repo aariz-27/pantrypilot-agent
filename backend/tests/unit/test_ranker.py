@@ -80,14 +80,42 @@ def test_zero_budget_zero_known_cost_scores_full_cost_component():
     assert ranked.deterministic_score == pytest.approx(expected)
 
 
-def test_incomplete_cost_never_scores_as_if_free():
-    candidate = make_candidate(estimated_purchase_cost_aed=None, price_complete=False, cost_confidence=CostConfidence.UNKNOWN)
-    constraints = UserConstraints(budget_aed=10.0)
-    [ranked] = rank_candidates(
-        [candidate], constraints, recipe_cuisine_by_id={}, recipe_name_by_id={"r1": "Test"}
+def test_incomplete_cost_with_budget_is_rejected_even_if_marked_feasible():
+    # Regression for escape-path defect: a caller could bypass
+    # evaluate_constraints() entirely by directly constructing a
+    # CandidateEvaluation with hard_constraint_pass=True, price_complete
+    # =False, and a supplied budget. The ranker must defensively reject
+    # this invalid state rather than scoring it as if a conservative
+    # cost were acceptable -- incomplete cost with a budget can never be
+    # feasible (TECHNICAL_SPEC.md section 14).
+    candidate = make_candidate(
+        estimated_purchase_cost_aed=None,
+        price_complete=False,
+        cost_confidence=CostConfidence.UNKNOWN,
+        hard_constraint_pass=True,
     )
-    expected = 0.45 * 0.8 + 0.30 * 0.25 + 0.15 * 0.8 + 0.10 * 1.0
-    assert ranked.deterministic_score == pytest.approx(expected)
+    constraints = UserConstraints(budget_aed=10.0)
+    with pytest.raises(InvalidInputError):
+        rank_candidates(
+            [candidate], constraints, recipe_cuisine_by_id={}, recipe_name_by_id={"r1": "Test"}
+        )
+
+
+def test_complete_cost_above_budget_is_rejected_even_if_marked_feasible():
+    # Regression: the same escape path applies to a candidate with a
+    # known, complete cost that directly exceeds the supplied budget but
+    # is nonetheless marked hard_constraint_pass=True.
+    candidate = make_candidate(
+        estimated_purchase_cost_aed=15.0,
+        price_complete=True,
+        cost_confidence=CostConfidence.HIGH,
+        hard_constraint_pass=True,
+    )
+    constraints = UserConstraints(budget_aed=10.0)
+    with pytest.raises(InvalidInputError):
+        rank_candidates(
+            [candidate], constraints, recipe_cuisine_by_id={}, recipe_name_by_id={"r1": "Test"}
+        )
 
 
 def test_without_budget_cost_normalized_within_candidate_set():
