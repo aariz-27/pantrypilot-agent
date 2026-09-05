@@ -164,3 +164,33 @@ Explicitly out of scope for this ticket: RecipeAPI.io integration, LocalCuratedR
 Merge commit: `acb527823550de5aa1e88bebae866ec8d73a573f`. Implementation head (pre-merge): `5865b79ba25e03a22b86757894968047aa83bddc`. Final verification: 79 backend tests passed (2 warnings), governance validation passed, CI passed, working tree clean, local `main` synchronized with `origin/main`.
 
 `APPROVAL_GATES.md` G3 (Implementation Foundation Ready) is not marked complete: the frontend scaffold does not yet exist. G3 remains IN PROGRESS pending that condition and explicit Founder/Product Owner gate approval.
+
+---
+
+## 2026-09-05 — PP-002 Merged: Grounded Recipe Retrieval Layer
+
+The second authorized implementation ticket, PP-002 — Grounded Recipe Retrieval Layer, was implemented on `feature/pp-002-grounded-recipe-retrieval`, reviewed, corrected, and merged into `main` via PR #3.
+
+Delivered:
+
+- provider-neutral `RecipeProvider` Protocol with typed `SearchStrategy`/`SearchResultItem`/`SearchResult`, and `dedupe_search_results()` for (provider, provider_recipe_id) identity
+- RecipeAPI.io adapter (primary live provider), verified against the provider's real live documentation before implementation and against real live calls afterward: bounded page size, explicit 5s timeout, bounded retry (timeout/network/5xx only, never 429), full provider error-code mapping, provenance-preserving mapping into the shared `Recipe`/`RecipeIngredient` DTOs, no provider-specific field leakage
+- `LocalCuratedRecipeProvider` foundation: read-only, storage-agnostic, zero bundled production recipe data, mandatory `source_label`/`provenance_note` provenance, duplicate-ID rejection
+- typed `RECIPE_PROVIDER_*`/`RECIPE_NOT_FOUND` errors
+- 63 new tests at initial merge, mocked HTTP only in the automated suite
+
+Pre-existing issue found and remediated during this ticket: a real RecipeAPI.io API key had been committed directly to `main` (predating this ticket) via an explicit `git add` that bypassed `.gitignore`. `backend/.env` was untracked from git as this branch's first commit, and the Founder rotated the affected key. A session mistake (an overly broad diff-based secret scan that printed the pre-rotation key value into terminal output, not into any committed artifact) was disclosed immediately when it occurred.
+
+Independent review found and fixed two further issues before merge:
+
+1. `RecipeAPIIOAdapter`'s `timeout_seconds`/`max_retries` constructor parameters had no bounds validation, allowing a caller to bypass the required bounded-retry/bounded-timeout reliability guarantees. Fixed by validating both at construction time (`ALLOWED_MAX_RETRIES = (0, 1)`, `0 < timeout_seconds <= 5.0`), raising before any HTTP client is built or used.
+
+A live smoke test (4 requests total) additionally found that RecipeAPI.io's cuisine filter requires lowercase enum values; a capitalized filter value matched zero results. Fixed by lowercasing the cuisine value inside the adapter and re-verified live.
+
+Merge commit: `7cde50c4742ad397fb1e3e9586d8264b822721f2`. Implementation head (pre-merge): `521a482145662e619843a4c9fbe46b3e143ac7e9`. Final verification at merge: 151 backend tests passed (2 warnings), governance validation passed, CI passed.
+
+A subsequent comprehensive Module A+B validation pass (before this post-merge closure) added 9 new integration tests (`backend/tests/integration/test_module_a_b_integration.py`) composing provider-mapped recipes through the full PP-001 deterministic pipeline. All 7 requested scenarios passed; no defects, architectural drift, or scope drift were found. Total suite: 160 passed, 2 warnings.
+
+Explicitly out of scope for this ticket: pricing/cost engine, LLM/agent orchestration, `/api/recommend` end-to-end wiring, frontend, deployment, TheMealDB, and bulk-inventing the final curated dataset (DEC-012 remains OPEN — not resolved by this ticket).
+
+`APPROVAL_GATES.md` G4 (Core Deterministic Engine Ready) and G5 (Recipe Sources Ready) are not marked complete: G4 is blocked on the price repository/cost engine (not started); G5 is blocked on DEC-012. Both remain IN PROGRESS pending those conditions and explicit Founder/Product Owner gate approval.
