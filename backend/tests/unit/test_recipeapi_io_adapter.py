@@ -67,6 +67,92 @@ def test_constructor_raises_when_api_key_not_configured():
         RecipeAPIIOAdapter(make_settings(configured=False))
 
 
+# --- reliability-invariant constructor validation (PP-002 review finding) -----------
+#
+# The adapter itself must enforce bounded retry / bounded timeout; a caller
+# must not be able to bypass PP-002's reliability guarantees by overriding
+# these constructor parameters with unbounded values.
+
+
+def _client_with_call_counter():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(transport=transport, base_url=RecipeAPIIOAdapter.BASE_URL)
+    return client, calls
+
+
+def test_excessive_retry_count_is_rejected():
+    client, calls = _client_with_call_counter()
+    with pytest.raises(InvalidInputError):
+        RecipeAPIIOAdapter(make_settings(), http_client=client, max_retries=1000)
+    assert len(calls) == 0
+
+
+def test_negative_retry_count_is_rejected():
+    client, calls = _client_with_call_counter()
+    with pytest.raises(InvalidInputError):
+        RecipeAPIIOAdapter(make_settings(), http_client=client, max_retries=-1)
+    assert len(calls) == 0
+
+
+def test_zero_retries_is_permitted_at_construction():
+    client, _ = _client_with_call_counter()
+    adapter = RecipeAPIIOAdapter(make_settings(), http_client=client, max_retries=0)
+    assert adapter._max_retries == 0
+
+
+def test_one_retry_is_permitted_at_construction():
+    client, _ = _client_with_call_counter()
+    adapter = RecipeAPIIOAdapter(make_settings(), http_client=client, max_retries=1)
+    assert adapter._max_retries == 1
+
+
+def test_timeout_greater_than_five_seconds_is_rejected():
+    client, calls = _client_with_call_counter()
+    with pytest.raises(InvalidInputError):
+        RecipeAPIIOAdapter(make_settings(), http_client=client, timeout_seconds=5.1)
+    assert len(calls) == 0
+
+
+def test_zero_timeout_is_rejected():
+    client, calls = _client_with_call_counter()
+    with pytest.raises(InvalidInputError):
+        RecipeAPIIOAdapter(make_settings(), http_client=client, timeout_seconds=0)
+    assert len(calls) == 0
+
+
+def test_negative_timeout_is_rejected():
+    client, calls = _client_with_call_counter()
+    with pytest.raises(InvalidInputError):
+        RecipeAPIIOAdapter(make_settings(), http_client=client, timeout_seconds=-1.0)
+    assert len(calls) == 0
+
+
+def test_timeout_up_to_five_seconds_is_permitted():
+    client, _ = _client_with_call_counter()
+    adapter = RecipeAPIIOAdapter(make_settings(), http_client=client, timeout_seconds=5.0)
+    assert adapter._timeout_seconds == 5.0
+
+    client2, _ = _client_with_call_counter()
+    adapter2 = RecipeAPIIOAdapter(make_settings(), http_client=client2, timeout_seconds=3.0)
+    assert adapter2._timeout_seconds == 3.0
+
+
+def test_invalid_reliability_settings_never_issue_an_http_request():
+    # Combined excessive retry + excessive timeout: construction must
+    # fail before either constructor argument is used to build/issue a
+    # request, and before the injected client is ever invoked.
+    client, calls = _client_with_call_counter()
+    with pytest.raises(InvalidInputError):
+        RecipeAPIIOAdapter(make_settings(), http_client=client, max_retries=1000, timeout_seconds=60.0)
+    assert len(calls) == 0
+
+
 # --- successful mapping ------------------------------------------------------------
 
 

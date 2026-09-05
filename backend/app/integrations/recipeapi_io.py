@@ -87,6 +87,13 @@ class RecipeAPIIOAdapter:
     DEFAULT_TIMEOUT_SECONDS = 5.0
     DEFAULT_MAX_RETRIES = 1  # bounded: at most one retry, only for timeout/network/5xx
 
+    # Reliability invariants (PP-002 review finding): these are enforced
+    # by the adapter itself, not merely by the defaults above, so a
+    # caller cannot construct an adapter that bypasses bounded retry,
+    # deterministic termination, or the approved timeout ceiling.
+    MAX_TIMEOUT_SECONDS = 5.0
+    ALLOWED_MAX_RETRIES = (0, 1)
+
     def __init__(
         self,
         settings: Settings,
@@ -95,6 +102,17 @@ class RecipeAPIIOAdapter:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
     ) -> None:
+        if max_retries not in self.ALLOWED_MAX_RETRIES:
+            raise InvalidInputError(
+                f"max_retries must be one of {self.ALLOWED_MAX_RETRIES} (got {max_retries!r}); "
+                "PP-002 requires a bounded, deterministic retry policy"
+            )
+        if not (0 < timeout_seconds <= self.MAX_TIMEOUT_SECONDS):
+            raise InvalidInputError(
+                f"timeout_seconds must be positive and must not exceed "
+                f"{self.MAX_TIMEOUT_SECONDS} seconds (got {timeout_seconds!r})"
+            )
+
         if not settings.recipeapi_io_configured or settings.recipeapi_io_api_key is None:
             raise RecipeProviderConfigurationError("RECIPEAPI_IO_API_KEY is not configured")
 
