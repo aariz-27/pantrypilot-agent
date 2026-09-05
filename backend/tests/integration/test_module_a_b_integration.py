@@ -81,10 +81,12 @@ async def fetch_fixture_recipe(payload: dict) -> Recipe:
         return httpx.Response(200, json=payload)
 
     transport = httpx.MockTransport(handler)
-    client = httpx.AsyncClient(transport=transport, base_url=RecipeAPIIOAdapter.BASE_URL)
     settings = Settings(_env_file=None, recipeapi_io_api_key=FAKE_KEY)
-    async with RecipeAPIIOAdapter(settings, http_client=client) as adapter:
-        return await adapter.get_details(str(payload["data"]["id"]))
+    # The adapter correctly does not close an injected client (it does
+    # not own its lifecycle) -- this helper owns and closes it instead.
+    async with httpx.AsyncClient(transport=transport, base_url=RecipeAPIIOAdapter.BASE_URL) as client:
+        async with RecipeAPIIOAdapter(settings, http_client=client) as adapter:
+            return await adapter.get_details(str(payload["data"]["id"]))
 
 
 def normalize_recipe(recipe: Recipe) -> Recipe:
