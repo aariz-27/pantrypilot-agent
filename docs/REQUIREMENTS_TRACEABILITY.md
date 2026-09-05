@@ -75,15 +75,15 @@ Use:
 | FR-03 | User can select cuisine preference and strict/soft mode | Master Blueprint | M01, M02, M09 | TBD | TBD | TBD | TBD | DESIGNED |
 | FR-04 | User can enter servings | Master Blueprint | M01, M02 | TBD | TBD | TBD | TBD | DESIGNED |
 | FR-05 | User can specify excluded ingredients | Master Blueprint | M01, M02, M09 | TBD | TBD | TBD | TBD | DESIGNED |
-| FR-06 | Backend normalizes raw ingredients to canonical IDs | Master Blueprint | Ingredient Normalizer | TBD | TBD | TBD | TBD | DESIGNED |
+| FR-06 | Backend normalizes raw ingredients to canonical IDs | Master Blueprint | Ingredient Normalizer | PP-001 | backend/tests/unit/test_ingredient_normalizer.py | #1 | acb5278 (merge); 5865b79 (impl head) | IMPLEMENTED |
 | FR-07 | Agent selects recipe search strategy through tool calls | Master Blueprint | M03 Agent Orchestrator | TBD | TBD | TBD | TBD | DESIGNED |
 | FR-08 | RecipeAPI.io is primary live provider | Revised architecture / DEC-002 | Recipe Service / RecipeAPI adapter | TBD | TBD | TBD | TBD | DESIGNED |
 | FR-09 | All recipe sources map to one internal Recipe DTO | Revised architecture | Recipe Service / adapters | TBD | TBD | TBD | TBD | DESIGNED |
-| FR-10 | Pantry overlap and missing ingredients are deterministic | Master Blueprint | Pantry Matcher | TBD | TBD | TBD | TBD | DESIGNED |
+| FR-10 | Pantry overlap and missing ingredients are deterministic | Master Blueprint | Pantry Matcher | PP-001 | backend/tests/unit/test_pantry_matcher.py | #1 | acb5278 (merge); 5865b79 (impl head) | IMPLEMENTED |
 | FR-11 | Reference prices are read from local SQLite | Master Blueprint | Price Repository | TBD | TBD | TBD | TBD | DESIGNED |
-| FR-12 | Missing-item purchase cost is deterministic | Master Blueprint | Cost Engine | TBD | TBD | TBD | TBD | DESIGNED |
-| FR-13 | Hard constraints are enforced before ranking | Master Blueprint | Constraint Evaluator | TBD | TBD | TBD | TBD | DESIGNED |
-| FR-14 | Feasible candidates are ranked deterministically | Master Blueprint | Ranker | TBD | TBD | TBD | TBD | DESIGNED |
+| FR-12 | Missing-item purchase cost is deterministic | Master Blueprint | Cost Engine | PP-001 | backend/tests/unit/test_ranker.py | #1 | acb5278 (merge); 5865b79 (impl head) — foundation/input-shape only: `CostEvaluation` typed plug-point + ranker/constraint-evaluator integration; real cost calculation deferred to the Price Repository/Cost Engine ticket | IN_IMPLEMENTATION |
+| FR-13 | Hard constraints are enforced before ranking | Master Blueprint | Constraint Evaluator | PP-001 | backend/tests/unit/test_constraint_evaluator.py | #1 | acb5278 (merge); 5865b79 (impl head) | IMPLEMENTED |
+| FR-14 | Feasible candidates are ranked deterministically | Master Blueprint | Ranker | PP-001 | backend/tests/unit/test_ranker.py | #1 | acb5278 (merge); 5865b79 (impl head) | IMPLEMENTED |
 | FR-15 | Agent changes search strategy when needed within bounds | Master Blueprint | M03 Agent Orchestrator | TBD | TBD | TBD | TBD | DESIGNED |
 | FR-16 | Regional desi/Indian/Pakistani routing uses approved local curated source | DEC-003 | LocalCuratedRecipeProvider | TBD | TBD | TBD | TBD | DESIGNED |
 | FR-17 | Agent stops after configured bounds and returns grounded alternatives | Master Blueprint | M03 Agent Orchestrator | TBD | TBD | TBD | TBD | DESIGNED |
@@ -99,7 +99,7 @@ Use:
 | Requirement ID | Requirement Summary | Source | Planned Module(s) | Ticket | Tests | PR | Evidence | Status |
 |---|---|---|---|---|---|---|---|---|
 | AR-01 | Single-agent architecture | DEC-005 | M03 | TBD | TBD | TBD | TBD | DESIGNED |
-| AR-02 | Deterministic calculations remain outside LLM | DEC-006 | Core deterministic modules | TBD | TBD | TBD | TBD | DESIGNED |
+| AR-02 | Deterministic calculations remain outside LLM | DEC-006 | Core deterministic modules | PP-001 | backend/tests/unit/ (normalizer, matcher, constraint evaluator, ranker) | #1 | acb5278 (merge); 5865b79 (impl head) | IMPLEMENTED |
 | AR-03 | Provider-specific fields must not leak beyond adapter boundary | TECHNICAL_ARCHITECTURE | Recipe Service / adapters | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-04 | RecipeAPI.io is primary live source | DEC-002 | RecipeAPI adapter | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-05 | Local curated provider handles approved regional gaps | DEC-003 | LocalCuratedRecipeProvider | TBD | TBD | TBD | TBD | DESIGNED |
@@ -109,8 +109,8 @@ Use:
 | AR-09 | API layer contains no ranking/provider-specific business logic | TECHNICAL_ARCHITECTURE | M02 | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-10 | External provider calls have explicit timeout and bounded retry | PERFORMANCE_RELIABILITY_POLICY | RecipeAPI adapter | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-11 | Candidate and search attempt counts remain bounded | TECHNICAL_ARCHITECTURE | M03 / Recipe Service | TBD | TBD | TBD | TBD | DESIGNED |
-| AR-12 | Unknown price is never treated as zero | DATA_INTEGRITY_POLICY | Price Repository / Cost Engine | TBD | TBD | TBD | TBD | DESIGNED |
-| AR-13 | Recipe provenance is preserved | DATA_ARCHITECTURE | Recipe Service / local provider | TBD | TBD | TBD | TBD | DESIGNED |
+| AR-12 | Unknown price is never treated as zero | DATA_INTEGRITY_POLICY | Price Repository / Cost Engine | PP-001 | backend/tests/unit/test_constraint_evaluator.py, test_ranker.py | #1 | acb5278 (merge); 5865b79 (impl head) — enforced at the `CostEvaluation`/constraint-evaluator/ranker boundary; no live Price Repository yet | IMPLEMENTED |
+| AR-13 | Recipe provenance is preserved | DATA_ARCHITECTURE | Recipe Service / local provider | PP-001 | backend/tests/unit/test_constraint_evaluator.py | #1 | acb5278 (merge); 5865b79 (impl head) — provenance-validation foundation only; no Recipe Service/provider adapters yet | IMPLEMENTED |
 | AR-14 | No secrets are exposed to frontend or Git | Threat Model / Security Matrix | Config / deployment | TBD | TBD | TBD | TBD | DESIGNED |
 | AR-15 | Raw external provider content is treated as untrusted data | Threat Model | Agent / adapters / frontend | TBD | TBD | TBD | TBD | DESIGNED |
 

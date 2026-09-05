@@ -44,26 +44,19 @@ None.
 
 ## Ready Queue
 
-None yet.
-
-The first coding ticket will be added only after the governance foundation consistency pass is complete.
+None. PP-001 has been completed and merged (see Done section below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
 ## Backlog
 
-Planned implementation areas include:
+Delivered by PP-001 (see Done section below): repository/application scaffold, backend health endpoint, shared domain DTOs, ingredient normalization, pantry matching, constraint evaluator (subset), deterministic ranker. Real price data and full cost calculation are still outstanding — PP-001 only delivered the typed `CostEvaluation` input plug-point, not the Cost Engine/Price Repository themselves.
 
-- repository/application scaffold
-- backend health endpoint
+Remaining planned implementation areas include:
+
 - frontend scaffold
-- shared domain DTOs
-- ingredient normalization
-- pantry matching
 - price repository
 - cost engine
-- constraint evaluator
-- deterministic ranker
 - RecipeProvider abstraction
 - RecipeAPI.io adapter
 - LocalCuratedRecipeProvider
@@ -98,6 +91,22 @@ None.
 ---
 
 ## Completed
+
+### PP-001 — Application Foundation and Deterministic Core
+
+**Status:** DONE
+**Priority:** P0
+**Requirements:** FR-06, FR-10, FR-13, FR-14, AR-02, AR-12, AR-13 (implemented); FR-12 (foundation/input-shape only)
+**Decision Dependencies:** None
+**Branch:** `feature/pp-001-foundation-deterministic-core` (merged)
+
+**Objective:**
+FastAPI application foundation and the deterministic core (ingredient normalization, pantry matching, constraint evaluation, deterministic ranking) required to evaluate and rank grounded recipe candidates, with an explicit `CostEvaluation` input plug-point for the future Cost Engine.
+
+**Notes:**
+Merged via PR #1 (merge commit `acb5278`, implementation head `5865b79`). 79 backend tests passed, 2 warnings; governance validation and CI passed. Explicitly out of scope: RecipeAPI.io integration, LocalCuratedRecipeProvider, real grocery pricing repository/cost engine, LLM/agent orchestration, frontend, deployment. `/api/health`'s `database` status remains `not_configured` until the reference DB exists. Documented soft ranking assumption retained: no cuisine preference → neutral cuisine score 1.0. See `docs/REQUIREMENTS_TRACEABILITY.md` and `CURRENT_STATUS.md` for full evidence.
+
+---
 
 Governance foundation work completed so far includes:
 
