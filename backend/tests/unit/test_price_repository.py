@@ -149,19 +149,20 @@ def test_generic_butter_still_not_found_when_only_variants_have_manual_entries(d
     assert repo.get_price("butter") is None
 
 
-def test_committed_manual_price_entries_json_loads_and_resolves_all_three_entries(tmp_path):
+def test_committed_manual_price_entries_json_loads_and_resolves_all_five_entries(tmp_path):
     # Independent review finding (2026-09-06): prior tests only exercised
     # hand-inserted fixture rows, never the actual committed
     # backend/data/manual/manual_price_entries.json through the real
     # loader. This test loads that exact committed file via the real
     # scripts.load_manual_price_entries.load_manual_entries() entry point
-    # and verifies every one of its three Founder-approved entries --
-    # especially ginger -- returns the exact expected normalized value
-    # through PriceRepository.
+    # and verifies every one of its five Founder-approved entries --
+    # including the final Module C closure additions, corn and
+    # mayonnaise -- returns the exact expected normalized value through
+    # PriceRepository.
     db_path = str(tmp_path / "manual_entries_test.db")
 
     loaded_count = load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
-    assert loaded_count == 3
+    assert loaded_count == 5
 
     repo = PriceRepository(db_path)
 
@@ -189,5 +190,58 @@ def test_committed_manual_price_entries_json_loads_and_resolves_all_three_entrie
     assert ginger.package_quantity == 250
     assert ginger.package_price_aed == pytest.approx(3.24)
 
+    corn = repo.get_price("corn")
+    assert corn is not None
+    assert corn.source_type == "manual_curated"
+    assert corn.normalized_unit == "g"
+    assert corn.normalized_price_per_unit == pytest.approx(0.00995)
+    assert corn.package_quantity == 1
+    assert corn.package_unit == "kg"
+    assert corn.package_price_aed == pytest.approx(9.95)
+    assert corn.normalized_package_quantity == pytest.approx(1000)
+
+    mayonnaise = repo.get_price("mayonnaise")
+    assert mayonnaise is not None
+    assert mayonnaise.source_type == "manual_curated"
+    assert mayonnaise.normalized_unit == "g"
+    assert mayonnaise.normalized_price_per_unit == pytest.approx(0.0183606557377049, rel=0, abs=1e-16)
+    assert mayonnaise.package_quantity == 915
+    assert mayonnaise.package_unit == "g"
+    assert mayonnaise.package_price_aed == pytest.approx(16.80)
+    assert mayonnaise.normalized_package_quantity == pytest.approx(915)
+
     # Distinctness holds even when loaded from the real committed file.
-    assert salted.canonical_id != unsalted.canonical_id != ginger.canonical_id
+    assert len({unsalted.canonical_id, salted.canonical_id, ginger.canonical_id, corn.canonical_id, mayonnaise.canonical_id}) == 5
+
+
+def test_corn_manual_fallback_exact_normalized_price(tmp_path):
+    # Founder-approved exact figure: 9.95 AED / 1000 g = 0.00995 AED/g.
+    # Never derived from selecting or converting the real LuLu pcs
+    # contributor ("Sweet Corn 2 pcs").
+    db_path = str(tmp_path / "corn_manual_test.db")
+    load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
+    result = PriceRepository(db_path).get_price("corn")
+    assert result.normalized_price_per_unit == 0.00995
+    assert result.normalized_unit == "g"
+
+
+def test_mayonnaise_manual_fallback_exact_normalized_price(tmp_path):
+    # Founder-approved exact figure: 16.80 AED / 915 g = 0.0183606557377049
+    # AED/g, stored without arbitrary precision reduction. Never derived
+    # from converting or selecting any of the real LuLu ml contributors.
+    db_path = str(tmp_path / "mayonnaise_manual_test.db")
+    load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
+    result = PriceRepository(db_path).get_price("mayonnaise")
+    assert result.normalized_price_per_unit == 0.0183606557377049
+    assert result.normalized_unit == "g"
+
+
+def test_corn_and_mayonnaise_manual_fallbacks_never_zero_and_never_pick_ml_or_pcs(tmp_path):
+    db_path = str(tmp_path / "corn_mayo_never_zero_test.db")
+    load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
+    repo = PriceRepository(db_path)
+    for canonical_id in ("corn", "mayonnaise"):
+        result = repo.get_price(canonical_id)
+        assert result is not None
+        assert result.normalized_price_per_unit > 0
+        assert result.normalized_unit == "g"
