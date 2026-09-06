@@ -1,0 +1,68 @@
+[
+  {
+    "id": "9001", "sku": "SKU9001", "title": "Lurpak Butter Block Salted 400 g", "brand": "Lurpak",
+    "content": "400 g", "price": 24.0, "retailPrice": 24.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Butter", "inStock": true, "url": "https://example.test/butter-salted", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9002", "sku": "SKU9002", "title": "Almarai Unsalted Natural Butter 200 g", "brand": "Almarai",
+    "content": "200 g", "price": 13.85, "retailPrice": 13.85, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Butter", "inStock": true, "url": "https://example.test/butter-unsalted", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9003", "sku": "SKU9003", "title": "President Unsalted Butter 250 g", "brand": "President",
+    "content": "250 g", "price": 17.5, "retailPrice": 17.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Butter", "inStock": true, "url": "https://example.test/butter-president", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9004", "sku": "SKU9004", "title": "Lurpak Butter Roasting Spray 200 ml", "brand": "Lurpak",
+    "content": "200 ml", "price": 22.0, "retailPrice": 22.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Butter", "inStock": true, "url": "https://example.test/butter-spray", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9005", "sku": "SKU9005", "title": "Royal Gala Apple Italy 1 kg", "brand": null,
+    "content": "1 kg", "price": 9.95, "retailPrice": 9.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Apples", "inStock": true, "url": "https://example.test/apple-gala", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9006", "sku": "SKU9006", "title": "Pink Lady Apple 1 kg", "brand": null,
+    "content": "1 kg", "price": 10.95, "retailPrice": 10.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Apples", "inStock": true, "url": "https://example.test/apple-pinklady", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9007", "sku": "SKU9007", "title": "Fuji Apple Tray Pack 900 g", "brand": null,
+    "content": "900 g", "price": 8.5, "retailPrice": 8.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Apples", "inStock": true, "url": "https://example.test/apple-fuji", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9008", "sku": "SKU9008", "title": "Rockit Apple 1 pkt 5 pcs", "brand": "Rockit",
+    "content": "5 pcs", "price": 19.95, "retailPrice": 19.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Apples", "inStock": true, "url": "https://example.test/apple-rockit-pcs", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9009", "sku": "SKU9009", "title": "Carrots Australia 500 g", "brand": null,
+    "content": "500 g", "price": 3.5, "retailPrice": 3.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Carrots", "inStock": true, "url": "https://example.test/carrots-500g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9010", "sku": "SKU9010", "title": "Fresh Carrots 1 kg", "brand": null,
+    "content": "1 kg", "price": 6.75, "retailPrice": 6.75, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Carrots", "inStock": true, "url": "https://example.test/carrots-1kg", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9011", "sku": "SKU9011", "title": "Khaleej White Eggs Large 6 pcs", "brand": "Khaleej",
+    "content": "6 pcs", "price": 5.5, "retailPrice": 5.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "White Eggs", "inStock": true, "url": "https://example.test/eggs-6pcs", "scrapedAt": "2026-09-06 10:00:00"
+  }
+]

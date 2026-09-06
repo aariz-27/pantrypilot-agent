@@ -8,6 +8,7 @@ from app.domain.grocery_parsing import (
     resolve_canonical_id,
     validate_currency,
 )
+from app.domain.grocery_taxonomy import REFERENCE_PRICE_EXCLUDED_UNITS
 
 
 # --- price -----------------------------------------------------------------
@@ -297,6 +298,26 @@ def test_generic_butter_productype_mapping_unaffected_by_salted_unsalted_additio
     # do not repurpose or re-split generic butter in this ticket).
     assert resolve_canonical_id("Butter", "Lurpak Butter Block Salted 400 g") == "butter"
     assert resolve_canonical_id("Butter", "Almarai Unsalted Natural Butter 200 g") == "butter"
+
+
+def test_carrots_producttype_maps_to_canonical_carrot():
+    # Essential-ingredient data-quality fix (2026-09-06): real productType
+    # "Carrots" had no mapping rule at all -- narrow fixed mapping added.
+    assert resolve_canonical_id("Carrots", "Carrots Australia 500 g") == "carrot"
+    assert resolve_canonical_id("Carrots", "Fresh Carrots 1 kg") == "carrot"
+
+
+def test_reference_price_excluded_units_is_narrowly_scoped():
+    # Essential-ingredient data-quality fix (2026-09-06): the exclusion
+    # table must remain exactly as narrow as the real evidence justifies
+    # -- only butter/ml (roasting spray) and apple/pcs (piece-counted
+    # pack), never a blanket rule and never applied to an unrelated
+    # canonical_id such as "egg" (which is correctly pcs-based).
+    assert REFERENCE_PRICE_EXCLUDED_UNITS == {
+        "butter": frozenset({"ml"}),
+        "apple": frozenset({"pcs"}),
+    }
+    assert "egg" not in REFERENCE_PRICE_EXCLUDED_UNITS
 
 
 def test_speciality_cheese_never_counts_a_non_cheese_dip_as_cheese():
