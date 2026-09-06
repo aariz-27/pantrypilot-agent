@@ -171,3 +171,26 @@ Approved decisions must not be rewritten later. If circumstances change, append 
 **Blocking Scope:** Local recipe provider completeness  
 **Owner:** Founder / Product Owner  
 **Approver:** Founder / Product Owner
+
+---
+
+## DEC-013 — Grocery Price Ingestion and Reference Pricing Policy
+
+**Status:** APPROVED  
+**Decision:** LuLu Hypermarket UAE is the primary competition grocery pricing source (Carrefour is no longer the PP-003 baseline). The following ingestion/pricing rules are approved:
+
+- **Current price:** `price` is the sole input to reference-price generation and cost calculations. `retailPrice`, `discountAmount`, and `discountRatio` are provenance/audit metadata only and never affect cost calculation.
+- **Reference price:** for multiple valid products mapped to the same canonical ingredient and compatible normalized unit, use the **median normalized unit price** (one contributor → that value; odd count → middle value; even count → arithmetic mean of the two middle values). Contributors with incompatible unit dimensions for the same canonical ID are never combined — the data-quality issue is reported and no reference row is promoted for that canonical ID until resolved.
+- **Brand:** LuLu's `brand` field is preserved as provenance; brand never defines canonical identity; multiple brands may contribute to one canonical ingredient; a null brand never blocks ingestion.
+- **Canonical naming:** canonical IDs represent ingredients, not brands or packages. Meaningful cut/species/form distinctions are preserved (e.g. `boneless_chicken_breast` vs `chicken_wings`; `salmon_fillet` vs `whole_salmon`). Marketing terms (premium/fresh/local/value-pack) are not encoded. Branded prepared spice mixtures (e.g. biryani/chicken masala) get their own canonical IDs and are never collapsed into component spices.
+- **Package/unit parsing:** LuLu's `content` field is the primary package-size source. Deterministic parsing supports g, kg, ml, L/litre/litres, pieces/pcs, and multipacks (`N x size unit`). Mass and volume units are normalized to a common base (g, ml respectively). No mass/volume conversion is invented for bunch, pkt/packet, slices, teabags, or other non-metric package/count units.
+- **Gallons:** never silently converted to litres (no authoritative UAE gallon-to-litre conversion rule is defined in this project). Gallon-denominated rows are retained in staging/mapped data but never promoted to a litre-normalized reference. This does not block PP-003.
+- **Missing/ambiguous packages:** unresolved source rows are kept in staging and never promoted merely for being the only candidate for a canonical ingredient. Exception: a product whose source data explicitly states a reliable piece/count basis (e.g. "6 pcs") may be promoted on that basis. Package size and per-unit precision are never invented.
+- **Manual curated fallback:** a small, explicitly reviewed manual/curated price entry mechanism exists for important ingredients LuLu's export doesn't usefully cover. Every manual entry requires a canonical ID, package/unit basis, AED price, and a provenance/source note, and is tagged with a source type distinct from LuLu-derived entries. This mechanism ships empty — PP-003 does not pre-populate synthetic pricing data.
+
+**Rationale:** Prevents fabricated precision, brand-driven identity fragmentation, and silent unit-conversion errors in the grocery pricing pipeline, while keeping the architecture provider-neutral enough to support another offline source later without unnecessary generalized scraping infrastructure.  
+**Owner:** Solution Architecture  
+**Approver:** Founder / Product Owner  
+**Blocking Scope:** Grocery pricing ingestion (M14), reference price repository (M10), cost engine (M11)  
+**Required By:** Before PP-003 implementation (satisfied)  
+**Subsequent Status:** Active

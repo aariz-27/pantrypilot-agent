@@ -133,7 +133,7 @@ Founder / Product Owner (gate completion, once the frontend condition above is m
 
 ## G4 — Core Deterministic Engine Ready
 
-**Status:** IN PROGRESS — NOT COMPLETE
+**Status:** EXIT CRITERIA TECHNICALLY SATISFIED — AWAITING FOUNDER REVIEW (not self-declared COMPLETE)
 
 ### Entry Criteria
 - application foundation stable — met (PP-001)
@@ -143,18 +143,18 @@ The following are implemented and tested:
 
 - ingredient normalization — met (PP-001)
 - pantry matching — met (PP-001)
-- price repository — **not met** (explicitly out of scope for PP-001/PP-002; no SQLite reference DB exists yet)
-- cost engine — **not met** (PP-001/PP-002 only established the typed `CostEvaluation` input plug-point; no real purchase-cost calculation exists)
+- price repository — met (PP-003: `app/repositories/price_repository.py`, read-only SQLite lookup, never returns zero for an unknown price)
+- cost engine — met (PP-003: `app/domain/cost_engine.py`, implements TECHNICAL_SPEC.md section 13's package-purchase algorithm exactly against the frozen `CostEvaluation` contract)
 - hard constraints — met (PP-001)
-- deterministic ranking — met (PP-001; PP-002 validated the ranking formula/weights are unchanged via a dedicated A+B integration test)
+- deterministic ranking — met (PP-001; validated unchanged against real Module C cost output via `test_module_a_b_c_integration.py`)
 
-**Remaining condition to close this gate:** the price repository and cost engine (a future pricing module) must be implemented and tested before G4 can be marked COMPLETE.
+**Note:** per this file's own Gate Rules ("no gate advances automatically because code exists" / "Founder / Product Owner remains final approval authority"), this gate is reported as exit-criteria-satisfied but is NOT self-declared COMPLETE here. Founder review and explicit approval are still required to close it, consistent with how G3 was handled.
 
 ### Evidence
-- PP-001 PR #1 (merge commit `acb5278`), PP-002 PR #3 (merge commit `7cde50c`)
-- unit tests (PP-001/PP-002 backend suite)
-- integration tests (`backend/tests/integration/test_module_a_b_integration.py`, added during PP-002 post-merge validation)
-- regression fixtures — pending the pricing module
+- PP-001 PR #1 (merge commit `acb5278`), PP-002 PR #3 (merge commit `7cde50c`), PP-003 PR (see `CURRENT_STATUS.md`)
+- unit tests (PP-001/PP-002/PP-003 backend suite)
+- integration tests (`backend/tests/integration/test_module_a_b_integration.py`, `test_module_a_b_c_integration.py`)
+- regression fixtures: `backend/data/fixtures/lulu_sample.json` (ingestion edge cases); real-dataset QA report (see `CURRENT_STATUS.md`) — DEC-013's median/reference-price policy verified against ~2,699 real LuLu UAE products
 
 ### Approver
 Founder / Product Owner (gate completion still requires explicit Founder/Product Owner approval per the Gate Rules below)

@@ -19,3 +19,15 @@ dist/
 
 # Data (runtime-generated, not source-controlled reference data)
 *.db-journal
+
+# Raw/derived grocery source data: large, scraped, reproducible from
+# tooling + the raw export. Never commit the Founder's raw dataset or
+# the SQLite reference DB built from it -- both are regenerable via
+# scripts/import_lulu_products.py + scripts/normalize_grocery_prices.py.
+# Only backend/data/fixtures/ (tiny, hand-authored test fixtures) and
+# data/manual/ (small, reviewed curated entries) are source-controlled.
+data/raw/
+data/*.db
+data/*.db-journal
+backend/data/*.db
+backend/data/*.db-journal
