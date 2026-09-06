@@ -151,10 +151,10 @@ The following are implemented and tested:
 **Note:** per this file's own Gate Rules ("no gate advances automatically because code exists" / "Founder / Product Owner remains final approval authority"), this gate is reported as exit-criteria-satisfied but is NOT self-declared COMPLETE here. Founder review and explicit approval are still required to close it, consistent with how G3 was handled.
 
 ### Evidence
-- PP-001 PR #1 (merge commit `acb5278`), PP-002 PR #3 (merge commit `7cde50c`), PP-003 PR (see `CURRENT_STATUS.md`)
-- unit tests (PP-001/PP-002/PP-003 backend suite)
+- PP-001 PR #1 (merge commit `acb5278`), PP-002 PR #3 (merge commit `7cde50c`), PP-003 PR #5 (merge commit `39fbe62`, implementation head `aff4bd4`)
+- unit tests (PP-001/PP-002/PP-003 backend suite, 245 passed, re-verified against `main` post-merge)
 - integration tests (`backend/tests/integration/test_module_a_b_integration.py`, `test_module_a_b_c_integration.py`)
-- regression fixtures: `backend/data/fixtures/lulu_sample.json` (ingestion edge cases); real-dataset QA report (see `CURRENT_STATUS.md`) — DEC-013's median/reference-price policy verified against ~2,699 real LuLu UAE products
+- regression fixtures: `backend/data/fixtures/lulu_sample.json` (ingestion edge cases); real-dataset QA report (see `CURRENT_STATUS.md`) — DEC-013's median/reference-price policy verified against ~2,699 real LuLu UAE products, including a post-merge local-database regeneration and `PriceRepository` read verification against that real dataset
 
 ### Approver
 Founder / Product Owner (gate completion still requires explicit Founder/Product Owner approval per the Gate Rules below)
