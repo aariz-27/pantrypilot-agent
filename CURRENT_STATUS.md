@@ -7,7 +7,7 @@ Application foundation implementation (deterministic core and grounded recipe re
 
 - **Module A** (Deterministic Core — PP-001): **COMPLETE**
 - **Module B** (Grounded Recipe Retrieval — PP-002): **COMPLETE**
-- **Module C** (Pricing / Cost Engine): NOT STARTED
+- **Module C** (Pricing / Cost Engine — PP-003): **IMPLEMENTATION COMPLETE, pending Founder gate review** (G4 exit criteria technically satisfied — see `APPROVAL_GATES.md`; not self-declared COMPLETE)
 - **Module D** (Agent Orchestration): NOT STARTED
 - **Module E** (Frontend): NOT STARTED
 - **Module F** (Deployment): NOT STARTED
@@ -17,10 +17,10 @@ G3 — Implementation Foundation Ready — IN PROGRESS (not COMPLETE)
 
 Backend scaffold exists, backend boots, `/api/health` works, baseline backend tests run, CI baseline passes. Remaining condition before G3 can be marked COMPLETE: the frontend does not yet exist (`frontend/` scaffold, frontend boot, frontend baseline checks per `APPROVAL_GATES.md` G3 exit criteria). G3 is left explicitly incomplete rather than forced complete.
 
-G4 (Core Deterministic Engine Ready) and G5 (Recipe Sources Ready) are also IN PROGRESS, not COMPLETE — see `APPROVAL_GATES.md` for itemized exit-criteria status. G4 is blocked on the price repository/cost engine (Module C, not started); G5 is blocked on DEC-012 (final curated dataset, still OPEN).
+G4 (Core Deterministic Engine Ready): exit criteria are now technically satisfied by PP-003 (price repository + cost engine implemented and tested) — see `APPROVAL_GATES.md`; not self-declared COMPLETE, pending explicit Founder review/approval. G5 (Recipe Sources Ready) remains IN PROGRESS, blocked on DEC-012 (final curated dataset, still OPEN) — unaffected by PP-003.
 
 ## Active Ticket
-None. PP-001 and PP-002 were completed and merged (see "Completed Tickets" below); no new implementation ticket is currently authorized.
+PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine. Implemented on `feature/pp-003-pricing-cost-engine`; full backend suite (236 tests) and governance validation pass; PR pending. **Not yet merged** — see "In-Review Ticket" below for details. PP-001 and PP-002 were completed and merged (see "Completed Tickets" below).
 
 ## Open Blockers
 None currently recorded
@@ -30,6 +30,34 @@ None currently recorded
 - DEC-010 — Competition LLM model
 - DEC-011 — Deployment platform
 - DEC-012 — Final local curated recipe dataset size/content (**not resolved by PP-002** — the local curated provider remains foundation-only, with zero production recipe data)
+
+## In-Review Ticket
+
+### PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine
+
+**Status:** Implementation complete, PR open, **not merged**
+**Branch:** `feature/pp-003-pricing-cost-engine`
+**Verification:** 236 backend tests passed, 2 warnings (160 existing + 76 new); governance validation passed; CI-equivalent simulation passed.
+**Requirements advanced:** FR-11, FR-12, AR-07, AR-12 (implemented — see `docs/REQUIREMENTS_TRACEABILITY.md`).
+**Decision recorded:** DEC-013 — Grocery Price Ingestion and Reference Pricing Policy (APPROVED; see `DECISION_REGISTER.md`).
+**Real dataset QA statistics** (Founder-provided LuLu UAE export, 2,699 products, gitignored/local-only, never committed):
+
+| Metric | Value |
+|---|---|
+| Raw imported | 2,699 |
+| Mapped (priceable) | 1,773 |
+| Filtered out (irrelevant finished products) | 483 |
+| Unresolved/unmapped ingredient | 381 |
+| Unsupported unit (bunch/pkt/gallon/slices) | 52 |
+| Duplicates | 9 |
+| Incompatible unit groups (never promoted) | 12 |
+| Promoted reference entries | 181 |
+| Distinct canonical ingredients priced | 181 |
+| Unit distribution | g: 153, ml: 24, pcs: 4 |
+| Important-ingredient spot-check gaps | 2 (`butter` — blocked by an incompatible-unit-group data-quality flag, sold both by weight and volume in the export; `ginger` — not yet covered by the canonical mapping table) |
+
+**Known intentional limitations / deferred scope:** no LLM/agent orchestration, no `/api/recommend` end-to-end wiring, no frontend, no deployment, no live Apify/runtime scraping (ingestion is dev-time only). Taxonomy coverage is intentionally partial (181 of 301 real `productType` values mapped) — the QA table above is exactly the input for deciding whether manual gap-fill (DEC-013's small curated fallback) is worth doing before Module D.
+**Security note:** the real LuLu export (`data/raw/`) and the derived SQLite reference DB are gitignored and were never committed; only a small hand-authored test fixture (`backend/data/fixtures/lulu_sample.json`) and an empty manual-entries mechanism (`backend/data/manual/manual_price_entries.json`) are source-controlled.
 
 ## Completed Tickets
 

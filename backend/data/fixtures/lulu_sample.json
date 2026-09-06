@@ -1,0 +1,116 @@
+[
+  {
+    "id": "1001", "sku": "SKU1001", "title": "Fresh Onion 1 kg", "brand": "Fresh",
+    "content": "1 kg", "price": 4.5, "retailPrice": 4.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Onion", "inStock": true, "url": "https://example.test/onion", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1002", "sku": "SKU1002", "title": "Fresh Onion Pack 900 g", "brand": "GreenFarm",
+    "content": "900 g", "price": 4.1, "retailPrice": 4.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Onion", "inStock": true, "url": "https://example.test/onion2", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1003", "sku": "SKU1003", "title": "Test Full Cream Milk 4 x 1 Litre", "brand": "Almarai",
+    "content": "4 x 1 Litre", "price": 21.0, "retailPrice": 23.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Fresh Milk", "inStock": true, "url": "https://example.test/milk", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1004", "sku": "SKU1004", "title": "Test Protein Milk 1 L", "brand": "Almarai",
+    "content": "1 Litre", "price": 9.5, "retailPrice": 9.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Fresh Milk", "inStock": true, "url": "https://example.test/protein-milk", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1005", "sku": "SKU1005", "title": "Test White Eggs 30 pcs", "brand": "Al Ain Farms",
+    "content": "30 pcs", "price": 15.0, "retailPrice": 15.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "White Eggs", "inStock": true, "url": "https://example.test/eggs", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1006", "sku": "SKU1006", "title": "Test Boneless Chicken Breast 500 g", "brand": "Fresh",
+    "content": "500 g", "price": 18.5, "retailPrice": 18.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
+    "productType": "Chicken Breasts", "inStock": true, "url": "https://example.test/chicken-breast", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1007", "sku": "SKU1007", "title": "Test Bunch Coriander Leaves 1 Bunch", "brand": "Fresh",
+    "content": "1 Bunch", "price": 2.0, "retailPrice": 2.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": null, "category3": null,
+    "productType": "Herbs", "inStock": true, "url": "https://example.test/coriander", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1008", "sku": "SKU1008", "title": "Test Garlic Pure White 1 pkt", "brand": "Fresh",
+    "content": "1 pkt", "price": 3.0, "retailPrice": 3.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Other Vegetables", "inStock": true, "url": "https://example.test/garlic-pkt", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1009", "sku": "SKU1009", "title": "Test Full Cream Milk 1 Gallon", "brand": "LuLu",
+    "content": "1 Gallon", "price": 12.0, "retailPrice": 12.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Fresh Milk", "inStock": true, "url": "https://example.test/milk-gallon", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1010", "sku": "SKU1010", "title": "Test Black Tea 100 Teabags", "brand": "Lipton",
+    "content": "100 Teabags", "price": 10.0, "retailPrice": 10.0, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Black Tea", "inStock": true, "url": "https://example.test/tea", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1011", "sku": "SKU1011", "title": "Test Malformed Price Item 500 g", "brand": "Fresh",
+    "content": "500 g", "price": "not-a-price", "retailPrice": 5.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
+    "productType": "Beef Steak", "inStock": true, "url": "https://example.test/bad-price", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1012", "sku": "SKU1012", "title": "Test Zero Price Item 500 g", "brand": "Fresh",
+    "content": "500 g", "price": 0, "retailPrice": 5.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
+    "productType": "Beef Steak", "inStock": true, "url": "https://example.test/zero-price", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1013", "sku": "SKU1013", "title": "Test Invalid Currency Item 500 g", "brand": "Fresh",
+    "content": "500 g", "price": 5.0, "retailPrice": 5.0, "currency": "usd",
+    "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
+    "productType": "Beef Steak", "inStock": true, "url": "https://example.test/bad-currency", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1014", "sku": "SKU1014", "title": "Test Malformed Content Item", "brand": "Fresh",
+    "content": "1.2 kg-1.5 kg Appro x. Weight", "price": 20.0, "retailPrice": 20.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fresh Fish", "category3": null,
+    "productType": "Fresh Fish", "inStock": true, "url": "https://example.test/bad-content", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1015", "sku": "SKU1015", "title": "Test Chocolate Bar 45 g", "brand": "Nestle",
+    "content": "45 g", "price": 3.0, "retailPrice": 3.0, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Chocolate Bars", "inStock": true, "url": "https://example.test/chocolate", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1016", "sku": "SKU1016", "title": "Test Unmapped Exotic Ingredient 200 g", "brand": "Fresh",
+    "content": "200 g", "price": 8.0, "retailPrice": 8.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Other Vegetables", "inStock": true, "url": "https://example.test/exotic", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1006", "sku": "SKU1006", "title": "Test Boneless Chicken Breast 500 g (duplicate)", "brand": "Fresh",
+    "content": "500 g", "price": 18.5, "retailPrice": 18.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
+    "productType": "Chicken Breasts", "inStock": true, "url": "https://example.test/chicken-breast-dup", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1017", "sku": "SKU1017", "title": "Test Incompatible Unit Chicken Breast 6 pcs", "brand": "Fresh",
+    "content": "6 pcs", "price": 25.0, "retailPrice": 25.0, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
+    "productType": "Chicken Breasts", "inStock": true, "url": "https://example.test/chicken-breast-pcs", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "1018", "sku": "SKU1018", "title": "Test Nullable Fields Item", "brand": null,
+    "content": null, "price": 3.5, "retailPrice": null, "currency": "aed",
+    "category1": null, "category2": null, "category3": null,
+    "productType": null, "inStock": null, "url": null, "scrapedAt": null
+  }
+]

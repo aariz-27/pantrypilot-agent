@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # origin is trusted.
     allowed_origins: list[str] = []
 
+    # PP-003 addition (backward-compatible, additive): path to the
+    # packaged grocery reference-price SQLite database (M10). Read-only
+    # at runtime; never written by the live recommendation path.
+    price_db_path: str = "data/pantrypilot.db"
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _parse_allowed_origins(cls, value: object) -> list[str]:

@@ -38,13 +38,13 @@ Establish the governed application foundation and then deliver the PantryPilot M
 
 ## Active Ticket
 
-None.
+PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine. Implementation complete; see "In Review" below.
 
 ---
 
 ## Ready Queue
 
-None. PP-001 and PP-002 have been completed and merged (see Done section below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
+None. PP-001 and PP-002 have been completed and merged; PP-003 is implemented and in review (see below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
@@ -54,13 +54,11 @@ Delivered by PP-001 (see Done section below): repository/application scaffold, b
 
 Delivered by PP-002 (see Done section below): `RecipeProvider` abstraction, RecipeAPI.io adapter, `LocalCuratedRecipeProvider` foundation (zero production data — DEC-012 still open).
 
-Real price data and full cost calculation are still outstanding — PP-001/PP-002 only delivered the typed `CostEvaluation` input plug-point, not the Cost Engine/Price Repository themselves.
+Delivered by PP-003, pending merge (see "In Review" below): LuLu UAE grocery ingestion pipeline (M14), read-only `PriceRepository` (M10), deterministic `CostEngine` (M11), DEC-013 median reference-pricing policy.
 
 Remaining planned implementation areas include:
 
 - frontend scaffold
-- price repository
-- cost engine
 - agent tool layer
 - agent orchestrator
 - recommendation API (`/api/recommend` end-to-end wiring)
@@ -69,6 +67,7 @@ Remaining planned implementation areas include:
 - deployment
 - release verification
 - final curated recipe dataset content (blocked on DEC-012)
+- grocery taxonomy gap-fill / manual curated price entries (optional, informed by PP-003's QA report — 381 of 2,699 real products remain unmapped)
 
 These are implementation areas, not automatically authorized tickets.
 
@@ -88,7 +87,19 @@ Potential future blockers include unresolved decision triggers in:
 
 ## In Review
 
-None.
+### PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine
+
+**Status:** IN_REVIEW
+**Priority:** P0
+**Requirements:** FR-11, FR-12, AR-07, AR-12 (implemented)
+**Decision Dependencies:** DEC-013 (recorded, APPROVED)
+**Branch:** `feature/pp-003-pricing-cost-engine` (not merged)
+
+**Objective:**
+Deterministic LuLu UAE grocery ingestion (M14: raw → mapped → reference), a read-only reference-price repository (M10), and a deterministic purchase-cost engine (M11), plugging into PP-001's frozen `CostEvaluation`/constraint-evaluator/ranker contracts unchanged.
+
+**Notes:**
+236 backend tests passed (160 existing + 76 new); governance validation and CI-equivalent simulation passed. Ingested and QA'd against the real 2,699-product Founder-provided LuLu export (see `CURRENT_STATUS.md` for full statistics: 181 canonical ingredients priced, 1,773 products mapped, 381 unresolved, 12 incompatible-unit groups correctly excluded rather than merged, 9 duplicates detected). No LLM classification anywhere in the pipeline. Raw dataset and generated SQLite DB are gitignored, never committed. See `CURRENT_STATUS.md` and `DECISION_REGISTER.md` (DEC-013) for full evidence.
 
 ---
 
