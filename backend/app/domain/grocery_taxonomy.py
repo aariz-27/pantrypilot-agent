@@ -265,6 +265,31 @@ PRODUCT_TYPE_FIXED_CANONICAL: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# 2b. Fixed-canonical title overrides (final Module C pricing-gap
+# resolution, 2026-09-06). A small, narrow, evidence-based exception
+# layered on top of PRODUCT_TYPE_FIXED_CANONICAL: unlike
+# PRODUCT_TYPE_KEYWORD_RULES (no default -- an unmatched title falls
+# through to UNMAPPED), this PRESERVES the fixed-canonical default for
+# every title in the productType and only overrides it when a specific,
+# real title keyword is present. It never weakens or removes the
+# existing default mapping, so it cannot resurrect the "guess when
+# uncertain" pattern DEC-013 forbids -- the default here is the
+# already-approved fixed mapping, not a guess.
+# ---------------------------------------------------------------------------
+
+PRODUCT_TYPE_FIXED_CANONICAL_OVERRIDES: dict[str, list[tuple[str, str]]] = {
+    # "Coconut Shredded India 350 g" is a processed, mass-based cooking
+    # ingredient with materially different recipe intent from a whole
+    # fresh coconut ("Coconut Whole India 1 pc", "King Coconut 1 pc",
+    # "Tender Coconut Thailand 1 pc", "Tender Coconut with Opener 1 pc" --
+    # all of which correctly stay "coconut", the default).
+    "Coconut": [
+        ("shredded", "shredded_coconut"),
+        ("desiccated", "shredded_coconut"),
+    ],
+}
+
+# ---------------------------------------------------------------------------
 # 3. Family productType -> keyword-driven canonical_id.
 # Each entry: productType -> (ordered [(keyword, canonical_id), ...], default)
 # Keywords are matched case-insensitively as substrings of the title.
@@ -608,6 +633,70 @@ MANUAL_ONLY_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
 #   inventing an average apple weight, which DEC-013 forbids. Every
 #   other real "Apples" productType title in the export is kg/g-based.
 #
+# Final Module C pricing-gap resolution (2026-09-06) -- the remaining 9
+# incompatible-unit groups were each individually inspected (every real
+# contributor row, grouped by unit, titles/prices/package content
+# reviewed). Two of the nine (corn, mayonnaise) had NO non-arbitrary
+# deterministic signal available -- see the code comment above the
+# `RESIDUAL_INCOMPATIBLE_CANONICAL_IDS` note near the bottom of this
+# file for why they are intentionally left unresolved rather than
+# forced. The other seven were resolved as follows:
+#
+# - "evaporated_milk" excludes "ml": the sole ml contributor is "Rainbow
+#   Original Evaporated Milk Portion 10 x 14 ml" -- a single-serve
+#   creamer-style portion pack, a genuinely different consumption form
+#   from the four g-based standard cans (170 g/410 g), which is the
+#   normal cooking-ingredient form.
+# - "flavoured_yoghurt" excludes "ml" and "pcs":
+#   - the sole ml contributor, "Unikai Meethi Lassi 190 ml", is a
+#     drinkable lassi, not a spoonable yoghurt -- genuinely different
+#     recipe intent from the 42 g-based spoonable cups/pots.
+#   - the two pcs contributors ("Al Rawabi Blackberry & Raspberry
+#     Yoghurt 1 pc", "Al Rawabi Fruit Yoghurt Assorted 6 pcs") are
+#     ordinary spoonable pot yoghurts whose LuLu listing simply omits a
+#     weight in the content field -- a packaging/source-data anomaly,
+#     not a different product. Converting piece count to grams would
+#     require inventing a per-cup weight, which DEC-013 forbids, so they
+#     are excluded rather than guessed.
+# - "fresh_cream" excludes "ml": the three ml contributors ("El mlea
+#   Double Cream 270 ml", "El mlea Single Cream 270 ml", "President
+#   Light Cooking Cream 200 ml") are pourable liquid creams, a
+#   genuinely different physical form from the ten g-based thick
+#   tub/soured-cream products (Al Rawabi, Almarai, Daisy, Marmum -- all
+#   weight-labeled). Notably, "President Light Cooking Cream" conceptually
+#   duplicates the taxonomy's own separate "Cooking Cream" productType/
+#   canonical_id ("cooking_cream") -- LuLu's own "Fresh Cream" productType
+#   label is inconsistent for this title; a future ticket could
+#   reclassify it via a title-keyword override (as done here for
+#   "shredded_coconut"), but that is not required to give "fresh_cream"
+#   itself a safe, correct reference price, so it is left as a disclosed
+#   follow-up rather than done here.
+# - "ghee" excludes "g": unlike the other exclusions, this is NOT a
+#   "different product form" case -- ghee is genuinely, legitimately
+#   sold both by weight (5 contributors, e.g. "Almarai Pure Butter Ghee
+#   800 g") and by volume (15 contributors) in the real export, with no
+#   title-level distinguishing signal between them (same product,
+#   different brand packaging choices). Volume is chosen as ghee's
+#   canonical reference-price basis NOT because it has more
+#   contributors (an explicitly forbidden justification), but for
+#   architectural consistency with every other pure cooking fat/oil
+#   already in this taxonomy -- sunflower_oil, olive_oil, coconut_oil,
+#   canola_oil, and corn_oil are all priced in ml, and ghee is used
+#   identically in recipes (poured/measured by volume).
+# - "ketchup" excludes "ml": the sole ml contributor, "Heinz Less Sugar
+#   and Salt Tomato Ketchup 400 ml", is the same brand/product family as
+#   6 other Heinz ketchup SKUs that are all g-labeled (342 g/369 g/
+#   400 g/460 g/570 g/910 g) -- an isolated retailer/source labeling
+#   inconsistency for this one SKU, not a genuinely different product
+#   form, and ketchup density cannot be safely assumed to make a g/ml
+#   conversion.
+# - "whipping_cream" excludes "g": both g contributors are explicitly
+#   pre-made/aerosol products -- "Puck Whipping Cream Spray 250 g" (a
+#   spray, the same contaminant pattern as the butter case) and "Baskin
+#   Robbins Whipped Light Cream 425 g" (a ready-whipped topping) --
+#   genuinely different from the ten ml contributors, which are all raw
+#   pourable liquid cream meant to be whipped as part of a recipe.
+#
 # This dict is intentionally NOT consulted by resolve_canonical_id() --
 # mapping/classification is unaffected; only run_normalization()'s
 # reference-price candidate grouping (scripts/normalize_grocery_prices.py)
@@ -617,7 +706,31 @@ MANUAL_ONLY_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
 REFERENCE_PRICE_EXCLUDED_UNITS: dict[str, frozenset[str]] = {
     "butter": frozenset({"ml"}),
     "apple": frozenset({"pcs"}),
+    "evaporated_milk": frozenset({"ml"}),
+    "flavoured_yoghurt": frozenset({"ml", "pcs"}),
+    "fresh_cream": frozenset({"ml"}),
+    "ghee": frozenset({"g"}),
+    "ketchup": frozenset({"ml"}),
+    "whipping_cream": frozenset({"g"}),
 }
+
+# ---------------------------------------------------------------------------
+# 4d. Residual, intentionally unresolved incompatible-unit groups (final
+# Module C pricing-gap resolution, 2026-09-06). "corn" (1 g contributor,
+# "Sweet Corn Big 1 kg", vs 1 pcs contributor, "Sweet Corn 2 pcs") and
+# "mayonnaise" (2 g contributors vs 4 ml contributors, split across
+# multiple different brands with no title-level distinguishing signal
+# and no cross-taxonomy consistency argument analogous to ghee's) both
+# lack any non-arbitrary deterministic basis to prefer one unit over the
+# other -- picking one would violate the explicit "never choose the
+# majority unit just because it is the majority" rule with no
+# independent justification available. Neither is in the approved
+# essential-ingredient checklist. Left unresolved rather than forced;
+# recommended path is a Founder-reviewed manual curated fallback entry
+# if either is needed before Module D.
+# ---------------------------------------------------------------------------
+
+RESIDUAL_INCOMPATIBLE_CANONICAL_IDS: frozenset[str] = frozenset({"corn", "mayonnaise"})
 
 # ---------------------------------------------------------------------------
 # 5. Full canonical vocabulary: every canonical_id referenced above, plus
@@ -627,6 +740,7 @@ REFERENCE_PRICE_EXCLUDED_UNITS: dict[str, frozenset[str]] = {
 CANONICAL_GROCERY_INGREDIENTS: frozenset[str] = frozenset(
     set(PRODUCT_TYPE_FIXED_CANONICAL.values())
     | {cid for rules in PRODUCT_TYPE_KEYWORD_RULES.values() for _, cid in rules}
+    | {cid for rules in PRODUCT_TYPE_FIXED_CANONICAL_OVERRIDES.values() for _, cid in rules}
     | set(GROCERY_INGREDIENT_ALIASES.values())
     | MANUAL_ONLY_CANONICAL_INGREDIENTS
 )

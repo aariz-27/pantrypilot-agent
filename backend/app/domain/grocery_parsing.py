@@ -14,6 +14,7 @@ from app.domain.grocery_taxonomy import (
     CANONICAL_GROCERY_INGREDIENTS,
     GROCERY_INGREDIENT_ALIASES,
     PRODUCT_TYPE_FIXED_CANONICAL,
+    PRODUCT_TYPE_FIXED_CANONICAL_OVERRIDES,
     PRODUCT_TYPE_KEYWORD_RULES,
 )
 from app.domain.ingredient_normalizer import normalize_ingredient_name
@@ -254,6 +255,10 @@ def resolve_canonical_id(product_type: object, title: object) -> str | None:
     title_lower = title_str.lower()
 
     if product_type_str and product_type_str in PRODUCT_TYPE_FIXED_CANONICAL:
+        if product_type_str in PRODUCT_TYPE_FIXED_CANONICAL_OVERRIDES:
+            for keyword, canonical_id in PRODUCT_TYPE_FIXED_CANONICAL_OVERRIDES[product_type_str]:
+                if keyword in title_lower:
+                    return canonical_id
         return PRODUCT_TYPE_FIXED_CANONICAL[product_type_str]
 
     if product_type_str and product_type_str in PRODUCT_TYPE_KEYWORD_RULES:
