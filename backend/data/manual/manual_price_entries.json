@@ -31,5 +31,27 @@
     "package_price_aed": 3.24,
     "normalized_package_quantity": 250,
     "provenance_note": "Founder-approved manual price, essential-ingredient price coverage audit (2026-09-06): 250 g package, AED 3.24. Real LuLu titles exist (e.g. \"Ginger India 200 g\") under productType \"Chillies & Spicy\", which has no keyword-family mapping rule in the current taxonomy -- taxonomy-unmapped from LuLu, closed via manual fallback instead."
+  },
+  {
+    "canonical_id": "corn",
+    "normalized_unit": "g",
+    "display_name": "Sweet Corn",
+    "normalized_price_per_unit": 0.00995,
+    "package_quantity": 1,
+    "package_unit": "kg",
+    "package_price_aed": 9.95,
+    "normalized_package_quantity": 1000,
+    "provenance_note": "Founder-approved manual price, final Module C pricing-gap closure (2026-09-06): sweet corn, 1 kg package, AED 9.95 (0.00995 AED/g). The real LuLu \"corn\" canonical ID has exactly one g contributor and one pcs contributor with no non-arbitrary basis to prefer either (see grocery_taxonomy.RESIDUAL_INCOMPATIBLE_CANONICAL_IDS) -- the LuLu rows remain in raw/mapped data unchanged and excluded from LuLu-derived reference-price promotion; this manual entry is a gram-based fallback only, with no conversion from or selection of the pcs contributor."
+  },
+  {
+    "canonical_id": "mayonnaise",
+    "normalized_unit": "g",
+    "display_name": "Hellmann's Mayonnaise",
+    "normalized_price_per_unit": 0.0183606557377049,
+    "package_quantity": 915,
+    "package_unit": "g",
+    "package_price_aed": 16.80,
+    "normalized_package_quantity": 915,
+    "provenance_note": "Founder-approved manual price, final Module C pricing-gap closure (2026-09-06): Hellmann's Mayonnaise, 915 g package, AED 16.80 (16.80 / 915 = 0.0183606557377049 AED/g). The real LuLu \"mayonnaise\" canonical ID has 2 g contributors and 4 ml contributors spread across multiple brands with no non-arbitrary basis to prefer either (see grocery_taxonomy.RESIDUAL_INCOMPATIBLE_CANONICAL_IDS) -- the LuLu rows remain in raw/mapped data unchanged. Founder policy: canonical mayonnaise uses a gram-based manual fallback only; the existing ml LuLu contributors are never converted, never selected, and no density is derived or assumed."
   }
 ]

@@ -307,17 +307,39 @@ def test_carrots_producttype_maps_to_canonical_carrot():
     assert resolve_canonical_id("Carrots", "Fresh Carrots 1 kg") == "carrot"
 
 
+def test_shredded_coconut_splits_from_whole_coconut():
+    # Final Module C pricing-gap resolution (2026-09-06): a processed,
+    # mass-based shredded/desiccated coconut has materially different
+    # recipe intent from a whole fresh coconut -- the fixed-canonical
+    # override splits it into its own canonical_id, while every other
+    # real "Coconut" title (no "shredded"/"desiccated" keyword) keeps
+    # resolving to the existing default, "coconut", unchanged.
+    assert resolve_canonical_id("Coconut", "Coconut Shredded India 350 g") == "shredded_coconut"
+    assert resolve_canonical_id("Coconut", "Coconut Whole India 1 pc") == "coconut"
+    assert resolve_canonical_id("Coconut", "King Coconut 1 pc") == "coconut"
+    assert resolve_canonical_id("Coconut", "Tender Coconut Thailand 1 pc") == "coconut"
+    assert resolve_canonical_id("Coconut", "Tender Coconut with Opener 1 pc") == "coconut"
+
+
 def test_reference_price_excluded_units_is_narrowly_scoped():
-    # Essential-ingredient data-quality fix (2026-09-06): the exclusion
-    # table must remain exactly as narrow as the real evidence justifies
-    # -- only butter/ml (roasting spray) and apple/pcs (piece-counted
-    # pack), never a blanket rule and never applied to an unrelated
-    # canonical_id such as "egg" (which is correctly pcs-based).
+    # Essential-ingredient / final Module C pricing-gap resolution
+    # (2026-09-06): the exclusion table must remain exactly as narrow as
+    # the real evidence justifies for each canonical_id, never a blanket
+    # rule and never applied to an unrelated canonical_id such as "egg"
+    # (which is correctly pcs-based).
     assert REFERENCE_PRICE_EXCLUDED_UNITS == {
         "butter": frozenset({"ml"}),
         "apple": frozenset({"pcs"}),
+        "evaporated_milk": frozenset({"ml"}),
+        "flavoured_yoghurt": frozenset({"ml", "pcs"}),
+        "fresh_cream": frozenset({"ml"}),
+        "ghee": frozenset({"g"}),
+        "ketchup": frozenset({"ml"}),
+        "whipping_cream": frozenset({"g"}),
     }
     assert "egg" not in REFERENCE_PRICE_EXCLUDED_UNITS
+    assert "corn" not in REFERENCE_PRICE_EXCLUDED_UNITS
+    assert "mayonnaise" not in REFERENCE_PRICE_EXCLUDED_UNITS
 
 
 def test_speciality_cheese_never_counts_a_non_cheese_dip_as_cheese():

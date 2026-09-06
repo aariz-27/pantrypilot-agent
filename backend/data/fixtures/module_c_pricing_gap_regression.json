@@ -1,0 +1,128 @@
+[
+  {
+    "id": "9101", "sku": "SKU9101", "title": "Coconut Shredded India 350 g", "brand": null,
+    "content": "350 g", "price": 6.5, "retailPrice": 6.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Coconut", "inStock": true, "url": "https://example.test/coconut-shredded", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9102", "sku": "SKU9102", "title": "Tender Coconut Thailand 1 pc", "brand": null,
+    "content": "1 pc", "price": 10.95, "retailPrice": 10.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Coconut", "inStock": true, "url": "https://example.test/coconut-whole-1", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9103", "sku": "SKU9103", "title": "King Coconut 1 pc", "brand": null,
+    "content": "1 pc", "price": 12.95, "retailPrice": 12.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Coconut", "inStock": true, "url": "https://example.test/coconut-whole-2", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9104", "sku": "SKU9104", "title": "Sweet Corn Big 1 kg", "brand": null,
+    "content": "1 kg", "price": 9.95, "retailPrice": 9.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Corns & Baby Corn", "inStock": true, "url": "https://example.test/corn-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9105", "sku": "SKU9105", "title": "Sweet Corn 2 pcs", "brand": null,
+    "content": "2 pcs", "price": 7.95, "retailPrice": 7.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Fruits & Vegetables", "category3": null,
+    "productType": "Corns & Baby Corn", "inStock": true, "url": "https://example.test/corn-pcs", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9106", "sku": "SKU9106", "title": "Rainbow Evaporated Milk 410 g", "brand": "Rainbow",
+    "content": "410 g", "price": 5.3, "retailPrice": 5.3, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Evaporated Milk", "inStock": true, "url": "https://example.test/evapmilk-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9107", "sku": "SKU9107", "title": "Rainbow Original Evaporated Milk Portion 10 x 14 ml", "brand": "Rainbow",
+    "content": "10 x 14 ml", "price": 6.25, "retailPrice": 6.25, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Evaporated Milk", "inStock": true, "url": "https://example.test/evapmilk-portion-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9108", "sku": "SKU9108", "title": "Activia Stirred Yoghurt Full Fat Mango 120 g", "brand": "Activia",
+    "content": "120 g", "price": 2.95, "retailPrice": 2.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Flavoured Yoghurt", "inStock": true, "url": "https://example.test/flavyog-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9109", "sku": "SKU9109", "title": "Unikai Meethi Lassi 190 ml", "brand": "Unikai",
+    "content": "190 ml", "price": 0.95, "retailPrice": 0.95, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Flavoured Yoghurt", "inStock": true, "url": "https://example.test/flavyog-lassi-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9110", "sku": "SKU9110", "title": "Al Rawabi Fruit Yoghurt Assorted 6 pcs", "brand": "Al Rawabi",
+    "content": "6 pcs", "price": 8.2, "retailPrice": 8.2, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Flavoured Yoghurt", "inStock": true, "url": "https://example.test/flavyog-pcs", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9111", "sku": "SKU9111", "title": "Almarai Fresh Cream 100 g", "brand": "Almarai",
+    "content": "100 g", "price": 4.55, "retailPrice": 4.55, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Fresh Cream", "inStock": true, "url": "https://example.test/freshcream-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9112", "sku": "SKU9112", "title": "El mlea Double Cream 270 ml", "brand": "El mlea",
+    "content": "270 ml", "price": 17.45, "retailPrice": 17.45, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Fresh Cream", "inStock": true, "url": "https://example.test/freshcream-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9113", "sku": "SKU9113", "title": "Almarai Pure Butter Ghee 800 g", "brand": "Almarai",
+    "content": "800 g", "price": 44.9, "retailPrice": 44.9, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Ghee", "inStock": true, "url": "https://example.test/ghee-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9114", "sku": "SKU9114", "title": "Amul Pure Ghee 500 ml", "brand": "Amul",
+    "content": "500 ml", "price": 18.95, "retailPrice": 18.95, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Ghee", "inStock": true, "url": "https://example.test/ghee-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9115", "sku": "SKU9115", "title": "Heinz Tomato Ketchup 460 g", "brand": "Heinz",
+    "content": "460 g", "price": 10.95, "retailPrice": 10.95, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Ketchup", "inStock": true, "url": "https://example.test/ketchup-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9116", "sku": "SKU9116", "title": "Heinz Less Sugar and Salt Tomato Ketchup 400 ml", "brand": "Heinz",
+    "content": "400 ml", "price": 19.2, "retailPrice": 19.2, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Ketchup", "inStock": true, "url": "https://example.test/ketchup-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9117", "sku": "SKU9117", "title": "Heinz Creamy Classic Mayonnaise 430 g", "brand": "Heinz",
+    "content": "430 g", "price": 20.4, "retailPrice": 20.4, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Mayonnaise", "inStock": true, "url": "https://example.test/mayo-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9118", "sku": "SKU9118", "title": "Kewpie Mayonnaise Japanese Style 310 ml", "brand": "Kewpie",
+    "content": "310 ml", "price": 24.5, "retailPrice": 24.5, "currency": "aed",
+    "category1": "Grocery", "category2": "Food Cupboard", "category3": null,
+    "productType": "Mayonnaise", "inStock": true, "url": "https://example.test/mayo-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9119", "sku": "SKU9119", "title": "Puck Whipping Cream 1 Litre", "brand": "Puck",
+    "content": "1 Litre", "price": 29.75, "retailPrice": 29.75, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Whipping Cream", "inStock": true, "url": "https://example.test/whipcream-ml", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9120", "sku": "SKU9120", "title": "Puck Whipping Cream Spray 250 g", "brand": "Puck",
+    "content": "250 g", "price": 20.85, "retailPrice": 20.85, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "Whipping Cream", "inStock": true, "url": "https://example.test/whipcream-spray-g", "scrapedAt": "2026-09-06 10:00:00"
+  },
+  {
+    "id": "9121", "sku": "SKU9121", "title": "Khaleej White Eggs Large 6 pcs", "brand": "Khaleej",
+    "content": "6 pcs", "price": 5.5, "retailPrice": 5.5, "currency": "aed",
+    "category1": "Fresh Food", "category2": "Dairy , Eggs & Cheese", "category3": null,
+    "productType": "White Eggs", "inStock": true, "url": "https://example.test/eggs-6pcs", "scrapedAt": "2026-09-06 10:00:00"
+  }
+]
