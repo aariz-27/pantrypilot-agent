@@ -28,6 +28,7 @@ from app.domain.grocery_parsing import (  # noqa: E402
     resolve_canonical_id,
     validate_currency,
 )
+from app.domain.grocery_taxonomy import REFERENCE_PRICE_EXCLUDED_UNITS  # noqa: E402
 from app.domain.reference_pricing import compute_reference_prices  # noqa: E402
 
 
@@ -190,6 +191,12 @@ def run_normalization(db_path: str) -> dict:
         mapped_ok = [r for r in mapped_rows if r["mapping_status"] == MappingStatus.MAPPED.value]
         grouped: dict[tuple[str, str], list[ReferencePriceCandidate]] = collections.defaultdict(list)
         for r in mapped_ok:
+            # Evidence-based, canonical-ID-scoped exclusion (see
+            # grocery_taxonomy.REFERENCE_PRICE_EXCLUDED_UNITS): the row
+            # stays a genuine `mapped` row in mapped_grocery_products, but
+            # is never a reference-price candidate for this canonical_id.
+            if r["normalized_unit"] in REFERENCE_PRICE_EXCLUDED_UNITS.get(r["canonical_id"], frozenset()):
+                continue
             grouped[(r["canonical_id"], r["normalized_unit"])].append(
                 ReferencePriceCandidate(
                     normalized_price_per_unit=r["normalized_price_per_unit"],

@@ -167,6 +167,7 @@ PRODUCT_TYPE_FIXED_CANONICAL: dict[str, str] = {
     "Garlic": "garlic",
     "Capsicum": "bell_pepper",
     "Cucumber": "cucumber",
+    "Carrots": "carrot",
     "Corns & Baby Corn": "corn",
     "Eggplant": "eggplant",
     "Mushrooms": "mushroom",
@@ -582,6 +583,41 @@ MANUAL_ONLY_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
         "unsalted_butter",
     }
 )
+
+# ---------------------------------------------------------------------------
+# 4c. Reference-price-eligibility exclusions (essential-ingredient
+# data-quality fix, 2026-09-06). Narrow, evidence-based exceptions where
+# a real LuLu contributor legitimately carries a canonical_id but its
+# unit is categorically incompatible with that ingredient's normal
+# mass/volume form -- so it must never enter reference-price
+# aggregation for that canonical_id, even though it remains a genuine
+# `mapped` row in mapped_grocery_products (nothing is silently dropped
+# from ingestion or from ingredient identity; only excluded from *that
+# canonical_id's* reference-price candidate pool). Never a blanket
+# per-unit rule and never applied globally -- always scoped to one
+# specific canonical_id and justified by a specific real title.
+#
+# - "butter" excludes "ml": the sole ml contributor is "Lurpak Butter
+#   Roasting Spray 200 ml" -- a cooking spray, not a normal mass-based
+#   butter package. No salted/unsalted/block/portion butter title in the
+#   real export is ml-based, so this cannot exclude any of them. No
+#   density conversion is performed; the spray row simply never
+#   contributes to the "butter" reference-price statistic.
+# - "apple" excludes "pcs": the sole pcs contributor is "Rockit Apple 1
+#   pkt 5 pcs". Converting a piece count to grams would require
+#   inventing an average apple weight, which DEC-013 forbids. Every
+#   other real "Apples" productType title in the export is kg/g-based.
+#
+# This dict is intentionally NOT consulted by resolve_canonical_id() --
+# mapping/classification is unaffected; only run_normalization()'s
+# reference-price candidate grouping (scripts/normalize_grocery_prices.py)
+# and the QA report's incompatible-group accounting consult it.
+# ---------------------------------------------------------------------------
+
+REFERENCE_PRICE_EXCLUDED_UNITS: dict[str, frozenset[str]] = {
+    "butter": frozenset({"ml"}),
+    "apple": frozenset({"pcs"}),
+}
 
 # ---------------------------------------------------------------------------
 # 5. Full canonical vocabulary: every canonical_id referenced above, plus

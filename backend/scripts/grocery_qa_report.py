@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db.connection import connection_scope  # noqa: E402
+from app.domain.grocery_taxonomy import REFERENCE_PRICE_EXCLUDED_UNITS  # noqa: E402
 
 # Common recipe staples worth specifically calling out if pricing
 # coverage is missing -- not exhaustive, just a sanity spot-check list
@@ -76,15 +77,35 @@ def build_report(db_path: str) -> str:
             }
         )
 
-        incompatible_rows = connection.execute(
-            """
-            SELECT canonical_id, GROUP_CONCAT(DISTINCT normalized_unit) AS units, COUNT(*) AS c
-            FROM mapped_grocery_products
-            WHERE mapping_status = 'mapped'
-            GROUP BY canonical_id
-            HAVING COUNT(DISTINCT normalized_unit) > 1
-            """
+        # Mirrors scripts/normalize_grocery_prices.py's own reference-price
+        # candidate grouping exactly, including REFERENCE_PRICE_EXCLUDED_UNITS
+        # (essential-ingredient data-quality fix, 2026-09-06): a canonical_id
+        # with a real but categorically-incompatible unit contributor (e.g.
+        # "butter"/ml for a roasting spray, "apple"/pcs for a piece-counted
+        # pack) must not still be reported as an unresolved incompatible
+        # group here once that contributor is excluded from promotion.
+        unit_rows = connection.execute(
+            "SELECT canonical_id, normalized_unit, COUNT(*) AS c FROM mapped_grocery_products "
+            "WHERE mapping_status = 'mapped' GROUP BY canonical_id, normalized_unit"
         ).fetchall()
+        units_by_canonical: dict[str, set[str]] = collections.defaultdict(set)
+        counts_by_canonical_unit: dict[tuple[str, str], int] = {}
+        for row in unit_rows:
+            canonical_id, unit, count = row["canonical_id"], row["normalized_unit"], row["c"]
+            counts_by_canonical_unit[(canonical_id, unit)] = count
+            if unit in REFERENCE_PRICE_EXCLUDED_UNITS.get(canonical_id, frozenset()):
+                continue
+            units_by_canonical[canonical_id].add(unit)
+
+        incompatible_rows = [
+            {
+                "canonical_id": canonical_id,
+                "units": ",".join(sorted(units)),
+                "c": sum(counts_by_canonical_unit[(canonical_id, u)] for u in units),
+            }
+            for canonical_id, units in sorted(units_by_canonical.items())
+            if len(units) > 1
+        ]
 
         missing_important = []
         for canonical_id in IMPORTANT_INGREDIENTS:
