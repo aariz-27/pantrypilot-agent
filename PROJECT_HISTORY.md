@@ -196,3 +196,38 @@ Explicitly out of scope for this ticket: pricing/cost engine, LLM/agent orchestr
 `APPROVAL_GATES.md` G4 (Core Deterministic Engine Ready) and G5 (Recipe Sources Ready) are not marked complete: G4 is blocked on the price repository/cost engine (not started); G5 is blocked on DEC-012. Both remain IN PROGRESS pending those conditions and explicit Founder/Product Owner gate approval.
 
 During post-merge closure, the Founder restored `backend/.env` locally with a newly rotated RecipeAPI.io credential. The live smoke test was re-run (3 requests: ingredient search, recipe-detail mapping, cuisine-filtered search) and passed against the rotated key, confirming authentication, grounded search results, correct detail mapping, and correct cuisine filtering. Closure documentation wording was also corrected: earlier wording had implied no API key value was ever present in a PP-002 commit/PR. The accurate state is that an old (now-revoked) key was committed to git history predating PP-002 (`bfdde3e`); PP-002 untracked `backend/.env` (`eb50929`) without rewriting history, so that old, revoked value remains visible in the historical deletion diff of that commit; the Founder rotated the credential; and the current valid key exists only in the Founder's local, untracked `backend/.env` and has never been committed.
+
+---
+
+## 2026-09-06 — PP-003 Merged: Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine
+
+The third authorized implementation ticket, PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine, was implemented on `feature/pp-003-pricing-cost-engine`, reviewed, corrected, independently approved, and merged into `main` via PR #5.
+
+Delivered:
+
+- a deterministic three-layer LuLu UAE grocery ingestion pipeline (M14): `raw_grocery_products` (verbatim staging) → `mapped_grocery_products` (parse/mapping outcome, every row retained regardless of status) → `ingredient_prices` (final reference, one row per canonical ingredient/normalized unit), plus `manual_price_entries` (empty-by-default curated fallback) and `ingredient_aliases`
+- a real, evidence-built canonical grocery taxonomy (`grocery_taxonomy.py`) grounded in exhaustive inspection of the Founder's real 2,699-product LuLu UAE export, not invented assumptions
+- deterministic package/content parsing (`grocery_parsing.py`): grams/kilograms, millilitres/litres, explicit piece counts, multipacks (`N x SIZE unit`), and explicit recognition (never silent conversion) of bunch/pkt/teabags/gallon/slices/pack/box
+- DEC-013 — Grocery Price Ingestion and Reference Pricing Policy (APPROVED, recorded in `DECISION_REGISTER.md`): median reference price over compatible-unit contributors, `price` field only for cost calculation, brand never defines identity, ambiguous/missing package size never promoted (except explicit piece/count), gallons never silently converted
+- a read-only `PriceRepository` (M10): `get_price(canonical_id, normalized_unit=None)`, checks `manual_price_entries` as fallback, never returns zero for an unknown price
+- a deterministic `CostEngine` (M11): `ceil(required/package)` purchasing math against the frozen `CostEvaluation` contract, with a conservative one-package/MEDIUM-confidence fallback for ambiguous or incompatible-dimension recipe measures
+- 85 new tests (245 total with the existing PP-001/PP-002 suite)
+
+Independent review found and the team fixed four correctness issues before final approval:
+
+1. `PRODUCT_TYPE_KEYWORD_DEFAULT` had silently guessed a canonical variant (e.g. "Fresh Milk" → `full_fat_milk`) whenever no keyword in a title matched, violating DEC-013's uncertain-mappings-stay-unresolved rule. Removed entirely; such products now correctly resolve to `None` (UNMAPPED_INGREDIENT).
+2. The LuLu `productType` label was found to be unreliable in the real export (e.g. "Puck Cream Cheese Spread" is filed under productType "Feta & White Cheese"). Three productTypes were converted from fixed-canonical to keyword-family resolution, and a fourth family ("Speciality Cheese") was added, so canonical identity is decided by title evidence, not the unreliable label.
+3. `parse_package_content()` silently under-parsed additive bundles (`"2 kg + 1 kg"` accepted only the first number) and weight ranges (`"1.2 kg-1.5 kg"` accepted only the first endpoint). Added an explicit range pattern (always unresolved — a range is inherently ambiguous) and an additive pattern (sums same-dimension bundles deterministically; stays unresolved across incompatible dimensions).
+4. A keyword-ordering bug caused more specific phrases to be shadowed by generic substrings (e.g. "potato" matching before "sweet potato" could ever be checked; "dal" matching before "moong dal"/"chana dal"/"toor dal"/"urid dal"). Reordered both families so specific phrases are always checked first.
+
+All four findings were fixed with real, evidence-based keyword rules verified against actual titles in the dataset (not blanket guesses), re-validated against the full real dataset, and covered by 9 new regression tests. The correction shifted canonical coverage from 181 to 213 distinct priced canonical ingredients (more granular and accurate) at the honest cost of slightly lower raw mapped coverage (1,773 → 1,734 — removed defaults are no longer silently guessed).
+
+Final real-dataset QA (2,699 real LuLu UAE products, gitignored/local-only, never committed): 1,734 mapped, 483 filtered out, 419 unresolved, 52 unsupported-unit, 2 unparseable-package, 9 duplicates, 11 incompatible-unit groups correctly excluded rather than merged, 213 promoted reference entries across 213 distinct canonical ingredients (unit distribution: g: 184, ml: 24, pcs: 5). Two important-ingredient spot-check gaps were disclosed: `butter` (blocked by an incompatible-unit-group data-quality flag — sold both by weight and volume in the export) and `ginger` (not yet covered by the canonical mapping table).
+
+Merge commit: `39fbe623bb33943501416d9f37756f69f7350ca3`. Implementation head (pre-merge): `aff4bd466ed562274cffac2456428d49b61bb241`. Final verification at merge: 245 backend tests passed (2 warnings), governance validation passed, CI passed (Backend Checks, Frontend Checks, Governance Validation all green); re-verified after fast-forwarding local `main` to `origin/main` (245 passed, governance validation PASS).
+
+Before merge, the real local SQLite reference database (`backend/data/pantrypilot.db`, gitignored, never committed) was regenerated end-to-end from the Founder's local LuLu export using the merged ingestion scripts, confirmed to reproduce the exact final QA figures above, and `PriceRepository.get_price()` was verified to read it correctly: correct real prices returned for canonical IDs spanning produce, dairy, pulses, and meat; `butter` (known incompatible-unit exclusion) and a nonexistent canonical ID both correctly returned "not found" rather than a fabricated zero, directly confirming the never-treat-unknown-price-as-zero invariant against real data.
+
+Explicitly out of scope for this ticket: LLM/agent orchestration, `/api/recommend` end-to-end wiring, frontend, deployment, live Apify/runtime scraping (ingestion is dev-time only), and manual curated-fallback gap-fill (DEC-013's small curated-entry mechanism exists and is tested but ships empty).
+
+`APPROVAL_GATES.md` G4 (Core Deterministic Engine Ready) exit criteria are now technically satisfied (price repository and cost engine implemented, tested, and merged) but the gate itself is not self-declared COMPLETE — it still requires a separate, explicit Founder/Product Owner gate approval. G5 (Recipe Sources Ready) is unaffected by this ticket and remains blocked on DEC-012.

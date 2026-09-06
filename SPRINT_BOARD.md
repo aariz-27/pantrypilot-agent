@@ -38,13 +38,13 @@ Establish the governed application foundation and then deliver the PantryPilot M
 
 ## Active Ticket
 
-PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine. Implementation complete; see "In Review" below.
+None. PP-001, PP-002, and PP-003 have all been completed and merged (see "Completed" below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
 ## Ready Queue
 
-None. PP-001 and PP-002 have been completed and merged; PP-003 is implemented and in review (see below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
+None. PP-001, PP-002, and PP-003 have been completed and merged. The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
@@ -54,7 +54,7 @@ Delivered by PP-001 (see Done section below): repository/application scaffold, b
 
 Delivered by PP-002 (see Done section below): `RecipeProvider` abstraction, RecipeAPI.io adapter, `LocalCuratedRecipeProvider` foundation (zero production data — DEC-012 still open).
 
-Delivered by PP-003, pending merge (see "In Review" below): LuLu UAE grocery ingestion pipeline (M14), read-only `PriceRepository` (M10), deterministic `CostEngine` (M11), DEC-013 median reference-pricing policy.
+Delivered by PP-003 (see "Completed" below): LuLu UAE grocery ingestion pipeline (M14), read-only `PriceRepository` (M10), deterministic `CostEngine` (M11), DEC-013 median reference-pricing policy.
 
 Remaining planned implementation areas include:
 
@@ -87,23 +87,27 @@ Potential future blockers include unresolved decision triggers in:
 
 ## In Review
 
+None currently.
+
+---
+
+## Completed
+
 ### PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine
 
-**Status:** IN_REVIEW
+**Status:** DONE
 **Priority:** P0
 **Requirements:** FR-11, FR-12, AR-07, AR-12 (implemented)
 **Decision Dependencies:** DEC-013 (recorded, APPROVED)
-**Branch:** `feature/pp-003-pricing-cost-engine` (not merged)
+**Branch:** `feature/pp-003-pricing-cost-engine` (merged)
 
 **Objective:**
 Deterministic LuLu UAE grocery ingestion (M14: raw → mapped → reference), a read-only reference-price repository (M10), and a deterministic purchase-cost engine (M11), plugging into PP-001's frozen `CostEvaluation`/constraint-evaluator/ranker contracts unchanged.
 
 **Notes:**
-245 backend tests passed (160 existing + 85 new, including a post-review correction pass); governance validation and CI-equivalent simulation passed. Ingested and QA'd against the real 2,699-product Founder-provided LuLu export (see `CURRENT_STATUS.md` for full statistics: 213 canonical ingredients priced, 1,734 products mapped, 419 unresolved, 11 incompatible-unit groups correctly excluded rather than merged, 9 duplicates detected). Independent review found and fixed four correctness issues (unjustified canonical-mapping defaults, an unreliable LuLu productType label, silent range/additive package under-parsing, keyword-ordering bugs) — see `CURRENT_STATUS.md` for the corrected figures. No LLM classification anywhere in the pipeline. Raw dataset and generated SQLite DB are gitignored, never committed. See `CURRENT_STATUS.md` and `DECISION_REGISTER.md` (DEC-013) for full evidence.
+Merged via PR #5 (merge commit `39fbe62`, implementation head `aff4bd4`). 245 backend tests passed (160 existing + 85 new, including a post-review correction pass); governance validation and CI both passed (Backend Checks, Frontend Checks, Governance Validation), and were re-verified after merge against `main`. Ingested and QA'd against the real 2,699-product Founder-provided LuLu export (see `CURRENT_STATUS.md` for full statistics: 213 canonical ingredients priced, 1,734 products mapped, 419 unresolved, 11 incompatible-unit groups correctly excluded rather than merged, 9 duplicates detected). Independent review found and fixed four correctness issues (unjustified canonical-mapping defaults, an unreliable LuLu productType label, silent range/additive package under-parsing, keyword-ordering bugs) before final approval — see `CURRENT_STATUS.md` for the corrected figures. Post-approval, pre-merge, the real local SQLite database was regenerated from the Founder's LuLu export using the merged scripts and `PriceRepository` was verified to read it correctly. No LLM classification anywhere in the pipeline. Raw dataset and generated SQLite DB are gitignored, never committed. See `CURRENT_STATUS.md` and `DECISION_REGISTER.md` (DEC-013) for full evidence.
 
 ---
-
-## Completed
 
 ### PP-002 — Grounded Recipe Retrieval Layer
 
