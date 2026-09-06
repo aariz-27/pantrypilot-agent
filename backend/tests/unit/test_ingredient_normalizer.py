@@ -89,3 +89,32 @@ def test_normalize_pantry_empty_list():
     result = normalize_pantry([])
     assert result.canonical_ids == frozenset()
     assert result.unresolved == ()
+
+
+# --- salted/unsalted butter distinction (essential-ingredient audit, 2026-09-06) ---
+
+
+def test_unsalted_butter_normalizes_to_its_own_distinct_id():
+    result = normalize_ingredient_name("Unsalted Butter")
+    assert result.canonical_id == "unsalted_butter"
+    assert result.status == NormalizationStatus.EXACT
+
+
+def test_salted_butter_normalizes_to_its_own_distinct_id():
+    result = normalize_ingredient_name("Salted Butter")
+    assert result.canonical_id == "salted_butter"
+    assert result.status == NormalizationStatus.EXACT
+
+
+def test_generic_butter_is_unaffected_by_the_salted_unsalted_addition():
+    result = normalize_ingredient_name("Butter")
+    assert result.canonical_id == "butter"
+    assert result.status == NormalizationStatus.EXACT
+
+
+def test_salted_and_unsalted_butter_never_collapse_into_each_other():
+    salted = normalize_ingredient_name("salted butter")
+    unsalted = normalize_ingredient_name("unsalted butter")
+    assert salted.canonical_id == "salted_butter"
+    assert unsalted.canonical_id == "unsalted_butter"
+    assert salted.canonical_id != unsalted.canonical_id

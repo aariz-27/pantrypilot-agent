@@ -32,6 +32,11 @@ CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
         "bell_pepper",
         "ginger",
         "butter",
+        # Distinct from generic "butter": recipes may explicitly require
+        # one or the other, and substituting between them is never done
+        # silently (Founder decision, essential-ingredient audit).
+        "salted_butter",
+        "unsalted_butter",
         "milk",
         "salt",
         "black_pepper",

@@ -1,8 +1,15 @@
+import os
+
 import pytest
 
 from app.db.connection import connection_scope
 from app.db.schema import create_schema
 from app.repositories.price_repository import PriceRepository
+from scripts.load_manual_price_entries import load_manual_entries
+
+MANUAL_ENTRIES_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "manual", "manual_price_entries.json"
+)
 
 
 @pytest.fixture()
@@ -90,3 +97,97 @@ def test_repository_never_writes(db_path):
     with connection_scope(db_path, read_only=True) as connection:
         count = connection.execute("SELECT COUNT(*) AS c FROM ingredient_prices").fetchone()["c"]
     assert count == 1
+
+
+# --- salted/unsalted butter + ginger manual gap-fill (essential-ingredient audit, 2026-09-06) ---
+
+
+@pytest.fixture()
+def db_path_with_butter_variants(db_path):
+    with connection_scope(db_path, read_only=False) as connection:
+        connection.executemany(
+            """
+            INSERT INTO manual_price_entries (
+                canonical_id, normalized_unit, display_name, normalized_price_per_unit,
+                package_quantity, package_unit, package_price_aed, normalized_package_quantity,
+                source_type, provenance_note, collected_at
+            ) VALUES (?, 'g', ?, 0.06925, 200, 'g', 13.85, 200, 'manual_curated', ?, '2026-09-06')
+            """,
+            [
+                ("unsalted_butter", "Unsalted Butter", "Founder-approved manual price"),
+                ("salted_butter", "Salted Butter", "Founder-approved manual price"),
+            ],
+        )
+        connection.commit()
+    return db_path
+
+
+def test_salted_and_unsalted_butter_both_resolve_via_manual_fallback(db_path_with_butter_variants):
+    repo = PriceRepository(db_path_with_butter_variants)
+    unsalted = repo.get_price("unsalted_butter")
+    salted = repo.get_price("salted_butter")
+    assert unsalted is not None and unsalted.source_type == "manual_curated"
+    assert salted is not None and salted.source_type == "manual_curated"
+
+
+def test_salted_and_unsalted_butter_remain_distinct_lookups(db_path_with_butter_variants):
+    # Founder decision: salted and unsalted butter must never be silently
+    # substituted for one another. Looking one up must never accidentally
+    # return the other's row.
+    repo = PriceRepository(db_path_with_butter_variants)
+    unsalted = repo.get_price("unsalted_butter")
+    salted = repo.get_price("salted_butter")
+    assert unsalted.canonical_id == "unsalted_butter"
+    assert salted.canonical_id == "salted_butter"
+    assert unsalted.canonical_id != salted.canonical_id
+
+
+def test_generic_butter_still_not_found_when_only_variants_have_manual_entries(db_path_with_butter_variants):
+    # Adding salted_butter/unsalted_butter manual entries must not make
+    # generic "butter" resolve to either of them (no silent substitution).
+    repo = PriceRepository(db_path_with_butter_variants)
+    assert repo.get_price("butter") is None
+
+
+def test_committed_manual_price_entries_json_loads_and_resolves_all_three_entries(tmp_path):
+    # Independent review finding (2026-09-06): prior tests only exercised
+    # hand-inserted fixture rows, never the actual committed
+    # backend/data/manual/manual_price_entries.json through the real
+    # loader. This test loads that exact committed file via the real
+    # scripts.load_manual_price_entries.load_manual_entries() entry point
+    # and verifies every one of its three Founder-approved entries --
+    # especially ginger -- returns the exact expected normalized value
+    # through PriceRepository.
+    db_path = str(tmp_path / "manual_entries_test.db")
+
+    loaded_count = load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
+    assert loaded_count == 3
+
+    repo = PriceRepository(db_path)
+
+    unsalted = repo.get_price("unsalted_butter")
+    assert unsalted is not None
+    assert unsalted.source_type == "manual_curated"
+    assert unsalted.normalized_unit == "g"
+    assert unsalted.normalized_price_per_unit == pytest.approx(0.06925)
+    assert unsalted.package_quantity == 200
+    assert unsalted.package_price_aed == pytest.approx(13.85)
+
+    salted = repo.get_price("salted_butter")
+    assert salted is not None
+    assert salted.source_type == "manual_curated"
+    assert salted.normalized_unit == "g"
+    assert salted.normalized_price_per_unit == pytest.approx(0.06925)
+    assert salted.package_quantity == 200
+    assert salted.package_price_aed == pytest.approx(13.85)
+
+    ginger = repo.get_price("ginger")
+    assert ginger is not None
+    assert ginger.source_type == "manual_curated"
+    assert ginger.normalized_unit == "g"
+    assert ginger.normalized_price_per_unit == pytest.approx(0.01296)
+    assert ginger.package_quantity == 250
+    assert ginger.package_price_aed == pytest.approx(3.24)
+
+    # Distinctness holds even when loaded from the real committed file.
+    assert salted.canonical_id != unsalted.canonical_id != ginger.canonical_id

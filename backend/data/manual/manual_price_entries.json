@@ -1,1 +1,35 @@
-[]
+[
+  {
+    "canonical_id": "unsalted_butter",
+    "normalized_unit": "g",
+    "display_name": "Unsalted Butter",
+    "normalized_price_per_unit": 0.06925,
+    "package_quantity": 200,
+    "package_unit": "g",
+    "package_price_aed": 13.85,
+    "normalized_package_quantity": 200,
+    "provenance_note": "Founder-approved manual price, essential-ingredient price coverage audit (2026-09-06): 200 g package, AED 13.85. LuLu export contains real unsalted butter products but generic productType \"Butter\" is not split by salted/unsalted in this ticket; distinct pricing is manual-only pending a future taxonomy split."
+  },
+  {
+    "canonical_id": "salted_butter",
+    "normalized_unit": "g",
+    "display_name": "Salted Butter",
+    "normalized_price_per_unit": 0.06925,
+    "package_quantity": 200,
+    "package_unit": "g",
+    "package_price_aed": 13.85,
+    "normalized_package_quantity": 200,
+    "provenance_note": "Founder-approved manual price, essential-ingredient price coverage audit (2026-09-06): 200 g package, AED 13.85. LuLu export contains real salted butter products but generic productType \"Butter\" is not split by salted/unsalted in this ticket; distinct pricing is manual-only pending a future taxonomy split."
+  },
+  {
+    "canonical_id": "ginger",
+    "normalized_unit": "g",
+    "display_name": "Ginger",
+    "normalized_price_per_unit": 0.01296,
+    "package_quantity": 250,
+    "package_unit": "g",
+    "package_price_aed": 3.24,
+    "normalized_package_quantity": 250,
+    "provenance_note": "Founder-approved manual price, essential-ingredient price coverage audit (2026-09-06): 250 g package, AED 3.24. Real LuLu titles exist (e.g. \"Ginger India 200 g\") under productType \"Chillies & Spicy\", which has no keyword-family mapping rule in the current taxonomy -- taxonomy-unmapped from LuLu, closed via manual fallback instead."
+  }
+]

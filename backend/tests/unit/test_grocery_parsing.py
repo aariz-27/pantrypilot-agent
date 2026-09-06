@@ -278,6 +278,27 @@ def test_mozzarella_and_other_grated_cheese_disambiguates_by_title():
     assert resolve_canonical_id("Mozzarella & Other Grated Cheese", "Sargento Off The Block Traditional Cut 4 Cheese Mexican 226 g") == "mixed_shredded_cheese"
 
 
+def test_ginger_stays_taxonomy_unmapped_from_lulu_despite_manual_gap_fill():
+    # Essential-ingredient audit (2026-09-06): "ginger" is registered as a
+    # recognized canonical ID (see grocery_taxonomy.MANUAL_ONLY_CANONICAL_
+    # INGREDIENTS) so a Founder-reviewed manual price entry can exist for
+    # it, but this must NOT make real LuLu ingestion suddenly map ginger
+    # products -- there is still no productType rule for "Chillies &
+    # Spicy", so ingestion-time resolution is unchanged.
+    assert resolve_canonical_id("Chillies & Spicy", "Ginger India 200 g") is None
+    assert resolve_canonical_id("Chillies & Spicy", "Ginger China 250 g") is None
+
+
+def test_generic_butter_productype_mapping_unaffected_by_salted_unsalted_addition():
+    # Registering salted_butter/unsalted_butter as recognized canonical
+    # IDs must not change how real LuLu "Butter" productType titles
+    # ingest -- productType "Butter" remains fixed-mapped to generic
+    # "butter" for both salted and unsalted real titles (Founder decision:
+    # do not repurpose or re-split generic butter in this ticket).
+    assert resolve_canonical_id("Butter", "Lurpak Butter Block Salted 400 g") == "butter"
+    assert resolve_canonical_id("Butter", "Almarai Unsalted Natural Butter 200 g") == "butter"
+
+
 def test_speciality_cheese_never_counts_a_non_cheese_dip_as_cheese():
     # Finding 1+2 combined: "Moutabal" (an eggplant dip) genuinely
     # appears under productType "Speciality Cheese" in the real export.
