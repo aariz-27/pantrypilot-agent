@@ -1,8 +1,15 @@
+import os
+
 import pytest
 
 from app.db.connection import connection_scope
 from app.db.schema import create_schema
 from app.repositories.price_repository import PriceRepository
+from scripts.load_manual_price_entries import load_manual_entries
+
+MANUAL_ENTRIES_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "manual", "manual_price_entries.json"
+)
 
 
 @pytest.fixture()
@@ -140,3 +147,47 @@ def test_generic_butter_still_not_found_when_only_variants_have_manual_entries(d
     # generic "butter" resolve to either of them (no silent substitution).
     repo = PriceRepository(db_path_with_butter_variants)
     assert repo.get_price("butter") is None
+
+
+def test_committed_manual_price_entries_json_loads_and_resolves_all_three_entries(tmp_path):
+    # Independent review finding (2026-09-06): prior tests only exercised
+    # hand-inserted fixture rows, never the actual committed
+    # backend/data/manual/manual_price_entries.json through the real
+    # loader. This test loads that exact committed file via the real
+    # scripts.load_manual_price_entries.load_manual_entries() entry point
+    # and verifies every one of its three Founder-approved entries --
+    # especially ginger -- returns the exact expected normalized value
+    # through PriceRepository.
+    db_path = str(tmp_path / "manual_entries_test.db")
+
+    loaded_count = load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
+    assert loaded_count == 3
+
+    repo = PriceRepository(db_path)
+
+    unsalted = repo.get_price("unsalted_butter")
+    assert unsalted is not None
+    assert unsalted.source_type == "manual_curated"
+    assert unsalted.normalized_unit == "g"
+    assert unsalted.normalized_price_per_unit == pytest.approx(0.06925)
+    assert unsalted.package_quantity == 200
+    assert unsalted.package_price_aed == pytest.approx(13.85)
+
+    salted = repo.get_price("salted_butter")
+    assert salted is not None
+    assert salted.source_type == "manual_curated"
+    assert salted.normalized_unit == "g"
+    assert salted.normalized_price_per_unit == pytest.approx(0.06925)
+    assert salted.package_quantity == 200
+    assert salted.package_price_aed == pytest.approx(13.85)
+
+    ginger = repo.get_price("ginger")
+    assert ginger is not None
+    assert ginger.source_type == "manual_curated"
+    assert ginger.normalized_unit == "g"
+    assert ginger.normalized_price_per_unit == pytest.approx(0.01296)
+    assert ginger.package_quantity == 250
+    assert ginger.package_price_aed == pytest.approx(3.24)
+
+    # Distinctness holds even when loaded from the real committed file.
+    assert salted.canonical_id != unsalted.canonical_id != ginger.canonical_id
