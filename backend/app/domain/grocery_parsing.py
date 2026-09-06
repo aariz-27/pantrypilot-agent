@@ -14,7 +14,6 @@ from app.domain.grocery_taxonomy import (
     CANONICAL_GROCERY_INGREDIENTS,
     GROCERY_INGREDIENT_ALIASES,
     PRODUCT_TYPE_FIXED_CANONICAL,
-    PRODUCT_TYPE_KEYWORD_DEFAULT,
     PRODUCT_TYPE_KEYWORD_RULES,
 )
 from app.domain.ingredient_normalizer import normalize_ingredient_name
@@ -72,6 +71,22 @@ _COUNT_UNITS: dict[str, tuple[str, float]] = {"pcs": ("pcs", 1.0), "pc": ("pcs",
 
 _SUPPORTED_UNIT_TOKEN = r"(?:kg|g|ml|litres?|l|pcs?|pc)"
 
+# A range ("1.2 kg-1.5 kg", "(1 kg - 1.3 kg)") is inherently approximate.
+# Checked before every other pattern so its first number is never
+# silently accepted as if it were exact -- DEC-013/the approved policy
+# requires ranges to remain unresolved rather than fabricate precision.
+_RANGE_PATTERN = re.compile(
+    rf"\d+(?:\.\d+)?\s*{_SUPPORTED_UNIT_TOKEN}\s*-\s*\d+(?:\.\d+)?\s*{_SUPPORTED_UNIT_TOKEN}\b",
+    re.IGNORECASE,
+)
+# An additive bundle ("2 kg + 1 kg", "900 g + 200 g") is an unambiguous
+# same-dimension total -- both sides are real, exact numbers, so
+# summing them (after normalizing each side) is not a fabrication the
+# way accepting only the first number would be.
+_ADDITIVE_PATTERN = re.compile(
+    rf"(?P<qty1>\d+(?:\.\d+)?)\s*(?P<unit1>{_SUPPORTED_UNIT_TOKEN})\s*\+\s*(?P<qty2>\d+(?:\.\d+)?)\s*(?P<unit2>{_SUPPORTED_UNIT_TOKEN})\b",
+    re.IGNORECASE,
+)
 _MULTIPACK_PATTERN = re.compile(
     rf"(?P<count>\d+(?:\.\d+)?)\s*[x×]\s*(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>{_SUPPORTED_UNIT_TOKEN})\b",
     re.IGNORECASE,
@@ -118,6 +133,19 @@ def parse_package_content(content: object) -> ParsedPackage:
     DEC-013 forbids inventing mass/volume conversions for them, and
     forbids silently guessing the gallon standard.
 
+    Two additional real-data cases (independent review finding,
+    2026-09-06) are handled explicitly rather than left to the generic
+    single-quantity search, which would otherwise silently accept only
+    the first number in either case:
+
+    - Ranges ("1.2 kg-1.5 kg", "(1 kg - 1.3 kg) Approx. Weight") are
+      always unresolved -- an approximate range is never narrowed to
+      one fabricated endpoint.
+    - Additive same-dimension bundles ("2 kg + 1 kg", "900 g + 200 g")
+      are totaled -- both sides are real, exact numbers, so summing
+      them is not a fabrication; a cross-dimension "+" is left
+      unresolved rather than guessed.
+
     Returns an all-None ParsedPackage when nothing reliable is found;
     never guesses a quantity or unit.
     """
@@ -125,6 +153,38 @@ def parse_package_content(content: object) -> ParsedPackage:
         return _EMPTY_PACKAGE
 
     text = content.strip()
+
+    # Checked first: a range is always ambiguous, regardless of what
+    # any other pattern might otherwise match within the same string.
+    if _RANGE_PATTERN.search(text):
+        return _EMPTY_PACKAGE
+
+    additive_match = _ADDITIVE_PATTERN.search(text)
+    if additive_match:
+        unit1_token = additive_match.group("unit1").lower()
+        unit2_token = additive_match.group("unit2").lower()
+        normalized_unit1, factor1 = _resolve_unit(unit1_token)
+        normalized_unit2, factor2 = _resolve_unit(unit2_token)
+        if (
+            normalized_unit1 is not None
+            and normalized_unit1 == normalized_unit2
+        ):
+            qty1 = float(additive_match.group("qty1"))
+            qty2 = float(additive_match.group("qty2"))
+            total_normalized = qty1 * factor1 + qty2 * factor2
+            return ParsedPackage(
+                package_quantity=None,
+                package_unit=None,
+                multipack_count=None,
+                normalized_total_quantity=round(total_normalized, 4),
+                normalized_unit=normalized_unit1,
+                basis_source=PackageBasisSource.CONTENT_FIELD,
+                unsupported_unit_token=None,
+            )
+        # Different dimensions on either side of "+" (should not occur
+        # for the supported unit set, but defensively): never guess a
+        # cross-dimension total -- fall through to remain unresolved.
+        return _EMPTY_PACKAGE
 
     multipack_match = _MULTIPACK_PATTERN.search(text)
     if multipack_match:
@@ -200,9 +260,12 @@ def resolve_canonical_id(product_type: object, title: object) -> str | None:
         for keyword, canonical_id in PRODUCT_TYPE_KEYWORD_RULES[product_type_str]:
             if keyword in title_lower:
                 return canonical_id
-        default = PRODUCT_TYPE_KEYWORD_DEFAULT.get(product_type_str)
-        if default is not None:
-            return default
+        # No default: independent review (2026-09-06) found that
+        # guessing the "statistically standard" variant here (e.g.
+        # unmatched Fresh Milk -> full_fat_milk) conflicts with DEC-013's
+        # "uncertain mappings remain unresolved" rule. Falls through to
+        # UNMAPPED_INGREDIENT below rather than any productType-family
+        # default.
 
     if title_lower:
         # Substring alias match against noisy full product titles (titles

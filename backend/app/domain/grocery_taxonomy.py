@@ -32,10 +32,11 @@ Mapping strategy, in order, per product:
    canonical ID unambiguously.
 3. PRODUCT_TYPE_KEYWORD_RULES -- productType is a family (e.g. "Fresh
    Milk"); the title's keywords pick the specific canonical ID within
-   that family. PRODUCT_TYPE_KEYWORD_DEFAULT supplies a fallback within
-   the family when no keyword matches (documented per-case below; this
-   picks the statistically standard retail variant, e.g. full-fat milk,
-   never a fabricated price/quantity value).
+   that family, most specific phrase first. There is NO default: a
+   family title matching none of its keywords is UNMAPPED_INGREDIENT,
+   per DEC-013's "uncertain mappings remain unresolved" rule (a prior
+   keyword-default mechanism that guessed the "statistically standard"
+   variant was removed after independent review, 2026-09-06).
 4. Fall through to the shared alias/vocabulary match (title text against
    CANONICAL_GROCERY_INGREDIENTS / GROCERY_INGREDIENT_ALIASES) via the
    same normalize_ingredient_name() PP-001 already provides.
@@ -87,11 +88,18 @@ EXCLUDED_PRODUCT_TYPES: frozenset[str] = frozenset(
 
 PRODUCT_TYPE_FIXED_CANONICAL: dict[str, str] = {
     # Dairy / cheese / eggs
-    "Feta & White Cheese": "feta_cheese",
     "Cheddar Cheese": "cheddar_cheese",
-    "Mozzarella & Other Grated Cheese": "mozzarella_cheese",
     "Cheese Slices": "processed_cheese_slices",
-    "Cream Cheese & Spreads": "cream_cheese",
+    # NOTE: "Feta & White Cheese", "Mozzarella & Other Grated Cheese", and
+    # "Cream Cheese & Spreads" are intentionally NOT fixed-mapped here.
+    # Independent review (2026-09-06) found these productType buckets are
+    # not reliable single-ingredient signals in the real export -- e.g.
+    # "Puck Cream Cheese Spread 300 g" carries productType "Feta & White
+    # Cheese", and "Mozzarella & Other Grated Cheese" contains Parmesan,
+    # Cheddar, and mixed blends. They are handled as title-keyword-driven
+    # families in PRODUCT_TYPE_KEYWORD_RULES below instead, with no
+    # default -- an unmatched title in these families is UNMAPPED, never
+    # guessed from the productType label alone.
     "Laban": "laban",
     "Kefir": "kefir",
     "Plain Yoghurt": "plain_yoghurt",
@@ -271,15 +279,27 @@ PRODUCT_TYPE_KEYWORD_RULES: dict[str, list[tuple[str, str]]] = {
         ("full cream", "full_fat_milk"),
     ],
     "Chicken Breasts": [
+        # Real titles state the form explicitly ("Boneless", "Boneless/
+        # Skinless", "Fillet", "Cubes", "Bone In") -- each keyword here
+        # is real title evidence, not a guess; a title with none of
+        # these is correctly UNMAPPED rather than defaulted.
+        ("cubes", "chicken_breast_cubes"),
+        ("boneless", "boneless_chicken_breast"),
+        ("fillet", "boneless_chicken_breast"),
         ("bone in", "chicken_breast"),
         ("bone-in", "chicken_breast"),
     ],
     "Frozen Chicken Breasts": [
+        ("cubes", "chicken_breast_cubes"),
+        ("boneless", "boneless_chicken_breast"),
+        ("fillet", "boneless_chicken_breast"),
         ("bone in", "chicken_breast"),
         ("bone-in", "chicken_breast"),
     ],
     "Chicken Thighs": [
         ("boneless", "boneless_chicken_thigh"),
+        ("bone in", "chicken_thigh"),
+        ("bone-in", "chicken_thigh"),
     ],
     "Beef Cuts": [
         ("ribeye", "beef_ribeye"),
@@ -320,9 +340,17 @@ PRODUCT_TYPE_KEYWORD_RULES: dict[str, list[tuple[str, str]]] = {
         ("kingfish", "kingfish_fillet"),
     ],
     "Potatoes & Starchy Vegetables": [
-        ("potato", "potato"),
+        # More specific multi-word phrases MUST be checked before the
+        # generic "potato" substring they contain (independent review
+        # finding, 2026-09-06): "Sweet Potato Egypt 500 g" previously
+        # matched generic "potato" first and was wrongly mapped as plain
+        # potato.
         ("sweet potato", "sweet_potato"),
         ("cassava", "cassava"),
+        ("tapioca", "cassava"),
+        ("yam", "yam"),
+        ("aravi", "taro"),
+        ("potato", "potato"),
     ],
     "Cabbage & Broccoli": [
         ("broccoli", "broccoli"),
@@ -385,15 +413,35 @@ PRODUCT_TYPE_KEYWORD_RULES: dict[str, list[tuple[str, str]]] = {
         ("meat", "meat_masala"),
     ],
     "Pulses": [
-        ("lentil", "lentils"),
-        ("daal", "lentils"),
-        ("dal", "lentils"),
-        ("chickpea", "chickpeas"),
-        ("channa", "chickpeas"),
+        # Same ordering bug class as Potatoes & Starchy Vegetables
+        # (independent review finding, 2026-09-06): "dal"/"daal" is a
+        # substring of "moong dal", "chana dal", "toor dal", "urid dal" --
+        # every multi-word specific phrase must be checked before the
+        # generic single-word fallback that would otherwise match first
+        # and misclassify it (e.g. "LuLu Moong Dal 800 g" wrongly landing
+        # on generic lentils instead of moong_dal).
+        ("chana dal", "chana_dal"),
+        ("toor dal", "toor_dal"),
+        ("tur dal", "toor_dal"),
+        ("moong dal", "moong_dal"),
+        ("urid dal", "urad_dal"),
+        ("urad dal", "urad_dal"),
+        ("masoor", "lentils"),
         ("kidney bean", "kidney_beans"),
         ("rajma", "kidney_beans"),
-        ("black gram", "black_gram"),
-        ("moong", "moong_dal"),
+        ("black eye", "black_eyed_peas"),
+        ("green pea", "green_peas"),
+        ("chana", "chickpeas"),
+        ("channa", "chickpeas"),
+        ("chic pea", "chickpeas"),
+        ("chickpea", "chickpeas"),
+        ("toor", "toor_dal"),
+        ("urid", "urad_dal"),
+        ("urad", "urad_dal"),
+        ("moong", "mung_bean"),
+        ("dal", "lentils"),
+        ("daal", "lentils"),
+        ("lentil", "lentils"),
     ],
     "Flour": [
         ("whole wheat", "whole_wheat_flour"),
@@ -404,23 +452,80 @@ PRODUCT_TYPE_KEYWORD_RULES: dict[str, list[tuple[str, str]]] = {
         ("gram flour", "gram_flour"),
         ("besan", "gram_flour"),
     ],
+    # The following cheese productType families are independent-review
+    # findings (2026-09-06): LuLu's own category labels ("Feta & White
+    # Cheese", "Mozzarella & OTHER Grated Cheese") are themselves
+    # heterogeneous store-aisle groupings, not reliable single-ingredient
+    # signals -- real examples include "Puck Cream Cheese Spread 300 g"
+    # filed under "Feta & White Cheese", and Parmesan/Cheddar/Emmental
+    # filed under "Mozzarella & Other Grated Cheese". Every entry here is
+    # title-keyword-driven with NO default -- an unmatched title is
+    # UNMAPPED, never guessed from the productType label alone.
+    "Feta & White Cheese": [
+        ("halloumi", "halloumi_cheese"),
+        ("cream cheese", "cream_cheese"),
+        ("cottage cheese", "cottage_cheese"),
+        ("mascarpone", "mascarpone_cheese"),
+        ("brie", "brie_cheese"),
+        ("camembert", "camembert_cheese"),
+        ("kashkaval", "kashkaval_cheese"),
+        ("kashkawan", "kashkaval_cheese"),
+        ("ricotta", "ricotta_cheese"),
+        ("akkawi", "akkawi_cheese"),
+        ("akawi", "akkawi_cheese"),
+        ("paneer", "paneer"),
+        ("burrata", "burrata_cheese"),
+        ("romano", "romano_cheese"),
+        ("feta", "feta_cheese"),
+        ("white cheese", "white_cheese"),
+    ],
+    "Mozzarella & Other Grated Cheese": [
+        ("mozzarella", "mozzarella_cheese"),
+        ("parmesan", "parmesan_cheese"),
+        ("romano", "romano_cheese"),
+        ("emmental", "emmental_cheese"),
+        ("cheddar", "cheddar_cheese"),
+        ("4 cheese", "mixed_shredded_cheese"),
+        ("four cheese", "mixed_shredded_cheese"),
+        ("mexican cheese", "mixed_shredded_cheese"),
+        ("cheese blend", "mixed_shredded_cheese"),
+        ("cheese mix", "mixed_shredded_cheese"),
+    ],
+    "Cream Cheese & Spreads": [
+        ("cheddar", "cheddar_cheese"),
+        ("cream cheese", "cream_cheese"),
+        ("white cheese", "white_cheese"),
+        ("cheez", "cream_cheese"),
+        ("cheeze", "cream_cheese"),
+    ],
+    "Speciality Cheese": [
+        ("labneh", "labneh"),
+        ("halloumi", "halloumi_cheese"),
+        ("gouda", "gouda_cheese"),
+        ("kashkaval", "kashkaval_cheese"),
+        ("kashkawan", "kashkaval_cheese"),
+        ("grana padano", "parmesan_cheese"),
+        ("parmesan", "parmesan_cheese"),
+        ("brie", "brie_cheese"),
+        ("gruyere", "gruyere_cheese"),
+        ("blue cheese", "blue_cheese"),
+        ("string cheese", "string_cheese"),
+        ("roumy", "roumy_cheese"),
+        # "Moutabal" (an eggplant dip) genuinely appears under this
+        # productType in the real export -- intentionally no rule for
+        # it, so it correctly falls through to UNMAPPED rather than
+        # being counted as a cheese.
+    ],
 }
 
-# Default canonical ID used when a family productType's title matches none
-# of its keyword rules. Each default is the statistically standard retail
-# variant for that family in this market -- a taxonomy/default-naming
-# decision, never a fabricated price or package size.
-PRODUCT_TYPE_KEYWORD_DEFAULT: dict[str, str] = {
-    "Fresh Milk": "full_fat_milk",
-    "Chicken Breasts": "boneless_chicken_breast",
-    "Frozen Chicken Breasts": "boneless_chicken_breast",
-    "Chicken Thighs": "chicken_thigh",
-    "Lamb & Mutton Chops & Cuts": "lamb_chops",
-    "Cabbage & Broccoli": "cabbage",
-    "Courgettes & Artichoke": "zucchini",
-    "Peas & Beans": "green_beans",
-    "Flour": "plain_flour",
-}
+# NOTE: a PRODUCT_TYPE_KEYWORD_DEFAULT ("guess the standard retail
+# variant when no keyword matches") previously existed here and was
+# removed per independent review (2026-09-06): defaulting e.g. unmatched
+# "Fresh Milk" titles to full_fat_milk, or unmatched "Flour" titles to
+# plain_flour, conflicts with DEC-013's "uncertain mappings remain
+# unresolved" rule. A family productType whose title matches none of its
+# PRODUCT_TYPE_KEYWORD_RULES now falls through to UNMAPPED_INGREDIENT --
+# never a guessed canonical ID.
 
 # ---------------------------------------------------------------------------
 # 4. Additional title-level aliases (Founder-specified regional synonyms),
@@ -452,6 +557,5 @@ GROCERY_INGREDIENT_ALIASES: dict[str, str] = {
 CANONICAL_GROCERY_INGREDIENTS: frozenset[str] = frozenset(
     set(PRODUCT_TYPE_FIXED_CANONICAL.values())
     | {cid for rules in PRODUCT_TYPE_KEYWORD_RULES.values() for _, cid in rules}
-    | set(PRODUCT_TYPE_KEYWORD_DEFAULT.values())
     | set(GROCERY_INGREDIENT_ALIASES.values())
 )

@@ -139,13 +139,51 @@ def test_parse_gallon_never_silently_converted_to_litres():
     assert result.unsupported_unit_token == "gallon"
 
 
-def test_parse_malformed_content_returns_all_none():
+def test_parse_malformed_range_content_never_fabricates_precision():
+    # Independent review finding (2026-09-06): this real, malformed
+    # scraper-artifact range must NOT resolve to its first number (1.2
+    # kg) -- a range is always ambiguous, so it must stay fully
+    # unresolved rather than silently accepting one endpoint.
     result = parse_package_content("1.2 kg-1.5 kg Appro x. Weight")
-    # Malformed/corrupted content must never be guessed at -- either it
-    # cleanly resolves or it does not; a partial/garbled match is not
-    # acceptable. This scraper-artifact string must not silently yield
-    # a fabricated quantity.
-    assert result.normalized_unit is None or result.package_quantity is not None
+    assert result.normalized_unit is None
+    assert result.normalized_total_quantity is None
+    assert result.package_quantity is None
+
+
+def test_parse_clean_range_content_stays_unresolved():
+    # Real example from the Founder export: "Pineapple India 1 pc (1 kg - 1.3 kg)"
+    result = parse_package_content("(1 kg - 1.3 kg)")
+    assert result.normalized_unit is None
+    assert result.normalized_total_quantity is None
+
+
+def test_parse_additive_same_unit_bundle_totals_deterministically():
+    # Real examples: "Sadia Frozen Tender Chicken Breast 2 kg + 1 kg",
+    # "Al Baker All Purpose Flour No.1 2 kg + 1 kg" -- an unambiguous
+    # same-dimension total, not a fabrication (both numbers are real).
+    result = parse_package_content("2 kg + 1 kg")
+    assert result.normalized_total_quantity == 3000
+    assert result.normalized_unit == "g"
+
+
+def test_parse_additive_bundle_mixed_mass_units_converts_and_sums():
+    result = parse_package_content("900 g + 200 g")
+    assert result.normalized_total_quantity == 1100
+    assert result.normalized_unit == "g"
+
+    # kg and g both normalize to the same base unit, so mixing them in
+    # an additive bundle is still an unambiguous, correct total.
+    result2 = parse_package_content("1 kg + 500 g")
+    assert result2.normalized_total_quantity == 1500
+    assert result2.normalized_unit == "g"
+
+
+def test_parse_additive_bundle_incompatible_dimensions_stays_unresolved():
+    # Defensive: a "+" bundle spanning two different dimensions must
+    # never be guessed at.
+    result = parse_package_content("2 kg + 3 pcs")
+    assert result.normalized_unit is None
+    assert result.normalized_total_quantity is None
 
 
 def test_parse_empty_or_missing_content():
@@ -168,8 +206,14 @@ def test_resolve_canonical_id_fixed_product_type():
     assert resolve_canonical_id("Whole Chicken", "Fresh Whole Chicken 1.5 kg") == "whole_chicken"
 
 
-def test_resolve_canonical_id_keyword_family_default():
-    assert resolve_canonical_id("Fresh Milk", "Some Brand Fresh Milk 1 L") == "full_fat_milk"
+def test_resolve_canonical_id_keyword_family_with_no_evidence_is_unmapped_not_guessed():
+    # Independent review (2026-09-06): a family productType whose title
+    # carries no distinguishing keyword must be UNMAPPED, never defaulted
+    # to a guessed "standard" variant (DEC-013's uncertain-mappings-stay-
+    # unresolved rule).
+    assert resolve_canonical_id("Fresh Milk", "Some Brand Fresh Milk 1 L") is None
+    assert resolve_canonical_id("Flour", "Some Brand Flour 1 kg") is None
+    assert resolve_canonical_id("Peas & Beans", "Some Brand Mixed 500 g") is None
 
 
 def test_resolve_canonical_id_keyword_family_specific_match():
@@ -190,3 +234,54 @@ def test_resolve_canonical_id_masala_never_collapses_into_component_spice():
     result = resolve_canonical_id("Masala", "National Biryani Masala 200 g")
     assert result == "biryani_masala"
     assert result not in ("turmeric", "cumin", "black_pepper", "coriander_powder")
+
+
+# --- independent review regression tests (2026-09-06) -------------------------------
+
+
+def test_sweet_potato_never_maps_to_generic_potato():
+    # Finding 4: "potato" is a substring of "sweet potato"; the more
+    # specific phrase must be checked first.
+    assert resolve_canonical_id("Potatoes & Starchy Vegetables", "Sweet Potato Egypt 500 g") == "sweet_potato"
+    assert resolve_canonical_id("Potatoes & Starchy Vegetables", "Potato Lebanon 1 kg") == "potato"
+
+
+def test_moong_dal_never_maps_to_generic_lentils():
+    # Finding 4: "dal" is a substring of "moong dal"/"chana dal"/"toor
+    # dal"/"urid dal"; each specific phrase must be checked before the
+    # generic "dal" fallback.
+    assert resolve_canonical_id("Pulses", "LuLu Moong Dal 800 g") == "moong_dal"
+    assert resolve_canonical_id("Pulses", "LuLu Chana Dal 800 g") == "chana_dal"
+    assert resolve_canonical_id("Pulses", "Bayara Toor Dal 400 g") == "toor_dal"
+    assert resolve_canonical_id("Pulses", "Bayara Urid Dal 400 g") == "urad_dal"
+    assert resolve_canonical_id("Pulses", "LuLu Masoor Dal 800 g") == "lentils"
+
+
+def test_feta_white_cheese_product_type_is_not_treated_as_universally_feta():
+    # Finding 2: real example -- "Puck Cream Cheese Spread 300 g" carries
+    # productType "Feta & White Cheese" in the actual export.
+    assert resolve_canonical_id("Feta & White Cheese", "Puck Cream Cheese Spread 300 g") == "cream_cheese"
+    assert resolve_canonical_id("Feta & White Cheese", "Almarai Full Fat Feta Cheese 200 g") == "feta_cheese"
+    assert resolve_canonical_id("Feta & White Cheese", "Puck Halloumi Cheese 200 g") == "halloumi_cheese"
+    assert resolve_canonical_id("Feta & White Cheese", "Belgioioso Mascarpone Creamy Spreadable Cheese 226 g") == "mascarpone_cheese"
+    # A title with no specific cheese-type keyword is UNMAPPED, not
+    # guessed as feta merely because of the productType label.
+    assert resolve_canonical_id("Feta & White Cheese", "Muratbey Anatolian Mix Cheese 200 g") is None
+
+
+def test_mozzarella_and_other_grated_cheese_disambiguates_by_title():
+    # Finding 2: this productType genuinely contains Parmesan, Cheddar,
+    # and mixed blends in the real export, not just mozzarella.
+    assert resolve_canonical_id("Mozzarella & Other Grated Cheese", "The Three Cows Shredded Mozzarella Cheese 200 g") == "mozzarella_cheese"
+    assert resolve_canonical_id("Mozzarella & Other Grated Cheese", "Crystal Farms Parmesan Cheese 226 g") == "parmesan_cheese"
+    assert resolve_canonical_id("Mozzarella & Other Grated Cheese", "President Shredded Cheddar Cheese 200 g") == "cheddar_cheese"
+    assert resolve_canonical_id("Mozzarella & Other Grated Cheese", "Sargento Off The Block Traditional Cut 4 Cheese Mexican 226 g") == "mixed_shredded_cheese"
+
+
+def test_speciality_cheese_never_counts_a_non_cheese_dip_as_cheese():
+    # Finding 1+2 combined: "Moutabal" (an eggplant dip) genuinely
+    # appears under productType "Speciality Cheese" in the real export.
+    # With no default, it correctly falls through to UNMAPPED.
+    assert resolve_canonical_id("Speciality Cheese", "Smart Gourmet Classic Moutabal 200 g") is None
+    assert resolve_canonical_id("Speciality Cheese", "Fresh Labneh With Zaatar 250 g") == "labneh"
+    assert resolve_canonical_id("Speciality Cheese", "Dutch Gouda Mild Cheese 250 g") == "gouda_cheese"

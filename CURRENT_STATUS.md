@@ -37,7 +37,7 @@ None currently recorded
 
 **Status:** Implementation complete, PR open, **not merged**
 **Branch:** `feature/pp-003-pricing-cost-engine`
-**Verification:** 236 backend tests passed, 2 warnings (160 existing + 76 new); governance validation passed; CI-equivalent simulation passed.
+**Verification:** 245 backend tests passed, 2 warnings (160 existing + 85 new, including a post-independent-review correction pass fixing four canonical-mapping/parsing findings); governance validation passed; CI-equivalent simulation passed.
 **Requirements advanced:** FR-11, FR-12, AR-07, AR-12 (implemented — see `docs/REQUIREMENTS_TRACEABILITY.md`).
 **Decision recorded:** DEC-013 — Grocery Price Ingestion and Reference Pricing Policy (APPROVED; see `DECISION_REGISTER.md`).
 **Real dataset QA statistics** (Founder-provided LuLu UAE export, 2,699 products, gitignored/local-only, never committed):
@@ -45,16 +45,19 @@ None currently recorded
 | Metric | Value |
 |---|---|
 | Raw imported | 2,699 |
-| Mapped (priceable) | 1,773 |
+| Mapped (priceable) | 1,734 |
 | Filtered out (irrelevant finished products) | 483 |
-| Unresolved/unmapped ingredient | 381 |
+| Unresolved/unmapped ingredient | 419 |
 | Unsupported unit (bunch/pkt/gallon/slices) | 52 |
+| Unparseable package (incl. weight ranges, e.g. "1 kg - 1.3 kg") | 2 |
 | Duplicates | 9 |
-| Incompatible unit groups (never promoted) | 12 |
-| Promoted reference entries | 181 |
-| Distinct canonical ingredients priced | 181 |
-| Unit distribution | g: 153, ml: 24, pcs: 4 |
+| Incompatible unit groups (never promoted) | 11 |
+| Promoted reference entries | 213 |
+| Distinct canonical ingredients priced | 213 |
+| Unit distribution | g: 184, ml: 24, pcs: 5 |
 | Important-ingredient spot-check gaps | 2 (`butter` — blocked by an incompatible-unit-group data-quality flag, sold both by weight and volume in the export; `ginger` — not yet covered by the canonical mapping table) |
+
+**Note:** these figures reflect a correction pass after independent review (2026-09-06) found four correctness issues (unjustified canonical-mapping defaults; an unreliable LuLu `productType` — "Feta & White Cheese" also contains cream cheese, halloumi, mascarpone, etc. in the real export; silent under-parsing of additive/range package strings; a keyword-ordering bug causing "Sweet Potato"/"Moong Dal" to be misclassified as generic potato/lentils). All four were fixed; canonical coverage is now more granular and more accurate (213 vs. the prior run's 181 canonical ingredients) at the honest cost of slightly lower raw mapped coverage (1,734 vs. 1,773 — removed defaults are no longer silently guessed). See PR history for the correction commit.
 
 **Known intentional limitations / deferred scope:** no LLM/agent orchestration, no `/api/recommend` end-to-end wiring, no frontend, no deployment, no live Apify/runtime scraping (ingestion is dev-time only). Taxonomy coverage is intentionally partial (181 of 301 real `productType` values mapped) — the QA table above is exactly the input for deciding whether manual gap-fill (DEC-013's small curated fallback) is worth doing before Module D.
 **Security note:** the real LuLu export (`data/raw/`) and the derived SQLite reference DB are gitignored and were never committed; only a small hand-authored test fixture (`backend/data/fixtures/lulu_sample.json`) and an empty manual-entries mechanism (`backend/data/manual/manual_price_entries.json`) are source-controlled.

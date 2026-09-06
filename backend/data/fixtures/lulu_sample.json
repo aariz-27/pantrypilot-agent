@@ -102,7 +102,7 @@
     "productType": "Chicken Breasts", "inStock": true, "url": "https://example.test/chicken-breast-dup", "scrapedAt": "2026-09-06 10:00:00"
   },
   {
-    "id": "1017", "sku": "SKU1017", "title": "Test Incompatible Unit Chicken Breast 6 pcs", "brand": "Fresh",
+    "id": "1017", "sku": "SKU1017", "title": "Test Incompatible Unit Boneless Chicken Breast 6 pcs", "brand": "Fresh",
     "content": "6 pcs", "price": 25.0, "retailPrice": 25.0, "currency": "aed",
     "category1": "Fresh Food", "category2": "Fresh Meat & Poultry", "category3": null,
     "productType": "Chicken Breasts", "inStock": true, "url": "https://example.test/chicken-breast-pcs", "scrapedAt": "2026-09-06 10:00:00"
