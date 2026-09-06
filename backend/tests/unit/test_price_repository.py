@@ -90,3 +90,53 @@ def test_repository_never_writes(db_path):
     with connection_scope(db_path, read_only=True) as connection:
         count = connection.execute("SELECT COUNT(*) AS c FROM ingredient_prices").fetchone()["c"]
     assert count == 1
+
+
+# --- salted/unsalted butter + ginger manual gap-fill (essential-ingredient audit, 2026-09-06) ---
+
+
+@pytest.fixture()
+def db_path_with_butter_variants(db_path):
+    with connection_scope(db_path, read_only=False) as connection:
+        connection.executemany(
+            """
+            INSERT INTO manual_price_entries (
+                canonical_id, normalized_unit, display_name, normalized_price_per_unit,
+                package_quantity, package_unit, package_price_aed, normalized_package_quantity,
+                source_type, provenance_note, collected_at
+            ) VALUES (?, 'g', ?, 0.06925, 200, 'g', 13.85, 200, 'manual_curated', ?, '2026-09-06')
+            """,
+            [
+                ("unsalted_butter", "Unsalted Butter", "Founder-approved manual price"),
+                ("salted_butter", "Salted Butter", "Founder-approved manual price"),
+            ],
+        )
+        connection.commit()
+    return db_path
+
+
+def test_salted_and_unsalted_butter_both_resolve_via_manual_fallback(db_path_with_butter_variants):
+    repo = PriceRepository(db_path_with_butter_variants)
+    unsalted = repo.get_price("unsalted_butter")
+    salted = repo.get_price("salted_butter")
+    assert unsalted is not None and unsalted.source_type == "manual_curated"
+    assert salted is not None and salted.source_type == "manual_curated"
+
+
+def test_salted_and_unsalted_butter_remain_distinct_lookups(db_path_with_butter_variants):
+    # Founder decision: salted and unsalted butter must never be silently
+    # substituted for one another. Looking one up must never accidentally
+    # return the other's row.
+    repo = PriceRepository(db_path_with_butter_variants)
+    unsalted = repo.get_price("unsalted_butter")
+    salted = repo.get_price("salted_butter")
+    assert unsalted.canonical_id == "unsalted_butter"
+    assert salted.canonical_id == "salted_butter"
+    assert unsalted.canonical_id != salted.canonical_id
+
+
+def test_generic_butter_still_not_found_when_only_variants_have_manual_entries(db_path_with_butter_variants):
+    # Adding salted_butter/unsalted_butter manual entries must not make
+    # generic "butter" resolve to either of them (no silent substitution).
+    repo = PriceRepository(db_path_with_butter_variants)
+    assert repo.get_price("butter") is None

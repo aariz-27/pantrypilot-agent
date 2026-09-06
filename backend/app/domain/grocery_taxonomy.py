@@ -550,6 +550,40 @@ GROCERY_INGREDIENT_ALIASES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# 4b. Canonical grocery ingredients that are recognized identities in this
+# taxonomy but are NOT (yet) produced by any LuLu ingestion mapping rule
+# above. Their reference price comes solely from the DEC-013 manual
+# curated fallback (backend/data/manual/manual_price_entries.json),
+# reviewed by the Founder, per the essential-ingredient price-coverage
+# audit (2026-09-06).
+#
+# Adding an ID here does NOT change ingestion/mapping behavior: it is not
+# referenced by PRODUCT_TYPE_FIXED_CANONICAL or PRODUCT_TYPE_KEYWORD_RULES,
+# and it does not add a new GROCERY_INGREDIENT_ALIASES substring rule, so
+# re-running the LuLu ingestion pipeline against the same real dataset
+# produces byte-identical mapping/QA results to before this addition.
+#
+# - "ginger": genuinely present in the real LuLu export (e.g. "Ginger
+#   India 200 g") but under productType "Chillies & Spicy", which has no
+#   keyword-family rule in this ticket's scope -- taxonomy-unmapped from
+#   LuLu today, closed via manual fallback instead.
+# - "salted_butter" / "unsalted_butter": the real export's "Butter"
+#   productType contains both salted and unsalted titles, but productType
+#   "Butter" remains fixed-mapped to generic "butter" unchanged (Founder
+#   decision: do not repurpose or re-split generic "butter" in this
+#   ticket). Distinct pricing for salted/unsalted is intentionally
+#   manual-only for now.
+# ---------------------------------------------------------------------------
+
+MANUAL_ONLY_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
+    {
+        "ginger",
+        "salted_butter",
+        "unsalted_butter",
+    }
+)
+
+# ---------------------------------------------------------------------------
 # 5. Full canonical vocabulary: every canonical_id referenced above, plus
 # app.domain.canonical_ingredients' set (shared namespace).
 # ---------------------------------------------------------------------------
@@ -558,4 +592,5 @@ CANONICAL_GROCERY_INGREDIENTS: frozenset[str] = frozenset(
     set(PRODUCT_TYPE_FIXED_CANONICAL.values())
     | {cid for rules in PRODUCT_TYPE_KEYWORD_RULES.values() for _, cid in rules}
     | set(GROCERY_INGREDIENT_ALIASES.values())
+    | MANUAL_ONLY_CANONICAL_INGREDIENTS
 )
