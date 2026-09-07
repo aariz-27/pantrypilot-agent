@@ -56,11 +56,20 @@ class SearchObservation:
 def build_decision_payload(state: AgentState) -> dict:
     """Serialize state + the latest observation into the untrusted DATA
     block passed to LLMProvider.decide(). Only safe, high-level fields
-    are included -- no hidden reasoning, no raw provider payloads."""
+    are included -- no hidden reasoning, no raw provider payloads.
+
+    `pantry_canonical` is the minimum context a real model needs to
+    choose a grounded search anchor (ticket section 9: "strongest
+    pantry anchor ingredient") instead of inventing one. Canonical IDs
+    are used rather than pantry_raw because they are already-normalized,
+    machine-controlled vocabulary values (app.domain.grocery_taxonomy),
+    not arbitrary free text -- the minimum safe context, per the
+    independent review finding that fixed this (2026-09-07)."""
 
     observation = state.last_observation
     return {
         "state_summary": {
+            "pantry_canonical": sorted(state.pantry_canonical),
             "search_attempts_used": state.search_attempts,
             "search_attempts_remaining": max(0, state.max_search_attempts - state.search_attempts),
             "candidates_evaluated_total": len(state.evaluated_candidates),

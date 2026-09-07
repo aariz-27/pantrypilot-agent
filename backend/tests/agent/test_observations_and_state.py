@@ -61,6 +61,26 @@ def test_untrusted_recipe_text_is_confined_to_the_observation_data_block():
     assert injected not in str(payload["state_summary"])
 
 
+def test_decision_payload_includes_pantry_canonical_context():
+    """Independent review finding (2026-09-07): the LLM was never given
+    any pantry context at all, yet SearchArgs requires it to choose 1-4
+    anchor ingredients -- a real model would have to invent them.
+    build_decision_payload must expose the actual canonical pantry IDs
+    (sorted for determinism) so a real model can ground its choice."""
+
+    state = _state(pantry_canonical=frozenset({"tomato", "onion", "basmati_rice"}))
+    payload = build_decision_payload(state)
+
+    assert payload["state_summary"]["pantry_canonical"] == ["basmati_rice", "onion", "tomato"]
+
+
+def test_decision_payload_pantry_canonical_is_empty_list_not_missing_when_pantry_is_empty():
+    state = _state(pantry_canonical=frozenset())
+    payload = build_decision_payload(state)
+
+    assert payload["state_summary"]["pantry_canonical"] == []
+
+
 def test_decision_payload_omits_secrets_and_only_carries_safe_fields():
     state = _state(budget_aed=25.0, cuisine_preference="Italian", cuisine_strict=True)
     payload = build_decision_payload(state)

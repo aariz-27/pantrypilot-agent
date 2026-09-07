@@ -51,7 +51,13 @@ class AgentState:
     max_search_attempts: int = MAX_SEARCH_ATTEMPTS
     searched_strategies: list[SearchAttemptRecord] = field(default_factory=list)
     distinct_search_signatures: set[tuple] = field(default_factory=set)
-    candidate_ids_seen: set[str] = field(default_factory=set)
+    # Recipe identity, matching app.recipe.provider.dedupe_search_results'
+    # own contract exactly: (provider, provider_recipe_id) tuples built
+    # directly from SearchResultItem/Recipe's own structured fields --
+    # never derived by parsing the composite `id` string, which would
+    # make correctness depend on provider name literals never colliding
+    # under string concatenation (independent review finding, 2026-09-07).
+    candidate_ids_seen: set[tuple[str, str]] = field(default_factory=set)
     evaluated_candidates: list[CandidateEvaluation] = field(default_factory=list)
     recipe_meta_by_id: dict[str, tuple[str | None, str]] = field(default_factory=dict)
     best_feasible: list[CandidateEvaluation] = field(default_factory=list)

@@ -242,13 +242,24 @@ class AgentOrchestrator:
             )
             return
 
-        new_items = [item for item in outcome.items if item.id not in state.candidate_ids_seen]
-        state.candidate_ids_seen.update(item.id for item in outcome.items)
+        new_items = [
+            item for item in outcome.items if (item.provider, item.provider_recipe_id) not in state.candidate_ids_seen
+        ]
+        state.candidate_ids_seen.update((item.provider, item.provider_recipe_id) for item in outcome.items)
         capacity = state.remaining_candidate_capacity()
         to_fetch = new_items[:capacity]
 
         recipes, _failed_ids = await fetch_recipe_details(provider, to_fetch)
         for recipe in recipes:
+            # Keyed by recipe.id (e.g. "recipeapi_io:1"): this string is
+            # always built by app.recipe.mapping.build_recipe_id from the
+            # SAME (provider, provider_recipe_id) tuple used above, so it
+            # carries the tuple identity faithfully without this code
+            # re-parsing/re-deriving it independently. It is also the
+            # exact key app.domain.ranker.rank_candidates requires for
+            # its cuisine_by_id/name_by_id maps (a frozen Module A
+            # contract), so this dict is intentionally string-keyed
+            # rather than tuple-keyed like candidate_ids_seen above.
             state.recipe_meta_by_id[recipe.id] = (recipe.cuisine, recipe.name)
 
         feasible, rejected = evaluate_and_rank(recipes, state.pantry_canonical, constraints, self._price_repository)

@@ -580,3 +580,116 @@ async def test_same_input_and_scripted_decisions_produce_the_same_result(price_d
     assert result_a.search_attempts == result_b.search_attempts
     assert [c.recipe_id for c in result_a.recommendations] == [c.recipe_id for c in result_b.recommendations]
     assert [c.deterministic_score for c in result_a.recommendations] == [c.deterministic_score for c in result_b.recommendations]
+
+
+# --- independent review fix: pantry context reaches the LLM ------------------
+
+
+async def test_first_llm_request_contains_the_actual_pantry_canonical_candidates(price_db):
+    """Independent review finding (2026-09-07): build_decision_payload
+    previously carried no pantry information at all, so a real model
+    asked to choose 1-4 anchor ingredients had nothing grounded to
+    choose from. The very first request the agent makes must already
+    expose the user's real canonical pantry."""
+
+    provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result())])
+    llm = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(pantry_raw=["tomato", "onion", "basmati rice"]))
+
+    first_request = llm.requests[0]
+    assert first_request.observation["state_summary"]["pantry_canonical"] == ["basmati_rice", "onion", "tomato"]
+
+
+async def test_llm_can_choose_a_pantry_derived_anchor_and_it_executes_correctly(price_db):
+    """A dynamic (non-pre-scripted) fake LLM reads the pantry candidates
+    from the observation and picks its search anchor from them, proving
+    the full round trip works when the anchor is genuinely
+    pantry-derived rather than an anchor the test hard-coded in
+    advance."""
+
+    class PantryAnchorLLM:
+        provider_name = "fake-pantry-anchor"
+
+        def __init__(self):
+            self.requests = []
+
+        async def decide(self, request):
+            self.requests.append(request)
+            pantry = request.observation["state_summary"]["pantry_canonical"]
+            if request.observation["latest_search_observation"] is None:
+                assert pantry, "expected non-empty pantry context on the first decision"
+                action = _search_action([pantry[0]])
+            else:
+                action = _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)
+            return await _as_response(action)
+
+    async def _as_response(action):
+        from app.integrations.llm_provider import LLMDecisionResponse
+
+        return LLMDecisionResponse(raw_action=action.model_dump(mode="json"), model_name="fake")
+
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="1 cup")])
+    provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe})
+    llm = PantryAnchorLLM()
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["tomato", "onion", "basmati rice"]))
+
+    assert provider.search_calls[0].query_ingredients == ["basmati_rice"]
+    assert result.status == "completed"
+
+
+# --- independent review fix: cross-provider dedupe identity -------------------
+
+
+async def test_same_provider_local_id_from_two_different_providers_are_not_confused(price_db):
+    """Independent review finding (2026-09-07): candidate_ids_seen must
+    key on (provider, provider_recipe_id), matching
+    app.recipe.provider.dedupe_search_results' own identity contract --
+    not on the provider_recipe_id alone or on any ad hoc string. Two
+    different providers legitimately returning the same provider-local
+    id ("1") must both survive as distinct, independently evaluated
+    candidates."""
+
+    recipeapi_item = SearchResultItem(id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", name="Recipe A")
+    curated_item = SearchResultItem(id="local_curated:1", provider="local_curated", provider_recipe_id="1", name="Recipe B")
+
+    recipeapi_recipe = make_recipe(
+        id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", cuisine="Asian",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    curated_recipe = make_recipe(
+        id="local_curated:1", provider="local_curated", provider_recipe_id="1", cuisine="Pakistani",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+
+    recipeapi_provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=SearchResult(items=[recipeapi_item], page=1, page_size=10, has_more=False))],
+        details_by_id={"1": recipeapi_recipe},
+    )
+    curated_provider = FakeRecipeProvider(
+        "local_curated",
+        searches=[ScriptedSearch(result=SearchResult(items=[curated_item], page=1, page_size=10, has_more=False))],
+        details_by_id={"1": curated_recipe},
+    )
+
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"], route=SearchRoute.RECIPEAPI_IO),
+            _search_action(["onion"], route=SearchRoute.LOCAL_CURATED, cuisine="Pakistani"),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(
+        llm, {"recipeapi_io": recipeapi_provider, "local_curated": curated_provider}, PriceRepository(price_db)
+    )
+
+    result = await orch.run(_base_request(pantry_raw=[], cuisine_preference="Pakistani"))
+
+    assert recipeapi_provider.detail_calls == ["1"]
+    assert curated_provider.detail_calls == ["1"]
+    recommended_ids = {c.recipe_id for c in result.recommendations}
+    assert recommended_ids == {"recipeapi_io:1", "local_curated:1"}
