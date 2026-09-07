@@ -95,15 +95,12 @@ def _estimate_canonical_group_cost(
         and parsed.normalized_unit == price.normalized_unit
     ]
 
-    if len(reliable_quantities) != len(parsed_lines):
-        # At least one line's measure is ambiguous/unsupported (pinch,
-        # handful, to taste, cup/tbsp/tsp, no measure at all) or an
-        # incompatible unit dimension (e.g. recipe needs a piece count
-        # but the reference is priced per gram). Never fabricate a
-        # combined total by mixing a known quantity with an unknown one,
-        # and never fabricate a conversion. Conservative fallback: one
-        # package total for this ingredient (not one per line), marked
-        # approximate.
+    if not reliable_quantities:
+        # Zero lines have a reliable compatible quantity (ambiguous/
+        # unsupported measure -- pinch, handful, to taste, cup/tbsp/tsp
+        # -- or an incompatible unit dimension on every line). Never
+        # fabricate a conversion or a quantity. Conservative fallback:
+        # one package total for this ingredient, marked approximate.
         return IngredientCostDetail(
             canonical_id=canonical_id,
             packages_needed=1,
@@ -113,9 +110,33 @@ def _estimate_canonical_group_cost(
             cost_confidence=CostConfidence.MEDIUM,
         )
 
-    total_required = sum(reliable_quantities)
-    packages_needed = math.ceil(total_required / price.normalized_package_quantity)
-    packages_needed = max(1, packages_needed)
+    # At least one line has a known, unit-compatible quantity. Sum only
+    # those reliable quantities -- never the ambiguous/incompatible
+    # ones, and never a guessed value for them -- to get the known
+    # minimum this ingredient definitely requires.
+    total_reliable = sum(reliable_quantities)
+    known_min_packages = max(1, math.ceil(total_reliable / price.normalized_package_quantity))
+
+    if len(reliable_quantities) == len(parsed_lines):
+        # Every line was reliable: the known minimum is the exact
+        # answer, not just a floor.
+        packages_needed = known_min_packages
+        cost_confidence = CostConfidence.HIGH
+    else:
+        # One or more lines are ambiguous/unsupported/incompatible.
+        # Their real quantity is unknown, so it can only ever add
+        # uncertainty on top of the known minimum -- it must never be
+        # used to fabricate an addition, but it must also never let the
+        # result fall below the package count the reliable lines have
+        # already proven necessary (audit correction, 2026-09-07: the
+        # previous fallback discarded the reliable subtotal entirely
+        # whenever any line was ambiguous, which could undercost a
+        # known minimum requirement -- e.g. "1500 g" + "a pinch" used to
+        # return 1 package instead of the 2 packages "1500 g" alone
+        # already requires).
+        packages_needed = known_min_packages
+        cost_confidence = CostConfidence.MEDIUM
+
     line_cost = round(packages_needed * price.package_price_aed, 2)
 
     return IngredientCostDetail(
@@ -124,7 +145,7 @@ def _estimate_canonical_group_cost(
         package_price_aed=price.package_price_aed,
         line_cost_aed=line_cost,
         price_complete=True,
-        cost_confidence=CostConfidence.HIGH,
+        cost_confidence=cost_confidence,
     )
 
 
