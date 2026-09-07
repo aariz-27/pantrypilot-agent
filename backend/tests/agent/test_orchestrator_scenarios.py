@@ -734,3 +734,114 @@ async def test_same_provider_local_id_from_two_different_providers_are_not_confu
     assert curated_provider.detail_calls == ["1"]
     recommended_ids = {c.recipe_id for c in result.recommendations}
     assert recommended_ids == {"recipeapi_io:1", "local_curated:1"}
+
+
+# --- Modules A-D integration validation: additional scenario coverage --------
+# (Founder-authorized full A-D validation, 2026-09-07. Scenarios 1/3/4/7/9/10/
+# 11/12 from that validation matrix are already proven by the tests above;
+# the tests below close the remaining genuine gaps: small/partial pantry,
+# max-total-time, exclusion, and fully-unresolved pantry -- none of which had
+# an orchestrator-level (full A-D composition) test yet.)
+
+
+async def test_small_partial_pantry_never_invents_an_anchor_for_the_unresolved_item(price_db):
+    """Scenario 2: a 2-item pantry where one item ("bread") does not
+    resolve to any canonical grocery ingredient. The agent must operate
+    gracefully on the resolved remainder ("egg") and can never invent an
+    anchor for the unresolved item or fabricate a canonical id for it."""
+
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="egg", raw_measure="2 pcs")])
+    provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe})
+    llm = FakeLLMProvider([_search_action(["egg"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["egg", "bread"]))
+
+    first_request = llm.requests[0]
+    assert first_request.observation["state_summary"]["pantry_canonical"] == ["egg"]
+    assert provider.search_calls[0].query_ingredients == ["egg"]
+    assert result.status == "completed"
+
+
+async def test_recipe_exceeding_max_total_time_is_deterministically_rejected(price_db):
+    """Scenario 5: Python (app.domain.constraint_evaluator), not the LLM,
+    is authoritative for the max-total-time hard constraint. The LLM
+    schema has no field to alter it."""
+
+    slow_recipe = make_recipe(
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        prep_time_minutes=30,
+        cook_time_minutes=40,  # 70 total > the 45-minute limit below
+    )
+    provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": slow_recipe})
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(max_total_time_minutes=45))
+
+    from app.domain.models import RejectionReason
+
+    assert result.status == "no_feasible_match"
+    [closest] = result.closest_alternatives[:1]
+    assert RejectionReason.MAX_TOTAL_TIME_EXCEEDED in closest.rejection_reasons
+
+
+async def test_excluded_ingredient_is_deterministically_rejected_even_when_matched(price_db):
+    """Scenario 6: an excluded ingredient rejects a recipe even though
+    the ingredient is otherwise available in the pantry (exclusion is a
+    hard safety rule, independent of match status -- app.domain.
+    constraint_evaluator, unchanged). The LLM action schema has no field
+    to alter the exclusion list; a malformed attempt to do so is proven
+    separately in test_llm_attempt_to_change_exclusions_is_rejected_as_malformed."""
+
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe})
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    request = AgentRequest(
+        request_id="req-excl",
+        pantry_raw=["tomato", "onion", "basmati rice"],
+        budget_aed=None,
+        cuisine_preference=None,
+        cuisine_strict=False,
+        servings=4,
+        max_total_time_minutes=None,
+        excluded_raw=["tomato"],
+    )
+    result = await orch.run(request)
+
+    from app.domain.models import RejectionReason
+
+    assert result.status == "no_feasible_match"
+    [closest] = result.closest_alternatives[:1]
+    assert RejectionReason.EXCLUDED_INGREDIENT_PRESENT in closest.rejection_reasons
+
+
+async def test_fully_unresolved_pantry_stops_immediately_without_fabricating_a_canonical_id(price_db):
+    """Scenario 8: "kohlrabi" is genuinely unresolved in the current
+    grocery taxonomy vocabulary (verified directly against
+    app.domain.grocery_taxonomy before writing this test, per the
+    ticket's own "if beetroot is now canonical, choose another
+    genuinely unknown string" instruction -- beetroot now resolves).
+    A pantry containing only unresolved input must stop immediately,
+    before ever calling the LLM, rather than guessing an unrelated
+    canonical ingredient or letting the loop proceed with an empty
+    canonical pantry."""
+
+    from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
+    from app.domain.ingredient_normalizer import normalize_ingredient_name
+
+    probe = normalize_ingredient_name("kohlrabi", CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
+    assert probe.canonical_id is None, "test assumption violated: 'kohlrabi' is no longer unresolved -- pick another word"
+
+    llm = FakeLLMProvider([])  # must never be called
+    orch = AgentOrchestrator(llm, {}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["kohlrabi"]))
+
+    assert result.status == "no_feasible_match"
+    assert result.stop_reason == "input_makes_search_impossible"
+    assert result.search_attempts == 0
+    assert llm.call_count == 0
+    assert result.closest_alternatives == []
