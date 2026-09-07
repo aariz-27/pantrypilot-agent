@@ -29,7 +29,7 @@ from dataclasses import dataclass
 
 from app.domain.grocery_parsing import parse_package_content
 from app.domain.models import CostConfidence, CostEvaluation, RecipeIngredient
-from app.repositories.price_repository import PriceLookupResult, PriceRepository
+from app.repositories.price_repository import PriceRepository
 
 
 @dataclass(frozen=True)
@@ -50,14 +50,32 @@ def estimate_ingredient_cost(
 ) -> IngredientCostDetail:
     """Estimate the purchase cost for ONE missing ingredient."""
 
-    if ingredient.canonical_id is None:
+    return _estimate_canonical_group_cost([ingredient], price_repository)
+
+
+def _estimate_canonical_group_cost(
+    ingredients: list[RecipeIngredient], price_repository: PriceRepository
+) -> IngredientCostDetail:
+    """Estimate the purchase cost for every recipe line that resolves to
+    ONE canonical ingredient, combined.
+
+    A recipe may legitimately list the same missing ingredient across
+    more than one line (e.g. "salt to taste" and "1 tsp salt for the
+    marinade", or two separate "onion" lines for different parts of the
+    method). Costing each line independently would buy a separate
+    package per line instead of covering the ingredient's one real
+    combined requirement -- audit finding (2026-09-07), fixed here.
+    All lines in `ingredients` must share the same canonical_id (or all
+    be None); callers group by canonical_id before calling this.
+    """
+
+    canonical_id = ingredients[0].canonical_id
+    if canonical_id is None:
         return IngredientCostDetail(None, None, None, None, False, CostConfidence.UNKNOWN)
 
-    price = price_repository.get_price(ingredient.canonical_id)
+    price = price_repository.get_price(canonical_id)
     if price is None:
-        return IngredientCostDetail(
-            ingredient.canonical_id, None, None, None, False, CostConfidence.UNKNOWN
-        )
+        return IngredientCostDetail(canonical_id, None, None, None, False, CostConfidence.UNKNOWN)
 
     if (
         price.package_price_aed is None
@@ -66,26 +84,25 @@ def estimate_ingredient_cost(
     ):
         # We have a per-unit price but no concrete purchasable package
         # on record -- cannot compute a real purchase cost.
+        return IngredientCostDetail(canonical_id, None, None, None, False, CostConfidence.UNKNOWN)
+
+    parsed_lines = [parse_package_content(ing.raw_measure) for ing in ingredients]
+    reliable_quantities = [
+        parsed.normalized_total_quantity
+        for parsed in parsed_lines
+        if parsed.normalized_unit is not None
+        and parsed.normalized_total_quantity is not None
+        and parsed.normalized_unit == price.normalized_unit
+    ]
+
+    if not reliable_quantities:
+        # Zero lines have a reliable compatible quantity (ambiguous/
+        # unsupported measure -- pinch, handful, to taste, cup/tbsp/tsp
+        # -- or an incompatible unit dimension on every line). Never
+        # fabricate a conversion or a quantity. Conservative fallback:
+        # one package total for this ingredient, marked approximate.
         return IngredientCostDetail(
-            ingredient.canonical_id, None, None, None, False, CostConfidence.UNKNOWN
-        )
-
-    required = parse_package_content(ingredient.raw_measure)
-
-    reliable = (
-        required.normalized_unit is not None
-        and required.normalized_total_quantity is not None
-        and required.normalized_unit == price.normalized_unit
-    )
-
-    if not reliable:
-        # Ambiguous/unsupported recipe measure (pinch, handful, to
-        # taste, cup/tbsp/tsp, no measure at all) or an incompatible
-        # unit dimension (e.g. recipe needs a piece count but the
-        # reference is priced per gram). Conservative fallback: one
-        # package, marked approximate -- never a fabricated conversion.
-        return IngredientCostDetail(
-            canonical_id=ingredient.canonical_id,
+            canonical_id=canonical_id,
             packages_needed=1,
             package_price_aed=price.package_price_aed,
             line_cost_aed=round(price.package_price_aed, 2),
@@ -93,19 +110,42 @@ def estimate_ingredient_cost(
             cost_confidence=CostConfidence.MEDIUM,
         )
 
-    packages_needed = math.ceil(
-        required.normalized_total_quantity / price.normalized_package_quantity
-    )
-    packages_needed = max(1, packages_needed)
+    # At least one line has a known, unit-compatible quantity. Sum only
+    # those reliable quantities -- never the ambiguous/incompatible
+    # ones, and never a guessed value for them -- to get the known
+    # minimum this ingredient definitely requires.
+    total_reliable = sum(reliable_quantities)
+    known_min_packages = max(1, math.ceil(total_reliable / price.normalized_package_quantity))
+
+    if len(reliable_quantities) == len(parsed_lines):
+        # Every line was reliable: the known minimum is the exact
+        # answer, not just a floor.
+        packages_needed = known_min_packages
+        cost_confidence = CostConfidence.HIGH
+    else:
+        # One or more lines are ambiguous/unsupported/incompatible.
+        # Their real quantity is unknown, so it can only ever add
+        # uncertainty on top of the known minimum -- it must never be
+        # used to fabricate an addition, but it must also never let the
+        # result fall below the package count the reliable lines have
+        # already proven necessary (audit correction, 2026-09-07: the
+        # previous fallback discarded the reliable subtotal entirely
+        # whenever any line was ambiguous, which could undercost a
+        # known minimum requirement -- e.g. "1500 g" + "a pinch" used to
+        # return 1 package instead of the 2 packages "1500 g" alone
+        # already requires).
+        packages_needed = known_min_packages
+        cost_confidence = CostConfidence.MEDIUM
+
     line_cost = round(packages_needed * price.package_price_aed, 2)
 
     return IngredientCostDetail(
-        canonical_id=ingredient.canonical_id,
+        canonical_id=canonical_id,
         packages_needed=packages_needed,
         package_price_aed=price.package_price_aed,
         line_cost_aed=line_cost,
         price_complete=True,
-        cost_confidence=CostConfidence.HIGH,
+        cost_confidence=cost_confidence,
     )
 
 
@@ -126,6 +166,14 @@ def estimate_purchase_cost(
     candidate-evaluation composition) are responsible for that
     filtering via app.domain.pantry_matcher, unchanged here.
 
+    A recipe may list the same missing canonical ingredient on more
+    than one line (e.g. "salt to taste" and "1 tsp salt for the
+    marinade"); these are grouped and costed together as one combined
+    requirement rather than once per line, so the estimate never buys
+    more separate packages than the recipe actually needs (audit
+    finding, 2026-09-07). Grouping preserves first-seen order for
+    deterministic output.
+
     Incomplete if ANY missing ingredient lacks a usable price -- a
     candidate's total cost is never "complete" while one of its
     required purchases is unknown; that unknown is never treated as
@@ -137,7 +185,15 @@ def estimate_purchase_cost(
             estimated_purchase_cost_aed=0.0, price_complete=True, cost_confidence=CostConfidence.HIGH
         )
 
-    details = [estimate_ingredient_cost(ing, price_repository) for ing in missing_ingredients]
+    groups: dict[str | None, list[RecipeIngredient]] = {}
+    group_order: list[str | None] = []
+    for ing in missing_ingredients:
+        if ing.canonical_id not in groups:
+            groups[ing.canonical_id] = []
+            group_order.append(ing.canonical_id)
+        groups[ing.canonical_id].append(ing)
+
+    details = [_estimate_canonical_group_cost(groups[key], price_repository) for key in group_order]
 
     if any(not d.price_complete for d in details):
         return CostEvaluation()  # incomplete -- never coerced to zero or a partial sum

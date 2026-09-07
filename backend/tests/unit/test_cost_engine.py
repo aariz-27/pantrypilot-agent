@@ -150,6 +150,149 @@ def test_aggregate_cost_no_missing_ingredients_is_zero_and_complete(db_path):
     assert result.estimated_purchase_cost_aed == 0.0
 
 
+def test_duplicate_canonical_ingredient_lines_are_combined_not_double_bought(db_path):
+    # Audit finding (2026-09-07): a recipe may list the same missing
+    # ingredient on two separate lines (e.g. "salt to taste" and "1 tsp
+    # salt for the marinade"). Costing each line independently used to
+    # buy a separate package per line; two 500 g tomato lines against a
+    # 1000 g package must combine to ONE package (1000 g total), not
+    # two packages (as costing 500 g + 500 g separately, each rounding
+    # up to its own package, would incorrectly produce).
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "400 g"),
+        ingredient("tomato", "tomato", "400 g"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    assert result.price_complete is True
+    # Combined requirement is 800 g, which fits in one 1000 g package
+    # (20 AED) -- NOT two packages (40 AED), which per-line costing
+    # would have produced.
+    assert result.estimated_purchase_cost_aed == pytest.approx(20.0)
+
+
+def test_duplicate_canonical_ingredient_lines_combine_across_package_boundary(db_path):
+    # Combined total crossing a package boundary must still ceil
+    # correctly against the ONE combined total, not per line.
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "700 g"),
+        ingredient("tomato", "tomato", "600 g"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    # Combined 1300 g -> ceil(1300/1000) = 2 packages = 40 AED.
+    assert result.estimated_purchase_cost_aed == pytest.approx(40.0)
+
+
+def test_duplicate_canonical_ingredient_with_reliable_subtotal_below_one_package(db_path):
+    # One reliable line ("500 g", below the 1000 g package size) and one
+    # ambiguous line ("a pinch") for the same canonical ingredient must
+    # never be summed with a fabricated quantity for the ambiguous line,
+    # but the known reliable subtotal (500 g) still only requires the
+    # conservative minimum of one package here -- confidence stays
+    # MEDIUM because the ambiguous line adds real uncertainty.
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "500 g"),
+        ingredient("tomato", "tomato", "a pinch"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    assert result.price_complete is True
+    assert result.cost_confidence == CostConfidence.MEDIUM
+    assert result.estimated_purchase_cost_aed == pytest.approx(20.0)  # one package
+
+
+def test_ambiguous_line_never_undercosts_the_reliable_known_minimum(db_path):
+    # Independent review finding (2026-09-07): a reliable line that
+    # alone already requires 2 packages ("1500 g" against a 1000 g
+    # package) must never be reduced to 1 package just because another
+    # line for the same ingredient is ambiguous ("a pinch"). The known
+    # minimum proven by the reliable line must always be honored --
+    # ambiguity can only ever add uncertainty (MEDIUM confidence), never
+    # reduce the cost below what is already known to be required.
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "1500 g"),
+        ingredient("tomato", "tomato", "a pinch"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    assert result.price_complete is True
+    assert result.cost_confidence == CostConfidence.MEDIUM
+    assert result.estimated_purchase_cost_aed == pytest.approx(40.0)  # 2 packages minimum, never fewer
+
+
+def test_fully_reliable_duplicate_lines_combine_before_ceiling_with_high_confidence(db_path):
+    # Two fully reliable lines combine into one exact total before
+    # ceil() is applied, and confidence is HIGH (not MEDIUM) because
+    # nothing is ambiguous.
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "700 g"),
+        ingredient("tomato", "tomato", "600 g"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    assert result.price_complete is True
+    assert result.cost_confidence == CostConfidence.HIGH
+    assert result.estimated_purchase_cost_aed == pytest.approx(40.0)  # combined 1300 g -> 2 packages
+
+
+def test_zero_reliable_quantities_still_uses_exactly_one_conservative_package(db_path):
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "a pinch"),
+        ingredient("tomato", "tomato", "to taste"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    assert result.price_complete is True
+    assert result.cost_confidence == CostConfidence.MEDIUM
+    assert result.estimated_purchase_cost_aed == pytest.approx(20.0)  # exactly one package
+
+
+def test_budget_rejects_when_corrected_minimum_cost_exceeds_budget(db_path):
+    # The corrected known-minimum cost (2 packages = 40 AED for "1500 g"
+    # + an ambiguous duplicate line) must be what the budget constraint
+    # actually sees -- a budget of 25 AED must be rejected, not
+    # incorrectly passed on the old, undercosted 1-package/20 AED
+    # result.
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "1500 g"),
+        ingredient("tomato", "tomato", "a pinch"),
+    ]
+    cost = estimate_purchase_cost(missing, repo)
+    assert cost.estimated_purchase_cost_aed == pytest.approx(40.0)
+
+    result = evaluate_constraints(make_recipe(), UserConstraints(budget_aed=25.0), cost)
+    assert result.hard_constraint_pass is False
+    assert RejectionReason.BUDGET_EXCEEDED in result.rejection_reasons
+
+
+def test_duplicate_unresolved_ingredients_still_yield_incomplete_not_multiplied(db_path):
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("mystery item", None, "1 g"),
+        ingredient("mystery item", None, "2 g"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    assert result.price_complete is False
+    assert result.estimated_purchase_cost_aed is None
+
+
+def test_different_canonical_ingredients_remain_independently_costed(db_path):
+    # Grouping by canonical_id must not accidentally merge distinct
+    # ingredients -- tomato and egg stay separate line items summed
+    # together, exactly as before this fix.
+    repo = PriceRepository(db_path)
+    missing = [
+        ingredient("tomato", "tomato", "500 g"),
+        ingredient("tomato", "tomato", "500 g"),
+        ingredient("egg", "egg", "30 pcs"),
+    ]
+    result = estimate_purchase_cost(missing, repo)
+    # tomato: combined 1000 g -> 1 package (20 AED). egg: 30 pcs -> 1 package (15 AED).
+    assert result.estimated_purchase_cost_aed == pytest.approx(35.0)
+
+
 def test_pantry_present_ingredients_are_not_this_module_concern(db_path):
     # This module never decides what's missing -- that's
     # app.domain.pantry_matcher's job, unchanged. Only ingredients the

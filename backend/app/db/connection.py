@@ -33,3 +33,22 @@ def connection_scope(db_path: str | Path, *, read_only: bool = False) -> Iterato
         yield connection
     finally:
         connection.close()
+
+
+def check_database_health(db_path: str | Path) -> bool:
+    """Best-effort read-only reachability check for /api/health (AC-25).
+
+    Returns True only if the database file exists and the expected
+    reference-price table can actually be queried; False for any
+    failure (missing file, corrupt file, missing/renamed table, locked
+    file, etc.). Never raises -- a health check must never crash the
+    app it is reporting on, so every exception here is deliberately
+    swallowed and turned into a plain "unavailable" signal for the
+    caller."""
+
+    try:
+        with connection_scope(db_path, read_only=True) as connection:
+            connection.execute("SELECT COUNT(*) FROM ingredient_prices").fetchone()
+        return True
+    except Exception:
+        return False
