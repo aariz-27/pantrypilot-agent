@@ -335,6 +335,40 @@ async def test_transport_error_retried_once_then_raises_unavailable():
     assert len(calls) == 2
 
 
+async def test_timeout_then_retry_succeeds_returns_result():
+    # Test-quality gap (audit finding, 2026-09-07): every existing retry
+    # test only proved retries-exhausted-then-raise. This proves the
+    # actual point of retrying -- a transient timeout followed by a
+    # successful second attempt must return a valid result, not raise.
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("simulated timeout", request=request)
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler, max_retries=1)
+    result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
+    assert result.items == []
+    assert len(calls) == 2  # initial failed attempt + one successful retry
+
+
+async def test_server_error_then_retry_succeeds_returns_result():
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler, max_retries=1)
+    result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
+    assert result.items == []
+    assert len(calls) == 2
+
+
 async def test_zero_max_retries_means_single_attempt():
     calls = []
 

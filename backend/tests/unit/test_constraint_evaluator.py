@@ -44,6 +44,25 @@ def test_excluded_ingredient_present():
     assert RejectionReason.EXCLUDED_INGREDIENT_PRESENT in result.rejection_reasons
 
 
+def test_excluded_ingredient_present_even_when_marked_optional():
+    # Test-coverage gap (audit finding, 2026-09-07): an exclusion is a
+    # hard user-safety rule (e.g. an allergy) and must apply even to an
+    # ingredient marked optional (e.g. an "optional garnish" of peanuts)
+    # -- the code already enforces this (constraint_evaluator.py checks
+    # every ingredient regardless of `optional`), but no test previously
+    # proved it.
+    recipe = make_recipe(
+        ingredients=[
+            RecipeIngredient(raw_name="rice", canonical_id="rice"),
+            RecipeIngredient(raw_name="peanuts", canonical_id="peanut", optional=True),
+        ]
+    )
+    constraints = UserConstraints(excluded_canonical=frozenset({"peanut"}))
+    result = evaluate_constraints(recipe, constraints)
+    assert result.hard_constraint_pass is False
+    assert RejectionReason.EXCLUDED_INGREDIENT_PRESENT in result.rejection_reasons
+
+
 def test_excluded_ingredient_absent_passes():
     recipe = make_recipe()
     constraints = UserConstraints(excluded_canonical=frozenset({"garlic"}))

@@ -156,3 +156,26 @@ async def test_get_details_unknown_id_raises_not_found():
     provider = make_provider()
     with pytest.raises(RecipeNotFoundError):
         await provider.get_details("does-not-exist")
+
+
+# --- pagination (previously untested, audit finding 2026-09-07) -------------
+
+
+async def test_search_paginates_deterministically_across_pages():
+    provider = make_provider()
+    page1 = await provider.search(SearchStrategy(page=1, page_size=1))
+    assert len(page1.items) == 1
+    assert page1.has_more is True
+
+    page2 = await provider.search(SearchStrategy(page=2, page_size=1))
+    assert len(page2.items) == 1
+    assert page2.has_more is False
+
+    assert page1.items[0].provider_recipe_id != page2.items[0].provider_recipe_id
+
+
+async def test_search_page_beyond_available_results_returns_empty_not_error():
+    provider = make_provider()
+    result = await provider.search(SearchStrategy(page=5, page_size=1))
+    assert result.items == []
+    assert result.has_more is False
