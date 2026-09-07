@@ -112,7 +112,7 @@ async def test_zero_results_leads_to_a_different_strategy(price_db):
     )
     llm = FakeLLMProvider(
         [
-            _search_action(["saffron"]),
+            _search_action(["onion"]),
             _search_action(["tomato"]),
             _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
         ]
@@ -122,7 +122,7 @@ async def test_zero_results_leads_to_a_different_strategy(price_db):
     result = await orch.run(_base_request())
 
     assert result.search_attempts == 2
-    assert provider.search_calls[0].query_ingredients == ["saffron"]
+    assert provider.search_calls[0].query_ingredients == ["onion"]
     assert provider.search_calls[1].query_ingredients == ["tomato"]
     assert result.status == "completed"
 
@@ -173,14 +173,18 @@ async def test_all_candidates_over_budget_triggers_new_strategy(price_db):
     )
     llm = FakeLLMProvider(
         [
-            _search_action(["tomato"]),
-            _search_action(["onion"]),
+            # Anchors are drawn from the searcher's own pantry (garlic,
+            # ginger) -- distinct from the recipes' costed ingredients
+            # (tomato, onion), which must remain outside the pantry so
+            # they are still "missing" and priced.
+            _search_action(["garlic"]),
+            _search_action(["ginger"]),
             _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
         ]
     )
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
-    result = await orch.run(_base_request(budget_aed=6.0, pantry_raw=[]))
+    result = await orch.run(_base_request(budget_aed=6.0, pantry_raw=["garlic", "ginger"]))
 
     assert llm.requests[1].observation["latest_search_observation"]["all_over_budget"] is True
     assert result.search_attempts == 2
@@ -207,14 +211,16 @@ async def test_strict_cuisine_mismatch_triggers_new_strategy(price_db):
     )
     llm = FakeLLMProvider(
         [
-            _search_action(["tomato"], cuisine="Italian"),
-            _search_action(["onion"], cuisine="Italian"),
+            _search_action(["garlic"], cuisine="Italian"),
+            _search_action(["ginger"], cuisine="Italian"),
             _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
         ]
     )
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
-    result = await orch.run(_base_request(cuisine_preference="Italian", cuisine_strict=True, pantry_raw=[]))
+    result = await orch.run(
+        _base_request(cuisine_preference="Italian", cuisine_strict=True, pantry_raw=["garlic", "ginger"])
+    )
 
     assert llm.requests[1].observation["latest_search_observation"]["all_strict_cuisine_mismatch"] is True
     assert result.status == "completed"
@@ -264,7 +270,10 @@ async def test_provider_unavailable_with_no_fallback_terminates_safely(price_db)
 
 
 async def test_local_curated_route_rejected_outside_approved_cuisine(price_db):
-    llm = FakeLLMProvider([_search_action(["chicken"], route=SearchRoute.LOCAL_CURATED, cuisine="French")])
+    # Anchor is a valid pantry item (default pantry) so this test
+    # isolates the local-curated cuisine-gate rejection specifically,
+    # rather than conflating it with the anchor-grounding check.
+    llm = FakeLLMProvider([_search_action(["tomato"], route=SearchRoute.LOCAL_CURATED, cuisine="French")])
     orch = AgentOrchestrator(llm, {"recipeapi_io": FakeRecipeProvider("recipeapi_io", [])}, PriceRepository(price_db))
 
     with pytest.raises(AgentUnsupportedActionError):
@@ -283,7 +292,9 @@ async def test_local_curated_route_permitted_for_approved_desi_intent(price_db):
     provider = FakeRecipeProvider("local_curated", searches=[ScriptedSearch(result=curated_result)], details_by_id={"biryani": recipe})
     llm = FakeLLMProvider(
         [
-            _search_action(["chicken"], route=SearchRoute.LOCAL_CURATED, cuisine="Pakistani"),
+            # Anchor matches the default pantry (and the curated recipe's
+            # own ingredient) so the anchor-grounding check passes.
+            _search_action(["tomato"], route=SearchRoute.LOCAL_CURATED, cuisine="Pakistani"),
             _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
         ]
     )
@@ -343,7 +354,14 @@ async def test_search_attempt_cap_enforced_even_if_model_requests_more(price_db)
         "recipeapi_io",
         searches=[ScriptedSearch(result=_search_result()) for _ in range(3)],
     )
-    llm = FakeLLMProvider([_search_action([f"ingredient{i}"]) for i in range(5)])
+    # Only the first 3 of these 5 queued actions are ever consumed (the
+    # attempt cap is checked before a 4th decision is even requested),
+    # so only the first 3 anchors need to be real, distinct pantry items
+    # (default pantry has exactly three); the last two are never touched.
+    llm = FakeLLMProvider(
+        [_search_action(["tomato"]), _search_action(["onion"]), _search_action(["basmati_rice"])]
+        + [_search_action([f"ingredient{i}"]) for i in range(3, 5)]
+    )
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
     result = await orch.run(_base_request())
@@ -549,10 +567,14 @@ async def test_unpriced_ingredient_never_fabricates_a_cost(price_db):
     # case this test targets.
     recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="garlic", raw_measure="1 g")])
     provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe})
-    llm = FakeLLMProvider([_search_action(["garlic"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    # Search anchor ("onion") is deliberately a different, in-pantry
+    # ingredient from the recipe's own unpriced ingredient ("garlic"),
+    # which must stay outside the pantry to remain "missing" and
+    # trigger the incomplete-cost path this test targets.
+    llm = FakeLLMProvider([_search_action(["onion"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
-    result = await orch.run(_base_request(budget_aed=10.0, pantry_raw=[]))
+    result = await orch.run(_base_request(budget_aed=10.0, pantry_raw=["onion"]))
 
     assert result.status == "no_feasible_match"
     [closest] = result.closest_alternatives[:1] or [None]
@@ -641,6 +663,25 @@ async def test_llm_can_choose_a_pantry_derived_anchor_and_it_executes_correctly(
     assert result.status == "completed"
 
 
+async def test_invented_non_pantry_anchor_is_rejected_before_any_provider_search(price_db):
+    """Independent review finding (2026-09-07): pantry-anchor grounding
+    was previously enforced only by SYSTEM_POLICY text, which is not a
+    control -- _handle_search accepted any anchor, including one absent
+    from the user's pantry. Pantry is tomato/onion only; the LLM
+    requests "saffron", which the user does not have. Python must
+    reject this deterministically, before any provider call, rather
+    than silently dropping/substituting the invalid anchor."""
+
+    provider = FakeRecipeProvider("recipeapi_io", searches=[])
+    llm = FakeLLMProvider([_search_action(["saffron"])])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    with pytest.raises(AgentUnsupportedActionError):
+        await orch.run(_base_request(pantry_raw=["tomato", "onion"]))
+
+    assert provider.search_calls == []
+
+
 # --- independent review fix: cross-provider dedupe identity -------------------
 
 
@@ -687,7 +728,7 @@ async def test_same_provider_local_id_from_two_different_providers_are_not_confu
         llm, {"recipeapi_io": recipeapi_provider, "local_curated": curated_provider}, PriceRepository(price_db)
     )
 
-    result = await orch.run(_base_request(pantry_raw=[], cuisine_preference="Pakistani"))
+    result = await orch.run(_base_request(pantry_raw=["tomato", "onion"], cuisine_preference="Pakistani"))
 
     assert recipeapi_provider.detail_calls == ["1"]
     assert curated_provider.detail_calls == ["1"]

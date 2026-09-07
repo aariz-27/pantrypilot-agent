@@ -29,7 +29,7 @@ from app.agent.tools import (
     is_approved_local_curated_intent,
 )
 from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
-from app.domain.ingredient_normalizer import normalize_pantry
+from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry
 from app.domain.models import CandidateEvaluation, UserConstraints
 from app.domain.ranker import rank_candidates
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
@@ -190,7 +190,28 @@ class AgentOrchestrator:
         last = state.last_attempt()
         return last.strategy.model_copy(update={"page": last.strategy.page + 1})
 
+    def _require_anchors_grounded_in_pantry(self, state: AgentState, anchor_ingredients: list[str]) -> None:
+        """Deterministic enforcement (independent review finding,
+        2026-09-07): SYSTEM_POLICY instructs a real model to choose
+        anchors from the user's actual pantry, but a system-prompt
+        instruction is not itself a control -- the LLM is never trusted
+        to honor it. Every anchor is normalized exactly as pantry_raw
+        was in _init_state and must resolve to a canonical ID the user
+        actually has; an anchor that fails to resolve, or resolves to an
+        ingredient outside pantry_canonical, is rejected outright, never
+        silently dropped or substituted for a different one."""
+
+        for anchor in anchor_ingredients:
+            result = normalize_ingredient_name(anchor, CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
+            if result.canonical_id is None or result.canonical_id not in state.pantry_canonical:
+                raise AgentUnsupportedActionError(
+                    f"search anchor {anchor!r} is not present in the user's pantry; anchors must be "
+                    "grounded in the user's actual canonical pantry, never invented"
+                )
+
     async def _handle_search(self, state: AgentState, args: SearchArgs, constraints: UserConstraints) -> None:
+        self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
+
         route = args.route.value
         if route == "local_curated" and not is_approved_local_curated_intent(args.cuisine, state.cuisine_preference):
             raise AgentUnsupportedActionError(
