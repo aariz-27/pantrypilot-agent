@@ -15,6 +15,13 @@ dependencies = [
     "pytest>=8,<9",
     "pytest-asyncio>=0.24,<1",
     "httpx>=0.27,<1",
+    # Module D (M03 Agent Orchestrator): the approved runtime LLMProvider
+    # adapter (app.integrations.llm_provider.AnthropicLLMProvider) is
+    # built against this SDK. It is imported lazily, only when actually
+    # constructing a live client (never at module import time and never
+    # on the fake-client test path), so its absence never breaks unit
+    # tests -- see app/integrations/llm_provider.py.
+    "anthropic>=0.40,<1",
 ]
 
 # NOTE: test tooling (pytest, httpx) is intentionally kept in the main
