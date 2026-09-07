@@ -139,15 +139,20 @@ Approved decisions must not be rewritten later. If circumstances change, append 
 
 ---
 
-## DEC-010 — Open: Competition LLM Model
+## DEC-010 — Competition Runtime LLM
 
-**Status:** OPEN  
-**Question:** Which exact production model will power the PantryPilot agent during the competition?  
-**Current Candidate:** Claude Sonnet 5  
-**Required By:** Before M03 Agent Orchestrator implementation  
-**Blocking Scope:** Agent runtime configuration  
+**Status:** APPROVED (was OPEN)  
+**Decision:** Claude Sonnet 5 is the final/frozen runtime LLM for the PantryPilot competition build. The Anthropic adapter already implemented in Module D (`app.integrations.llm_provider.AnthropicLLMProvider`) is the competition runtime path.  
+**Rationale:** Module D's live Anthropic structured-tool smoke test and the subsequent full Modules A-D integration validation (including a live-connected Anthropic + RecipeAPI.io run) both passed against `claude-sonnet-5`, confirming the model and adapter are production-ready for the competition build.  
+**Constraints:**
+- No alternative LLM provider is evaluated or added for this competition build.
+- The `LLMProvider` abstraction (`app.integrations.llm_provider.LLMProvider`) is retained as an architectural boundary regardless of this decision; no multi-provider implementation work is required or authorized by this closure.
+- The runtime model remains configured via `PANTRYPILOT_LLM_MODEL`, not hardcoded, consistent with the existing configuration/secrets design.
 **Owner:** Solution Architecture  
-**Approver:** Founder / Product Owner
+**Approver:** Founder / Product Owner  
+**Blocking Scope:** Agent runtime configuration  
+**Required By:** Before M03 Agent Orchestrator implementation (satisfied)  
+**Subsequent Status:** Active -- CLOSED
 
 ---
 
