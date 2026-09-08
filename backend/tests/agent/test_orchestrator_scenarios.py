@@ -189,7 +189,15 @@ async def test_all_candidates_over_budget_triggers_new_strategy(price_db):
     assert llm.requests[1].observation["latest_search_observation"]["all_over_budget"] is True
     assert result.search_attempts == 2
     assert result.status == "completed"
-    assert result.recommendations[0].recipe_id == "recipeapi_io:2"
+    # PR #15 fifth correction pass (2026-09-08, product decision): the
+    # only feasible candidate ("affordable", ingredient "onion") does
+    # not contain the active anchor "ginger" (the anchors here are
+    # deliberately disconnected from the recipes' own ingredients, see
+    # the comment above) -- recommendations no longer pads with a
+    # non-anchor candidate, so it stays empty and "affordable" surfaces
+    # via closest_alternatives instead.
+    assert result.recommendations == []
+    assert result.closest_alternatives[0].recipe_id == "recipeapi_io:2"
 
 
 # --- 5. strict cuisine mismatch -> different strategy -------------------------
@@ -224,7 +232,12 @@ async def test_strict_cuisine_mismatch_triggers_new_strategy(price_db):
 
     assert llm.requests[1].observation["latest_search_observation"]["all_strict_cuisine_mismatch"] is True
     assert result.status == "completed"
-    assert result.recommendations[0].recipe_id == "recipeapi_io:2"
+    # PR #15 fifth correction pass (2026-09-08, product decision):
+    # "right_cuisine" (ingredient "onion") does not contain the active
+    # anchor "ginger" -- recommendations no longer pads with a
+    # non-anchor candidate, so it surfaces via closest_alternatives.
+    assert result.recommendations == []
+    assert result.closest_alternatives[0].recipe_id == "recipeapi_io:2"
 
 
 # --- 6/7. transient provider failure -> bounded retry -------------------------
@@ -324,7 +337,16 @@ async def test_duplicate_recipe_across_attempts_evaluated_once(price_db):
     result = await orch.run(_base_request())
 
     assert provider.detail_calls.count("1") == 1
-    assert len(result.recommendations) == 2
+    # PR #15 fifth correction pass (2026-09-08, product decision):
+    # recipe "1" (tomato) does not contain the active anchor "onion"
+    # (the LATEST search's anchor) -- it surfaces via
+    # closest_alternatives rather than padding recommendations. Both
+    # distinct recipes are still accounted for exactly once (the real
+    # point of this test: the dedup above, not which bucket each lands
+    # in).
+    all_shown_ids = {c.recipe_id for c in result.recommendations + result.closest_alternatives}
+    assert all_shown_ids == {"recipeapi_io:1", "recipeapi_io:2"}
+    assert len(result.recommendations) == 1
 
 
 # --- 11. candidate cap of 20 enforced -----------------------------------------
@@ -732,8 +754,15 @@ async def test_same_provider_local_id_from_two_different_providers_are_not_confu
 
     assert recipeapi_provider.detail_calls == ["1"]
     assert curated_provider.detail_calls == ["1"]
-    recommended_ids = {c.recipe_id for c in result.recommendations}
-    assert recommended_ids == {"recipeapi_io:1", "local_curated:1"}
+    # PR #15 fifth correction pass (2026-09-08, product decision):
+    # "recipeapi_io:1" (tomato) does not contain the active anchor
+    # "onion" (the LATEST search's anchor) -- it surfaces via
+    # closest_alternatives rather than padding recommendations. Both
+    # distinct, correctly-identity-separated candidates are still
+    # accounted for exactly once (the real point of this test).
+    all_shown_ids = {c.recipe_id for c in result.recommendations + result.closest_alternatives}
+    assert all_shown_ids == {"recipeapi_io:1", "local_curated:1"}
+    assert {c.recipe_id for c in result.recommendations} == {"local_curated:1"}
 
 
 # --- Modules A-D integration validation: additional scenario coverage --------
@@ -1682,9 +1711,8 @@ async def test_additional_options_excludes_non_anchor_even_with_a_higher_score(p
     # HIGHER deterministic_score) must never appear in additional_options
     # at all while anchor supply remains -- not merely ranked behind the
     # anchor-matching ones (the prior pass's behavior), but excluded
-    # from the reserve pool entirely. It is simply not shown anywhere in
-    # this scenario, since all 4 anchor-matching candidates already fit
-    # within recommendations (3) + additional_options (1).
+    # from the reserve pool entirely. Fifth correction pass: it now
+    # surfaces via closest_alternatives instead of being dropped.
     anchor_weak = make_recipe(
         id="recipeapi_io:1", provider_recipe_id="1", name="Anchor Weak",
         ingredients=[
@@ -1728,8 +1756,12 @@ async def test_additional_options_excludes_non_anchor_even_with_a_higher_score(p
     # All 4 anchor-matching candidates (1, 3, 4, 5) are shown -- 3 in
     # recommendations, 1 in additional_options.
     assert all_shown_ids == {"recipeapi_io:1", "recipeapi_io:3", "recipeapi_io:4", "recipeapi_io:5"}
-    assert "recipeapi_io:2" not in result.anchor_match_by_id
     assert result.anchor_match_by_id["recipeapi_io:1"] is True
+    # PR #15 fifth correction pass (2026-09-08, product decision): the
+    # non-anchor candidate is not silently dropped -- it surfaces via
+    # closest_alternatives instead, correctly labeled.
+    assert [c.recipe_id for c in result.closest_alternatives] == ["recipeapi_io:2"]
+    assert result.anchor_match_by_id["recipeapi_io:2"] is False
 
 
 async def test_non_anchor_candidates_enter_additional_options_only_after_anchor_pool_exhausted(price_db):
@@ -1920,6 +1952,11 @@ async def test_reserve_depth_target_not_met_with_few_same_anchor_candidates(pric
 
 
 async def test_provider_broadening_available_reflects_the_reviewed_mapping(price_db):
+    # Product decision (fifth correction pass, 2026-09-08): basmati_rice
+    # is a specific-category id, deliberately NOT in
+    # PROVIDER_SEARCH_TERM_OVERRIDES -- broadening must be unavailable
+    # for it. minced_beef IS a reviewed lexical synonym, so broadening
+    # must be available for it.
     recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")])
     provider = FakeRecipeProvider(
         "recipeapi_io",
@@ -1930,6 +1967,22 @@ async def test_provider_broadening_available_reflects_the_reviewed_mapping(price
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
     await orch.run(_base_request(pantry_raw=["Basmati Rice"]))
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["provider_broadening_available"] is False
+
+
+async def test_provider_broadening_available_true_for_lexical_synonym_minced_beef(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="minced beef", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["minced beef"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(pantry_raw=["Minced Beef"]))
 
     state_summary = llm.requests[1].observation["state_summary"]
     assert state_summary["provider_broadening_available"] is True
@@ -1986,3 +2039,122 @@ def test_policy_text_carries_meal_defining_anchor_guidance():
 
     assert "meal-defining" in SYSTEM_POLICY.lower()
     assert "pasta" in SYSTEM_POLICY.lower()
+
+
+# --- Product decision (PR #15 fifth correction pass, 2026-09-08): -------------
+# recommendations are never padded with non-anchor candidates; non-anchor
+# feasible candidates route to closest_alternatives instead, structurally
+# separate.
+
+
+async def test_recommendations_never_padded_with_non_anchor_when_anchor_pool_insufficient(price_db):
+    only_anchor_match = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Only Anchor Match",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    non_anchor_1 = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Non Anchor 1",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    non_anchor_2 = make_recipe(
+        id="recipeapi_io:3", provider_recipe_id="3", name="Non Anchor 2",
+        ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id={"1": only_anchor_match, "2": non_anchor_1, "3": non_anchor_2},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    # Only ONE genuine anchor match exists -- recommendations must stay
+    # at length 1, never padded to 3 with the two non-anchor candidates.
+    assert len(result.recommendations) == 1
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"
+    assert result.additional_options == []
+    assert {c.recipe_id for c in result.closest_alternatives} == {"recipeapi_io:2", "recipeapi_io:3"}
+
+
+async def test_fewer_than_three_truthful_recommendations_is_allowed(price_db):
+    # Only 2 exact anchor matches exist in the whole provider inventory
+    # -- recommendations legitimately contains only 2, never forced to 3.
+    match_1 = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="lamb cubes", raw_measure="100 g")],
+    )
+    match_2 = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2",
+        ingredients=[RecipeIngredient(raw_name="lamb cubes", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": match_1, "2": match_2},
+    )
+    llm = FakeLLMProvider([_search_action(["lamb cubes"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["lamb cubes"]))
+
+    assert len(result.recommendations) == 2
+    assert result.additional_options == []
+    assert result.closest_alternatives == []
+
+
+async def test_zero_recommendations_with_non_anchor_closest_alternatives_only(price_db):
+    # No candidate at all contains the active anchor -- recommendations
+    # is legitimately empty; feasible non-anchor candidates surface only
+    # via closest_alternatives, never as normal recommendations.
+    non_anchor_1 = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    non_anchor_2 = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": non_anchor_1, "2": non_anchor_2},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert result.status == "completed"  # some feasible candidates exist, just non-anchor
+    assert result.recommendations == []
+    assert result.additional_options == []
+    assert {c.recipe_id for c in result.closest_alternatives} == {"recipeapi_io:1", "recipeapi_io:2"}
+
+
+async def test_exact_provider_exhaustion_permits_stopping_below_reserve_target(price_db):
+    # Only 2 same-anchor feasible candidates ever exist -- the agent
+    # must be free to stop with reserve_depth_target_met=false rather
+    # than being blocked from stopping (advisory only, per this pass's
+    # product decision: "2 may be the true maximum").
+    match_1 = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    match_2 = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": match_1, "2": match_2},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.ATTEMPT_LIMIT_REACHED)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert llm.requests[1].observation["state_summary"]["reserve_depth_target_met"] is False
+    assert result.status == "completed"
+    assert len(result.recommendations) == 2

@@ -28,8 +28,8 @@ from app.domain.models import Recipe
 # TECHNICAL_SPEC.md section 10 recommends as "normal" for any plan.
 MAX_PAGE_SIZE = 10
 
-# PR #15 fourth correction pass (2026-09-08, Blocker 2): a small,
-# reviewed, ONE-DIRECTIONAL mapping from canonical id to a broader
+# PR #15 fifth correction pass (2026-09-08, product decision): a small,
+# reviewed, ONE-DIRECTIONAL mapping from canonical id to an alternate
 # provider-search term. Lives here (the provider-NEUTRAL module), not
 # inside any one concrete adapter, so both provider implementations and
 # the agent/observation layer can reference the exact same reviewed set
@@ -38,15 +38,30 @@ MAX_PAGE_SIZE = 10
 # this RecipeAPI.io?"). Consulted ONLY when a caller explicitly opts in
 # (SearchStrategy.broaden_provider_search); NEVER consulted by canonical
 # matching/normalization (app.domain.ingredient_normalizer), which stays
-# exact and completely independent of this. Deliberately does NOT
-# include specific animal cuts (chicken_wings, chicken_breast,
-# chicken_thigh, ...) -- broadening a specific cut into its generic
-# parent (e.g. "chicken") would pull in unrelated cuts/varieties, which
-# is exactly the over-broadening this mapping must never do.
+# exact and completely independent of this.
+#
+# Product decision (2026-09-08, fifth correction pass): this dict holds
+# ONLY true lexical/synonym rewordings of the SAME ingredient -- never a
+# specific-ingredient-to-broader-parent-category rewrite. Broadening
+# specificity purely to manufacture a larger result set was found live
+# to be actively counterproductive (basmati_rice -> "rice" pulled in
+# ~1400 results, nearly all sticky rice / rice noodles / rice paper --
+# genuinely different foods that do not canonically match basmati rice
+# at all) and is a real product-truthfulness regression, not merely an
+# efficiency concern: PantryPilot must prefer fewer genuinely relevant
+# results over more weakly-related ones. minced_beef -> "ground beef" is
+# kept because it is the SAME specific ingredient under its other
+# common name (a UK/US wording difference, not a category change) --
+# see the entries REMOVED below for the ones that were category
+# changes, kept here as a record of what was reviewed and rejected:
+#   basmati_rice -> "rice"   (specific rice variety -> generic rice)
+#   jasmine_rice -> "rice"   (specific rice variety -> generic rice)
+#   white_rice   -> "rice"   (specific rice variety -> generic rice)
+# Specific animal cuts (chicken_wings, chicken_breast, chicken_thigh,
+# lamb_cubes, ...) were never in this dict and must never be added --
+# broadening a cut to its generic parent (e.g. "chicken", "lamb") is
+# exactly the specificity loss this mapping must never introduce.
 PROVIDER_SEARCH_TERM_OVERRIDES: dict[str, str] = {
-    "basmati_rice": "rice",
-    "jasmine_rice": "rice",
-    "white_rice": "rice",
     "minced_beef": "ground beef",
 }
 

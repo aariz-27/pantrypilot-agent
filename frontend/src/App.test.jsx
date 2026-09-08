@@ -514,26 +514,44 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
 describe('additional_options anchor discipline end-to-end (PR #15 second correction pass)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('shows the "Alternative pick" badge on a non-anchor RECOMMENDATION fallback card', async () => {
-    // A non-anchor card is still allowed to fill a recommendations
-    // slot when the anchor pool is insufficient -- it must be clearly
-    // labeled, unlike additional_options (Blocker 3, PR #15 fourth
-    // correction pass), which never receives non-anchor cards at all.
+  it('shows a non-anchor fallback card only in the separate "Other options" section, never inside recommendations (fifth correction pass)', async () => {
+    // Product decision (fifth correction pass, PR #15): recommendations
+    // is never padded with a non-anchor candidate. A non-anchor
+    // candidate now surfaces only via closest_alternatives, rendered as
+    // a structurally separate "Other options" section below the real
+    // recommendations, still carrying the "Alternative pick" badge.
     const response = baseResponse({
-      recommendations: [
-        card({ recipe_id: 'anchor-1', contains_active_anchor: true }),
-        card({ recipe_id: 'fallback-1', name: 'Fallback Dish', contains_active_anchor: false }),
-      ],
+      recommendations: [card({ recipe_id: 'anchor-1', contains_active_anchor: true })],
       additional_options: [],
+      closest_alternatives: [card({ recipe_id: 'fallback-1', name: 'Fallback Dish', contains_active_anchor: false })],
     })
     api.postRecommend.mockResolvedValue(response)
     render(<App />)
     await addRecognizedIngredientAndSubmit()
     await waitFor(() => screen.getByText('Fallback Dish'))
 
+    expect(screen.getByText('Other options')).toBeInTheDocument()
+    expect(screen.getByText('Chicken Fried Rice')).toBeInTheDocument() // the real recommendation, still shown
     expect(screen.getAllByText('Alternative pick')).toHaveLength(1)
     const fallbackCardEl = screen.getByText('Fallback Dish').closest('button')
     expect(fallbackCardEl).toContainElement(screen.getByText('Alternative pick'))
+  })
+
+  it('never mixes a non-anchor closest_alternatives card into the recommendations grid', async () => {
+    const response = baseResponse({
+      recommendations: [card({ recipe_id: 'anchor-1', contains_active_anchor: true })],
+      additional_options: [],
+      closest_alternatives: [card({ recipe_id: 'fallback-1', name: 'Fallback Dish', contains_active_anchor: false })],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Fallback Dish'))
+
+    const fallbackCard = screen.getByText('Fallback Dish').closest('button')
+    const recommendationCard = screen.getByText('Chicken Fried Rice').closest('button')
+    // Different grid containers -- not the same recipe-grid section.
+    expect(fallbackCard.closest('.recipe-grid')).not.toBe(recommendationCard.closest('.recipe-grid'))
   })
 
   it('additional_options from a real response never contains a non-anchor card (Blocker 3)', async () => {

@@ -357,7 +357,13 @@ describe('applyExtraPantryToResponse -- additional_options anchor discipline (PR
     expect(result.additional_options).toEqual([])
   })
 
-  it('allows a non-anchor candidate into recommendations once the anchor pool is exhausted', () => {
+  it('never pads recommendations with a non-anchor candidate, even defensively (fifth correction pass)', () => {
+    // The backend guarantees recommendations/additional_options never
+    // contain a non-anchor card, but this proves the frontend filter is
+    // defensive too: a non-anchor card present here (an unrealistic
+    // fixture under the new contract) is excluded, not relocated --
+    // local recompute never invents a closest_alternatives entry that
+    // the backend didn't already provide.
     const onlyAnchor = anchorCard({ recipe_id: 'only-anchor' })
     const nonAnchor1 = nonAnchorCard({ recipe_id: 'na1' })
     const nonAnchor2 = nonAnchorCard({ recipe_id: 'na2' })
@@ -367,11 +373,10 @@ describe('applyExtraPantryToResponse -- additional_options anchor discipline (PR
       closest_alternatives: [],
     }
     // Trigger a recompute pass (no-op confirmation) to exercise the
-    // ordering path.
+    // filtering path.
     const result = applyExtraPantryToResponse(response, new Set(['nonexistent']), new Set())
-    const ids = result.recommendations.map((c) => c.recipe_id)
-    expect(ids[0]).toBe('only-anchor')
-    expect(ids.slice(1)).toEqual(expect.arrayContaining(['na1', 'na2']))
+    expect(result.recommendations.map((c) => c.recipe_id)).toEqual(['only-anchor'])
+    expect(result.additional_options).toEqual([])
   })
 
   it('treats a null contains_active_anchor as "keep in place" (no anchor tracked for this response)', () => {

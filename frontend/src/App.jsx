@@ -251,13 +251,22 @@ function ResultsView({
 }) {
   const hasExact = response.recommendations.length > 0
   const additionalOptions = response.additional_options ?? []
+  const closestAlternatives = response.closest_alternatives ?? []
   // Priority 4: additional_options are only ever meaningful alongside
   // actual top-3 final recommendations -- the closest-alternatives
   // (fallback) path never has a "show more" reserve pool, since those
-  // candidates were hard-rejected, not merely ranked lower.
+  // candidates are never same-anchor matches.
   const revealedAdditional = hasExact ? additionalOptions.slice(0, visibleAdditionalCount) : []
-  const cardsToShow = hasExact ? [...response.recommendations, ...revealedAdditional] : response.closest_alternatives
+  const cardsToShow = hasExact ? [...response.recommendations, ...revealedAdditional] : closestAlternatives
   const hasMoreToShow = hasExact && visibleAdditionalCount < additionalOptions.length
+  // PR #15 fifth correction pass (2026-09-08, product decision):
+  // non-anchor fallback candidates never pad recommendations anymore --
+  // they live in closest_alternatives, shown as an explicitly separate
+  // section BELOW genuine recommendations (never mixed into the same
+  // grid), and only when there actually are exact/same-anchor matches
+  // to be "closest alternatives" TO. When there are no exact matches at
+  // all, closest_alternatives already IS the primary content above.
+  const hasSeparateClosestAlternatives = hasExact && closestAlternatives.length > 0
 
   if (!hasExact && cardsToShow.length === 0) {
     return <EmptyState onNewSearch={onNewSearch} />
@@ -309,6 +318,18 @@ function ResultsView({
         >
           Show more options
         </button>
+      ) : null}
+
+      {hasSeparateClosestAlternatives ? (
+        <div className="card" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div>
+            <h3 style={{ margin: '0 0 4px' }}>Other options</h3>
+            <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 13 }}>
+              These use a different main ingredient than what you searched for.
+            </p>
+          </div>
+          <RecipeGrid cards={closestAlternatives} onOpen={onOpen} />
+        </div>
       ) : null}
     </div>
   )

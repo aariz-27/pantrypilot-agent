@@ -37,34 +37,19 @@ import { rerankCards } from './ranking'
 
 const MAX_FINAL_RECOMMENDATIONS = 3 // mirrors backend/app/agent/state.py
 
-// PR #15 second correction pass (2026-09-08): mirrors
-// AgentOrchestrator._anchor_first_ordering exactly -- a STABLE
-// partition applied AFTER scoring/ranking (never a re-score, the
-// frozen formula in ./ranking.js is untouched), so anchor-matching
-// cards keep filling recommendations ahead of any non-anchor card while
-// anchor supply remains. `contains_active_anchor` is `null` for every
-// card when no anchor was ever tracked for this response -- treated as
-// "no information", grouped with the anchor-matching side so nothing is
-// demoted on a false negative; only a card explicitly marked `false` is
-// pushed to the back.
-function applyAnchorFirstOrdering(cards) {
-  const anchorGroup = []
-  const nonAnchorGroup = []
-  for (const card of cards) {
-    if (card.contains_active_anchor === false) {
-      nonAnchorGroup.push(card)
-    } else {
-      anchorGroup.push(card)
-    }
-  }
-  return [...anchorGroup, ...nonAnchorGroup]
-}
-
-// Blocker 3 (PR #15 fourth correction pass, 2026-09-08): mirrors
-// AgentOrchestrator._finalize's additional_options filter -- the
-// reserve pool ("Show more options") must contain ONLY same-anchor
-// candidates, never a non-anchor fallback (that stays possible only for
-// the top-3 recommendations slots, via applyAnchorFirstOrdering above).
+// PR #15 fifth correction pass (2026-09-08, product decision): mirrors
+// AgentOrchestrator._finalize's partition exactly -- recommendations
+// and additional_options are built EXCLUSIVELY from anchor-matching
+// cards; a non-anchor card never pads a recommendations slot (that
+// prior-pass behavior was reversed -- "fewer genuinely relevant
+// recommendations" is now preferred over padding with an unrelated
+// alternative). Since the backend already guarantees
+// recommendations/additional_options only ever contain anchor-matching
+// cards, this filter is defensive/idempotent by construction -- it
+// never needs to MOVE a non-anchor card anywhere (contains_active_anchor
+// is immutable per card; confirming ingredients only changes
+// coverage/cost, never which canonical ingredients a recipe contains),
+// so a non-anchor card simply never entered this pool to begin with.
 // No-op when no card in the pool carries any anchor information at all
 // (nothing to discriminate by); otherwise strictly requires
 // contains_active_anchor === true.
@@ -161,21 +146,18 @@ export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnr
   )
 
   // Priority 4: rerank the COMBINED pool (never mixing in
-  // closest_alternatives -- those are hard-rejected and can never
-  // become a recommendation/additional_option). A reserve candidate
-  // whose coverage improved can now outrank an original top-3 card.
-  // PR #15 second correction pass: the anchor-first partition is
-  // applied AFTER ranking, so the local "I have this" recompute can
-  // never undo the same anchor-relevance discipline the initial search
-  // establishes server-side.
+  // closest_alternatives -- those are a structurally separate,
+  // non-anchor fallback section and can never become a
+  // recommendation/additional_option). A reserve candidate whose
+  // coverage improved can now outrank an original top-3 card.
+  // PR #15 fifth correction pass: filtered to anchor-only AFTER
+  // ranking (defensive; the backend already guarantees this pool is
+  // anchor-only), so the local "I have this" recompute can never
+  // reintroduce the padding behavior this pass removed.
   const rerankedPool = rerankCards([...recomputedRecommendations, ...recomputedAdditional], rankingConstraints)
-  const orderedPool = applyAnchorFirstOrdering(rerankedPool)
-  const recommendations = orderedPool.slice(0, MAX_FINAL_RECOMMENDATIONS)
-  // Blocker 3: unlike recommendations, additional_options never falls
-  // back to a non-anchor candidate -- once the anchor-matching pool
-  // (already prioritized above) is exhausted, there is nothing left to
-  // reveal via "Show more options".
-  const additionalOptions = filterToAnchorOnly(orderedPool.slice(MAX_FINAL_RECOMMENDATIONS))
+  const anchorOnlyPool = filterToAnchorOnly(rerankedPool)
+  const recommendations = anchorOnlyPool.slice(0, MAX_FINAL_RECOMMENDATIONS)
+  const additionalOptions = anchorOnlyPool.slice(MAX_FINAL_RECOMMENDATIONS)
 
   return {
     ...response,

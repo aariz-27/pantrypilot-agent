@@ -793,11 +793,23 @@ async def test_aclose_does_not_close_an_injected_client():
     await injected_client.aclose()
 
 
-# --- Blocker 2: canonical identity vs provider-search wording (PR #15 --------
-# fourth correction pass, 2026-09-08)
+# --- Blocker 2 / product decision: canonical identity vs provider-search -----
+# wording (PR #15 fourth + fifth correction passes, 2026-09-08). The fifth
+# pass removed specific-ingredient-to-broader-category broadening
+# (basmati_rice/jasmine_rice/white_rice -> "rice") after live validation
+# found it actively counterproductive -- it inflated result COUNT while
+# destroying result RELEVANCE (the extra results were overwhelmingly a
+# different rice form/preparation, not basmati rice). Only a true
+# lexical/synonym rewording (minced_beef -> "ground beef", the SAME
+# ingredient under a different common name) remains.
 
 
-async def test_basmati_rice_provider_search_broadens_to_rice_when_requested():
+async def test_basmati_rice_provider_search_never_broadens_to_generic_rice():
+    # Product decision (fifth correction pass): a SPECIFIC rice variety
+    # must never broaden to the generic parent category "rice", even
+    # when broadening is explicitly requested -- basmati_rice has no
+    # entry in PROVIDER_SEARCH_TERM_OVERRIDES, so this is a no-op
+    # regardless of the flag.
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -806,10 +818,10 @@ async def test_basmati_rice_provider_search_broadens_to_rice_when_requested():
 
     adapter = make_adapter(handler)
     await adapter.search(SearchStrategy(query_ingredients=["basmati_rice"], broaden_provider_search=True))
-    assert captured["ingredients"] == "rice"
+    assert captured["ingredients"] == "basmati_rice"
 
 
-async def test_jasmine_rice_provider_search_broadens_to_rice_when_requested():
+async def test_jasmine_rice_provider_search_never_broadens_to_generic_rice():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -818,10 +830,10 @@ async def test_jasmine_rice_provider_search_broadens_to_rice_when_requested():
 
     adapter = make_adapter(handler)
     await adapter.search(SearchStrategy(query_ingredients=["jasmine_rice"], broaden_provider_search=True))
-    assert captured["ingredients"] == "rice"
+    assert captured["ingredients"] == "jasmine_rice"
 
 
-async def test_basmati_rice_provider_search_stays_exact_when_broadening_not_requested():
+async def test_white_rice_provider_search_never_broadens_to_generic_rice():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -829,8 +841,20 @@ async def test_basmati_rice_provider_search_stays_exact_when_broadening_not_requ
         return httpx.Response(200, json={"data": [], "meta": {}})
 
     adapter = make_adapter(handler)
-    await adapter.search(SearchStrategy(query_ingredients=["basmati_rice"], broaden_provider_search=False))
-    assert captured["ingredients"] == "basmati_rice"
+    await adapter.search(SearchStrategy(query_ingredients=["white_rice"], broaden_provider_search=True))
+    assert captured["ingredients"] == "white_rice"
+
+
+async def test_lamb_cubes_provider_search_never_broadens_to_generic_lamb():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["lamb_cubes"], broaden_provider_search=True))
+    assert captured["ingredients"] == "lamb_cubes"
 
 
 async def test_chicken_wings_never_broadens_to_generic_chicken():
@@ -850,10 +874,36 @@ async def test_chicken_wings_never_broadens_to_generic_chicken():
     assert "chicken" != captured["ingredients"]
 
 
-async def test_provider_search_broadening_only_affects_ids_with_a_reviewed_override():
-    # A multi-anchor query broadens only the anchors that have a
-    # reviewed entry -- others pass through unchanged, same as before
-    # this pass.
+async def test_minced_beef_provider_search_broadens_to_ground_beef_lexical_synonym():
+    # The one retained mapping: a true lexical/synonym rewording of the
+    # exact same ingredient, not a category change.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["minced_beef"], broaden_provider_search=True))
+    assert captured["ingredients"] == "ground beef"
+
+
+async def test_minced_beef_provider_search_stays_exact_when_broadening_not_requested():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["minced_beef"], broaden_provider_search=False))
+    assert captured["ingredients"] == "minced_beef"
+
+
+async def test_provider_search_broadening_only_affects_ids_with_a_reviewed_lexical_override():
+    # A multi-anchor query broadens only the anchor with a reviewed
+    # LEXICAL entry -- a specific-category id (basmati_rice) passes
+    # through unchanged even when broadening is requested.
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -862,9 +912,9 @@ async def test_provider_search_broadening_only_affects_ids_with_a_reviewed_overr
 
     adapter = make_adapter(handler)
     await adapter.search(
-        SearchStrategy(query_ingredients=["basmati_rice", "chicken_wings"], broaden_provider_search=True)
+        SearchStrategy(query_ingredients=["basmati_rice", "minced_beef"], broaden_provider_search=True)
     )
-    assert captured["ingredients"] == "rice,chicken_wings"
+    assert captured["ingredients"] == "basmati_rice,ground beef"
 
 
 async def test_provider_search_broadening_applies_to_free_text_enrichment_term_too():
@@ -877,7 +927,7 @@ async def test_provider_search_broadening_applies_to_free_text_enrichment_term_t
 
     adapter = make_adapter(handler)
     await adapter.search(
-        SearchStrategy(query_ingredients=["basmati_rice"], enrich_free_text=True, broaden_provider_search=True)
+        SearchStrategy(query_ingredients=["minced_beef"], enrich_free_text=True, broaden_provider_search=True)
     )
-    assert call_params[0]["ingredients"] == "rice"
-    assert call_params[1]["search"] == "rice"
+    assert call_params[0]["ingredients"] == "ground beef"
+    assert call_params[1]["search"] == "ground beef"

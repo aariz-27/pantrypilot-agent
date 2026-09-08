@@ -579,76 +579,61 @@ class AgentOrchestrator:
 
         return True, len(qualifying), min_time
 
-    def _anchor_first_ordering(self, state: AgentState) -> list[CandidateEvaluation]:
-        """PR #15 second correction pass (2026-09-08): stable-partitions
-        the already fully-ranked feasible pool (state.best_feasible,
-        unchanged, still produced by the frozen rank_candidates formula)
-        into anchor-containing candidates first, non-anchor candidates
-        second -- WITHIN each group, the existing frozen-ranking order
-        is preserved exactly (this is not a re-score, just a grouping of
-        already-scored candidates). This is what makes both
-        recommendations AND additional_options prefer anchor-matching
-        recipes while any remain, and only spill into non-anchor
-        candidates once that pool is exhausted -- without touching a
-        single weight, score, or the ranker itself.
-
-        No-op (returns state.best_feasible unchanged) when no anchor was
-        ever defined for this run -- there is nothing to group by."""
+    def _partition_by_anchor(
+        self, state: AgentState, candidates: list[CandidateEvaluation]
+    ) -> tuple[list[CandidateEvaluation], list[CandidateEvaluation]]:
+        """Splits an already-ranked candidate list into (anchor-matching,
+        non-anchor), preserving the existing frozen-ranking order within
+        each group (never a re-score -- app.domain.ranker is untouched).
+        No-op partition (everything treated as "anchor-matching") when no
+        anchor was ever defined for this run -- there is nothing to
+        discriminate by."""
 
         if state.active_anchor_canonical is None:
-            return list(state.best_feasible)
+            return list(candidates), []
 
         anchor_matching: list[CandidateEvaluation] = []
         non_anchor: list[CandidateEvaluation] = []
-        for candidate in state.best_feasible:
+        for candidate in candidates:
             if candidate_contains_anchor(candidate, state.recipe_by_id, state.active_anchor_canonical):
                 anchor_matching.append(candidate)
             else:
                 non_anchor.append(candidate)
-        return anchor_matching + non_anchor
+        return anchor_matching, non_anchor
 
     def _finalize(self, state: AgentState, stop_reason: str) -> AgentResult:
         status = "completed" if state.best_feasible else "no_feasible_match"
-        # Priority 4 (PR #15 correction pass, 2026-09-08): state.best_feasible
-        # is the FULL ranked feasible pool (see _merge_best_feasible) --
-        # the top-3 "final recommendations" invariant is enforced exactly
-        # here, once, and everything ranked below it becomes
-        # additional_options (never rejected candidates -- those remain
-        # closest_alternatives, built only when there is no feasible
-        # candidate at all, unchanged). PR #15 second correction pass:
-        # split from the ANCHOR-FIRST ordering, not the raw ranked pool,
-        # so a lower-scored anchor-matching candidate is never bumped
-        # out of the reserve pool by a higher-scored non-anchor one
-        # while anchor supply remains.
-        ordered_pool = self._anchor_first_ordering(state)
-        recommendations = list(ordered_pool[:MAX_FINAL_RECOMMENDATIONS])
-        remainder = ordered_pool[MAX_FINAL_RECOMMENDATIONS:]
-        # PR #15 fourth correction pass (2026-09-08, Blocker 3):
-        # additional_options ("Show more options") must contain ONLY
-        # same-anchor candidates -- once the anchor-matching pool is
-        # exhausted, Show More has nothing left to show and the
-        # frontend hides it, rather than padding the reserve pool with
-        # unrelated non-anchor candidates. This is stricter than
-        # recommendations (top 3), which may still fall back to a
-        # non-anchor candidate for a remaining slot when anchor supply
-        # is genuinely insufficient -- that fallback stays clearly
-        # labeled via anchor_match_by_id/contains_active_anchor, and a
-        # human still sees SOMETHING rather than an artificially short
-        # top-3. A non-anchor candidate that doesn't make it into
-        # recommendations is simply not shown anywhere by this pass
-        # (never silently promoted into the reserve pool). No-op
-        # (nothing filtered) when no anchor was ever defined -- there is
-        # nothing to discriminate by.
-        additional_options = (
-            [c for c in remainder if candidate_contains_anchor(c, state.recipe_by_id, state.active_anchor_canonical)]
+        # PR #15 fifth correction pass (2026-09-08, product decision):
+        # recommendations and additional_options are now BOTH built
+        # exclusively from the anchor-matching feasible pool -- a
+        # non-anchor candidate never pads a recommendations slot
+        # anymore. "Fewer genuinely relevant recommendations" is now
+        # explicitly preferred over "3 padded with an unrelated
+        # alternative" (a prior-pass behavior this ticket reverses).
+        # Non-anchor FEASIBLE candidates (previously eligible to fill a
+        # recommendations slot) now route to closest_alternatives
+        # instead -- a structurally and visually separate section,
+        # bounded the same way the existing hard-rejected-candidate
+        # closest_alternatives path already is. state.best_feasible is
+        # still the FULL ranked feasible pool (see _merge_best_feasible)
+        # produced by the frozen, unmodified ranker; only how it gets
+        # split across the three public buckets changed here.
+        anchor_feasible, non_anchor_feasible = self._partition_by_anchor(state, state.best_feasible)
+        recommendations = list(anchor_feasible[:MAX_FINAL_RECOMMENDATIONS])
+        additional_options = list(anchor_feasible[MAX_FINAL_RECOMMENDATIONS:])
+        anchor_match_by_id = (
+            {c.recipe_id: True for c in anchor_feasible} | {c.recipe_id: False for c in non_anchor_feasible}
             if state.active_anchor_canonical is not None
-            else list(remainder)
+            else {}
         )
-        anchor_match_by_id = {
-            c.recipe_id: candidate_contains_anchor(c, state.recipe_by_id, state.active_anchor_canonical)
-            for c in recommendations + additional_options
-        } if state.active_anchor_canonical is not None else {}
-        closest_alternatives = [] if state.best_feasible else self._closest_alternatives(state)
+        if state.best_feasible:
+            # Some feasible candidates exist (anchor-matching, non-
+            # anchor, or both). Hard-rejected candidates are never
+            # relevant here -- only surfaced via _closest_alternatives
+            # in the "nothing feasible at all" branch below.
+            closest_alternatives = list(non_anchor_feasible[:MAX_FINAL_RECOMMENDATIONS])
+        else:
+            closest_alternatives = self._closest_alternatives(state)
         higher_match_time_excluded, higher_match_count, higher_match_min_time = self._higher_match_time_excluded(
             state, recommendations or closest_alternatives
         )
