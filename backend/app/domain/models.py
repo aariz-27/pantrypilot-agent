@@ -20,6 +20,32 @@ class NormalizationStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class Difficulty(str, Enum):
+    """Provider-grounded difficulty (Module E, FR-18/AC-20 UI display).
+
+    Never inferred/calculated by Claude or by PantryPilot itself --
+    parsed case-insensitively from the provider's own `difficulty`
+    field (confirmed live on RecipeAPI.io, 2026-09-08: lowercase
+    string values including "medium"/"hard"). Any value that is
+    missing or does not match a known label maps to UNKNOWN rather
+    than being silently guessed as EASY/MEDIUM.
+    """
+
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_raw(cls, raw: object) -> "Difficulty":
+        if isinstance(raw, str):
+            cleaned = raw.strip().lower()
+            for member in cls:
+                if member.value == cleaned:
+                    return member
+        return cls.UNKNOWN
+
+
 class RecipeIngredient(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -61,6 +87,9 @@ class Recipe(BaseModel):
     # internal Recipe DTO as RecipeAPI.io" (DEC-003).
     source_label: str | None = None
     provenance_note: str | None = None
+    # Module E addition (backward-compatible, defaults to UNKNOWN so
+    # every existing Recipe construction site remains valid).
+    difficulty: Difficulty = Difficulty.UNKNOWN
 
 
 class CostConfidence(str, Enum):
@@ -115,6 +144,9 @@ class RejectionReason(str, Enum):
     INSTRUCTIONS_UNUSABLE = "instructions_unusable"
     INGREDIENT_LIST_UNUSABLE = "ingredient_list_unusable"
     PROVENANCE_INVALID = "provenance_invalid"
+    # Module E addition: user did not opt into Hard-difficulty recipes
+    # (default filter is Easy+Medium only, per the search-form default).
+    HARD_DIFFICULTY_EXCLUDED = "hard_difficulty_excluded"
 
 
 class UserConstraints(BaseModel):
@@ -128,6 +160,11 @@ class UserConstraints(BaseModel):
     cuisine_preference: str | None = None
     cuisine_strict: bool = False
     max_total_time_minutes: int | None = None
+    # Module E addition: default filter is Easy+Medium (True = Hard
+    # allowed). Deterministic, evaluated in constraint_evaluator -- the
+    # LLM has no authority over this field, matching how it has none
+    # over budget/exclusions/cuisine strictness.
+    allow_hard_difficulty: bool = False
 
     def model_post_init(self, __context: object) -> None:
         if self.budget_aed is not None and self.budget_aed < 0:

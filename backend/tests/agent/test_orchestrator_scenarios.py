@@ -845,3 +845,89 @@ async def test_fully_unresolved_pantry_stops_immediately_without_fabricating_a_c
     assert result.search_attempts == 0
     assert llm.call_count == 0
     assert result.closest_alternatives == []
+
+
+# --- Module E: servings scaling / ingredient breakdown / difficulty filter ---
+
+
+async def test_recommendation_carries_scaled_ingredients_and_cost_breakdown(price_db):
+    recipe = make_recipe(
+        servings=2,
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="200 g", canonical_id=None)],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(servings=4))  # requested double the original 2
+
+    assert len(result.recommendations) == 1
+    recipe_id = result.recommendations[0].recipe_id
+
+    scaling = result.scaling_by_id[recipe_id]
+    assert scaling.scaling_applied is True
+    assert scaling.scaling_factor == 2.0
+    assert scaling.original_servings == 2
+
+    scaled_recipe = result.recipe_by_id[recipe_id]
+    assert scaled_recipe.ingredients[0].raw_measure == "400.0 g"
+
+    # tomato is pantry-present in _base_request's default pantry, so it
+    # is matched, not missing -- breakdown key still exists but is empty.
+    assert recipe_id in result.missing_breakdown_by_id
+
+
+async def test_missing_ingredient_breakdown_reflects_scaled_quantity(price_db):
+    recipe = make_recipe(
+        servings=2,
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="200 g", canonical_id=None),
+            RecipeIngredient(raw_name="soy sauce", raw_measure="50 ml", canonical_id=None),
+        ],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    # soy_sauce is not in the pantry/price_db fixture -- it is missing
+    # and unpriced, so it must show up in the breakdown as incomplete,
+    # never as a fabricated zero, with its scaled quantity carried.
+    result = await orch.run(_base_request(servings=6))  # 3x the original 2 servings
+
+    recipe_id = result.recommendations[0].recipe_id
+    breakdown = result.missing_breakdown_by_id[recipe_id]
+    soy_row = next(r for r in breakdown if r.canonical_id == "soy_sauce" or r.raw_name == "soy sauce")
+    assert soy_row.scaled_required_quantity == 150.0  # 50 ml * 3
+    assert soy_row.detail.price_complete is False
+    assert soy_row.detail.line_cost_aed is None
+
+
+async def test_hard_difficulty_recipe_excluded_from_recommendations_by_default(price_db):
+    from app.domain.models import Difficulty
+
+    recipe = make_recipe(
+        difficulty=Difficulty.HARD,
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider(
+        [_search_action(["tomato"]), _stop_action(StopReason.NO_MATERIALLY_DIFFERENT_STRATEGY_REMAINS)]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert result.status == "no_feasible_match"
+    assert all(c.recipe_id != recipe.id for c in result.recommendations)

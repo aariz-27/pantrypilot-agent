@@ -3,7 +3,11 @@ import pytest
 from app.db.connection import connection_scope
 from app.db.schema import create_schema
 from app.domain.constraint_evaluator import evaluate_constraints
-from app.domain.cost_engine import estimate_ingredient_cost, estimate_purchase_cost
+from app.domain.cost_engine import (
+    estimate_ingredient_cost,
+    estimate_missing_ingredient_breakdown,
+    estimate_purchase_cost,
+)
 from app.domain.models import CostConfidence, NormalizationStatus, Recipe, RecipeIngredient, RejectionReason, UserConstraints
 from app.repositories.price_repository import PriceRepository
 
@@ -339,3 +343,63 @@ def test_budget_with_incomplete_cost_is_indeterminate_under_frozen_contract(db_p
     assert result.hard_constraint_pass is False
     assert RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE in result.rejection_reasons
     assert cost.estimated_purchase_cost_aed is None
+
+
+# --- estimate_missing_ingredient_breakdown (Module E) ------------------------------
+
+
+def test_breakdown_returns_one_row_per_canonical_ingredient(db_path):
+    repo = PriceRepository(db_path)
+    rows = estimate_missing_ingredient_breakdown(
+        [ingredient("tomato", "tomato", "500 g"), ingredient("eggs", "egg", "2 pcs")], repo
+    )
+    assert {r.canonical_id for r in rows} == {"tomato", "egg"}
+    tomato_row = next(r for r in rows if r.canonical_id == "tomato")
+    assert tomato_row.raw_name == "tomato"
+    assert tomato_row.normalized_unit == "g"
+    assert tomato_row.scaled_required_quantity == 500.0
+    assert tomato_row.detail.price_complete is True
+    assert tomato_row.detail.line_cost_aed == 20.0  # 1 package of 1000g @ 20 AED
+
+
+def test_breakdown_combines_duplicate_canonical_lines_into_one_row(db_path):
+    repo = PriceRepository(db_path)
+    rows = estimate_missing_ingredient_breakdown(
+        [ingredient("tomato", "tomato", "600 g"), ingredient("tomatoes", "tomato", "600 g")], repo
+    )
+    assert len(rows) == 1
+    assert rows[0].scaled_required_quantity == 1200.0
+    assert rows[0].detail.packages_needed == 2  # ceil(1200/1000)
+
+
+def test_breakdown_never_fabricates_a_price_for_unpriced_ingredient(db_path):
+    repo = PriceRepository(db_path)
+    rows = estimate_missing_ingredient_breakdown([ingredient("saffron", "saffron", "1 g")], repo)
+    assert len(rows) == 1
+    assert rows[0].detail.price_complete is False
+    assert rows[0].detail.line_cost_aed is None
+
+
+def test_breakdown_row_for_unresolved_ingredient_has_none_canonical_id(db_path):
+    repo = PriceRepository(db_path)
+    rows = estimate_missing_ingredient_breakdown(
+        [RecipeIngredient(raw_name="mystery item", canonical_id=None, raw_measure="1 unit")], repo
+    )
+    assert len(rows) == 1
+    assert rows[0].canonical_id is None
+    assert rows[0].raw_name == "mystery item"
+    assert rows[0].detail.price_complete is False
+
+
+def test_breakdown_empty_input_returns_empty_list(db_path):
+    repo = PriceRepository(db_path)
+    assert estimate_missing_ingredient_breakdown([], repo) == []
+
+
+def test_breakdown_ambiguous_measure_reports_no_scaled_quantity_but_still_prices(db_path):
+    repo = PriceRepository(db_path)
+    rows = estimate_missing_ingredient_breakdown([ingredient("tomato", "tomato", "a pinch")], repo)
+    assert rows[0].scaled_required_quantity is None
+    assert rows[0].normalized_unit is None
+    assert rows[0].detail.price_complete is True  # conservative one-package fallback
+    assert rows[0].detail.cost_confidence.value == "medium"

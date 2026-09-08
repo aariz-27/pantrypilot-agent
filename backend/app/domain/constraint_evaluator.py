@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.models import CostEvaluation, Recipe, RejectionReason, UserConstraints
+from app.domain.models import CostEvaluation, Difficulty, Recipe, RejectionReason, UserConstraints
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,12 @@ def evaluate_constraints(
     }
     if recipe_canonical_ids & constraints.excluded_canonical:
         reasons.append(RejectionReason.EXCLUDED_INGREDIENT_PRESENT)
+
+    # Module E: difficulty filter. Default is Easy+Medium only; the
+    # user must explicitly opt into Hard. Purely a grounded-field
+    # comparison -- never inferred/calculated.
+    if recipe.difficulty == Difficulty.HARD and not constraints.allow_hard_difficulty:
+        reasons.append(RejectionReason.HARD_DIFFICULTY_EXCLUDED)
 
     # Strict cuisine enforcement.
     if constraints.cuisine_strict and constraints.cuisine_preference:

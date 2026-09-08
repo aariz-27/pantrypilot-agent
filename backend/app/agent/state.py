@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.models import CandidateEvaluation
+from app.domain.cost_engine import MissingIngredientBreakdown
+from app.domain.models import CandidateEvaluation, Recipe
+from app.domain.serving_scaler import ScaledRecipe
 from app.recipe.provider import SearchStrategy
 
 MAX_SEARCH_ATTEMPTS = 3
@@ -46,6 +48,10 @@ class AgentState:
     max_total_time_minutes: int | None
     excluded_raw: list[str]
     excluded_canonical: frozenset[str]
+    # Module E: raw pantry text that failed canonical normalization,
+    # for the API layer to surface as "Unrecognized" -- never silently
+    # promoted into the canonical taxonomy or pricing tables.
+    pantry_unresolved: tuple[str, ...] = field(default_factory=tuple)
 
     search_attempts: int = 0
     max_search_attempts: int = MAX_SEARCH_ATTEMPTS
@@ -62,6 +68,15 @@ class AgentState:
     recipe_meta_by_id: dict[str, tuple[str | None, str]] = field(default_factory=dict)
     best_feasible: list[CandidateEvaluation] = field(default_factory=list)
     provider_status: dict[str, str] = field(default_factory=dict)
+    # Module E additions: user-facing detail carried alongside the
+    # frozen CandidateEvaluation contract, keyed by recipe_id. Populated
+    # deterministically in AgentOrchestrator._run_attempt -- never by
+    # the LLM. recipe_by_id holds the NORMALIZED + SERVING-SCALED
+    # recipe (ingredients only; servings/prep/cook/instructions/etc.
+    # untouched), for the API layer to build cards/detail views from.
+    recipe_by_id: dict[str, Recipe] = field(default_factory=dict)
+    scaling_by_id: dict[str, ScaledRecipe] = field(default_factory=dict)
+    missing_breakdown_by_id: dict[str, list[MissingIngredientBreakdown]] = field(default_factory=dict)
     progress_events: list[str] = field(default_factory=list)
     last_observation: object | None = None
 

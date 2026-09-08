@@ -215,8 +215,36 @@ async def test_provider_specific_raw_fields_do_not_leak_into_recipe():
     adapter = make_adapter(json_response(200, payload))
     recipe = await adapter.get_details("1")
     dumped = recipe.model_dump()
-    for leaked_field in ("difficulty", "calories_per_serving", "protein", "dietary_tags"):
+    # difficulty is now an intentional, first-class, typed Recipe field
+    # (Module E) -- it is deliberately mapped, not leaked raw. Only the
+    # remaining genuinely provider-specific fields must never appear.
+    for leaked_field in ("calories_per_serving", "protein", "dietary_tags"):
         assert leaked_field not in dumped
+
+
+@pytest.mark.parametrize(
+    "raw_difficulty,expected",
+    [
+        ("easy", "easy"),
+        ("Medium", "medium"),
+        ("HARD", "hard"),
+        ("expert", "unknown"),  # unrecognized value never guessed
+        (None, "unknown"),
+        (42, "unknown"),  # wrong type never guessed
+    ],
+)
+async def test_difficulty_is_mapped_case_insensitively_with_unknown_fallback(raw_difficulty, expected):
+    payload = {"data": {"id": 1, "name": "Test", "instructions": "Do it.", "difficulty": raw_difficulty}}
+    adapter = make_adapter(json_response(200, payload))
+    recipe = await adapter.get_details("1")
+    assert recipe.difficulty.value == expected
+
+
+async def test_missing_difficulty_field_entirely_is_unknown():
+    payload = {"data": {"id": 1, "name": "Test", "instructions": "Do it."}}
+    adapter = make_adapter(json_response(200, payload))
+    recipe = await adapter.get_details("1")
+    assert recipe.difficulty.value == "unknown"
 
 
 # --- malformed responses ------------------------------------------------------------

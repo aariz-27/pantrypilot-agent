@@ -112,6 +112,16 @@ jobs:
             echo "No frontend test script configured yet."
           fi
 
+      - name: Run frontend lint if configured
+        if: steps.frontend_exists.outputs.exists == 'true'
+        working-directory: frontend
+        run: |
+          if npm run | grep -q " lint"; then
+            npm run lint
+          else
+            echo "No frontend lint script configured yet."
+          fi
+
       - name: Run frontend build
         if: steps.frontend_exists.outputs.exists == 'true'
         working-directory: frontend

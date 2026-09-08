@@ -1,0 +1,346 @@
+"""Module E: POST /api/recommend integration tests.
+
+Uses a fake AgentOrchestrator (dependency override) -- no live Anthropic
+or RecipeAPI.io calls, consistent with docs/AGENTS.md ("Use mocks for
+routine provider/API tests"). The orchestrator itself is already
+covered by tests/agent/test_orchestrator_scenarios.py; these tests
+cover the HTTP boundary: request validation and response mapping.
+"""
+
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+from app.agent.errors import AgentMalformedActionError
+from app.agent.orchestrator import AgentResult
+from app.api.recommend import get_orchestrator
+from app.config import Settings, get_settings
+from app.domain.cost_engine import IngredientCostDetail, MissingIngredientBreakdown
+from app.domain.models import CandidateEvaluation, CostConfidence, Difficulty, Recipe, RejectionReason
+from app.domain.serving_scaler import ScaledRecipe
+from app.main import app
+
+VALID_REQUEST = {
+    "ingredients": ["chicken", "rice", "onion", "garlic"],
+    "servings": 4,
+    "max_total_time_minutes": 45,
+}
+
+
+def _recipe(**overrides) -> Recipe:
+    defaults = dict(
+        id="recipeapi_io:1",
+        provider="recipeapi_io",
+        provider_recipe_id="1",
+        name="Chicken Fried Rice",
+        cuisine="Asian",
+        image_url="https://example.test/img.jpg",
+        source_url="https://example.test/recipe/1",
+        difficulty=Difficulty.EASY,
+        servings=2,
+        prep_time_minutes=10,
+        cook_time_minutes=15,
+        instructions="Step 1. Step 2.",
+    )
+    defaults.update(overrides)
+    return Recipe(**defaults)
+
+
+def _candidate(**overrides) -> CandidateEvaluation:
+    defaults = dict(
+        recipe_id="recipeapi_io:1",
+        provider="recipeapi_io",
+        pantry_coverage=0.75,
+        matched_ingredients=["chicken_breast", "rice", "onion"],
+        missing_ingredients=["soy_sauce"],
+        missing_count=1,
+        estimated_purchase_cost_aed=3.5,
+        price_complete=True,
+        cost_confidence=CostConfidence.HIGH,
+        cuisine_match=True,
+        hard_constraint_pass=True,
+        rejection_reasons=[],
+        deterministic_score=0.9,
+    )
+    defaults.update(overrides)
+    return CandidateEvaluation(**defaults)
+
+
+class FakeOrchestrator:
+    def __init__(self, result: AgentResult | Exception) -> None:
+        self._result = result
+
+    async def run(self, request):
+        self.request = request
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
+
+def _override(fake_orchestrator: FakeOrchestrator) -> None:
+    app.dependency_overrides[get_orchestrator] = lambda: fake_orchestrator
+
+
+def _clear() -> None:
+    app.dependency_overrides.clear()
+
+
+def _happy_path_result() -> AgentResult:
+    recipe = _recipe()
+    candidate = _candidate()
+    breakdown = [
+        MissingIngredientBreakdown(
+            raw_name="soy sauce",
+            canonical_id="soy_sauce",
+            normalized_unit="ml",
+            scaled_required_quantity=100.0,
+            detail=IngredientCostDetail(
+                canonical_id="soy_sauce",
+                packages_needed=1,
+                package_price_aed=3.5,
+                line_cost_aed=3.5,
+                price_complete=True,
+                cost_confidence=CostConfidence.HIGH,
+            ),
+        )
+    ]
+    scaling = ScaledRecipe(recipe=recipe, requested_servings=4, original_servings=2, scaling_applied=True, scaling_factor=2.0)
+    return AgentResult(
+        request_id="req_test123",
+        status="completed",
+        search_attempts=1,
+        recommendations=[candidate],
+        closest_alternatives=[],
+        stop_reason="sufficient_feasible_candidates",
+        progress_events=["attempt 1: route=recipeapi_io new_items=1 feasible=1"],
+        provider_status={"recipeapi_io": "ok"},
+        recipe_by_id={recipe.id: recipe},
+        scaling_by_id={recipe.id: scaling},
+        missing_breakdown_by_id={recipe.id: breakdown},
+        pantry_unresolved=[],
+    )
+
+
+def test_happy_path_returns_mapped_recipe_card():
+    _override(FakeOrchestrator(_happy_path_result()))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "completed"
+        assert len(body["recommendations"]) == 1
+        card = body["recommendations"][0]
+        assert card["name"] == "Chicken Fried Rice"
+        assert card["difficulty"] == "easy"
+        assert card["is_exact_match"] is True
+        assert card["deviation_reasons"] == []
+        assert card["provider_original_servings"] == 2
+        assert card["requested_servings"] == 4
+        assert card["servings_scaling_applied"] is True
+        assert card["total_time_minutes"] == 25
+        assert card["missing_ingredients"][0]["display_name"] == "Soy Sauce"
+        assert card["missing_ingredients"][0]["estimated_cost_aed"] == 3.5
+        assert card["estimated_additional_spend_aed"] == 3.5
+    finally:
+        _clear()
+
+
+def test_unknown_price_is_never_returned_as_zero():
+    result = _happy_path_result()
+    incomplete_breakdown = [
+        MissingIngredientBreakdown(
+            raw_name="saffron",
+            canonical_id="saffron",
+            normalized_unit=None,
+            scaled_required_quantity=None,
+            detail=IngredientCostDetail(None, None, None, None, False, CostConfidence.UNKNOWN),
+        )
+    ]
+    result.missing_breakdown_by_id[result.recommendations[0].recipe_id] = incomplete_breakdown
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        row = response.json()["recommendations"][0]["missing_ingredients"][0]
+        assert row["price_complete"] is False
+        assert row["estimated_cost_aed"] is None
+    finally:
+        _clear()
+
+
+def test_closest_alternative_reports_time_deviation():
+    recipe = _recipe(prep_time_minutes=30, cook_time_minutes=27)
+    candidate = _candidate(hard_constraint_pass=False, rejection_reasons=[RejectionReason.MAX_TOTAL_TIME_EXCEEDED])
+    scaling = ScaledRecipe(recipe=recipe, requested_servings=4, original_servings=2, scaling_applied=True, scaling_factor=2.0)
+    result = AgentResult(
+        request_id="req_x",
+        status="no_feasible_match",
+        search_attempts=3,
+        recommendations=[],
+        closest_alternatives=[candidate],
+        stop_reason="attempt_limit_reached",
+        progress_events=[],
+        provider_status={},
+        recipe_by_id={recipe.id: recipe},
+        scaling_by_id={recipe.id: scaling},
+        missing_breakdown_by_id={recipe.id: []},
+        pantry_unresolved=[],
+    )
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        card = response.json()["closest_alternatives"][0]
+        assert card["is_exact_match"] is False
+        assert card["deviation_reasons"] == ["12 min over your target"]
+    finally:
+        _clear()
+
+
+def test_excluded_ingredient_violation_never_shown_as_closest_alternative():
+    recipe = _recipe()
+    candidate = _candidate(hard_constraint_pass=False, rejection_reasons=[RejectionReason.EXCLUDED_INGREDIENT_PRESENT])
+    result = AgentResult(
+        request_id="req_x",
+        status="no_feasible_match",
+        search_attempts=3,
+        recommendations=[],
+        closest_alternatives=[candidate],
+        stop_reason="attempt_limit_reached",
+        progress_events=[],
+        provider_status={},
+        recipe_by_id={recipe.id: recipe},
+        scaling_by_id={},
+        missing_breakdown_by_id={recipe.id: []},
+        pantry_unresolved=[],
+    )
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.json()["closest_alternatives"] == []
+    finally:
+        _clear()
+
+
+def test_pantry_unresolved_is_surfaced():
+    result = _happy_path_result()
+    result.pantry_unresolved.append("kohlrabi")
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        body = response.json()
+        assert body["pantry_unresolved"] == ["kohlrabi"]
+        assert any("1 pantry ingredient" in limitation for limitation in body["limitations"])
+    finally:
+        _clear()
+
+
+def test_agent_malformed_action_error_maps_to_503():
+    _override(FakeOrchestrator(AgentMalformedActionError("bad output")))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "AGENT_MALFORMED_ACTION"
+    finally:
+        _clear()
+
+
+# --- request validation -------------------------------------------------------------
+
+
+def test_missing_servings_is_rejected():
+    payload = {k: v for k, v in VALID_REQUEST.items() if k != "servings"}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_missing_total_time_is_rejected():
+    payload = {k: v for k, v in VALID_REQUEST.items() if k != "max_total_time_minutes"}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_empty_ingredients_list_is_rejected():
+    payload = {**VALID_REQUEST, "ingredients": []}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_too_many_ingredients_is_rejected():
+    payload = {**VALID_REQUEST, "ingredients": [f"item{i}" for i in range(31)]}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_servings_out_of_bounds_is_rejected():
+    for bad in (0, 21):
+        payload = {**VALID_REQUEST, "servings": bad}
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=payload)
+        assert response.status_code == 422
+
+
+def test_total_time_out_of_bounds_is_rejected():
+    for bad in (0, 601):
+        payload = {**VALID_REQUEST, "max_total_time_minutes": bad}
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=payload)
+        assert response.status_code == 422
+
+
+def test_negative_budget_is_rejected():
+    payload = {**VALID_REQUEST, "budget_aed": -1}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_too_many_excluded_ingredients_is_rejected():
+    payload = {**VALID_REQUEST, "excluded_ingredients": [f"item{i}" for i in range(21)]}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_unknown_privileged_field_is_rejected():
+    payload = {**VALID_REQUEST, "deterministic_score": 0.99}
+    client = TestClient(app)
+    response = client.post("/api/recommend", json=payload)
+    assert response.status_code == 422
+
+
+def test_unconfigured_llm_provider_fails_safely_with_503_not_a_crash(tmp_path):
+    # Real dependency chain (get_orchestrator -> get_llm_provider ->
+    # AnthropicLLMProvider(settings)), not the FakeOrchestrator override
+    # -- this proves a configuration error raised during FastAPI
+    # dependency resolution itself is still caught by the global
+    # PantryPilotError handler rather than surfacing as an unhandled 500.
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, price_db_path=str(tmp_path / "unused.db")
+    )
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "LLM_PROVIDER_CONFIGURATION_ERROR"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_valid_request_passes_allow_hard_difficulty_through():
+    fake = FakeOrchestrator(_happy_path_result())
+    _override(fake)
+    try:
+        client = TestClient(app)
+        client.post("/api/recommend", json={**VALID_REQUEST, "allow_hard_difficulty": True})
+        assert fake.request.allow_hard_difficulty is True
+    finally:
+        _clear()

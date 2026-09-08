@@ -1,0 +1,47 @@
+.search-form {
+  padding: var(--space-5);
+}
+
+.search-form__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.search-form__more-toggle {
+  margin-top: var(--space-4);
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  padding: var(--space-2) 0;
+}
+
+.search-form__more {
+  margin-top: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+}
+
+.search-form__checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+
+.search-form__submit {
+  margin-top: var(--space-5);
+  width: 100%;
+}
+
+@media (min-width: 480px) {
+  .search-form__submit {
+    width: auto;
+    min-width: 220px;
+  }
+}

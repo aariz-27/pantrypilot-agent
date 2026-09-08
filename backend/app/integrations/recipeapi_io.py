@@ -26,6 +26,14 @@ in this same ticket):
   quantity, unit, optional}). image_url/source_url are NOT documented
   as existing fields -- this adapter never fabricates them and only
   uses them if actually present in a response.
+- Module E live verification (2026-09-08, 2 bounded live calls -- 1
+  search, 1 detail): `difficulty` IS present with real lowercase string
+  values ("medium", "hard" observed; "easy" also a documented/expected
+  value) -- mapped via app.domain.models.Difficulty.from_raw(), which
+  falls back to UNKNOWN for anything unrecognized or absent, never
+  guessed. `image_url`/`source_url` were `null` on every real response
+  observed, confirming the frontend's "no image available"/omit-
+  source-link fallback paths are load-bearing, not theoretical.
 
 UNCONFIRMED pending the live smoke test in this ticket: the exact query
 parameter name for cuisine filtering (the provider's own "Query
@@ -54,7 +62,7 @@ import httpx
 
 from app.config import Settings
 from app.domain.errors import InvalidInputError
-from app.domain.models import NormalizationStatus, Recipe, RecipeIngredient
+from app.domain.models import Difficulty, NormalizationStatus, Recipe, RecipeIngredient
 from app.domain.provider_errors import (
     RecipeNotFoundError,
     RecipeProviderConfigurationError,
@@ -324,6 +332,7 @@ class RecipeAPIIOAdapter:
             prep_time_minutes=raw.get("prep_time") if isinstance(raw.get("prep_time"), int) else None,
             cook_time_minutes=raw.get("cook_time") if isinstance(raw.get("cook_time"), int) else None,
             fetched_at=datetime.now(timezone.utc),
+            difficulty=Difficulty.from_raw(raw.get("difficulty")),
         )
 
     def _map_ingredient(self, raw: object) -> RecipeIngredient | None:

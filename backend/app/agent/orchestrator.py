@@ -27,11 +27,14 @@ from app.agent.tools import (
     execute_search,
     fetch_recipe_details,
     is_approved_local_curated_intent,
+    normalize_recipe_ingredients,
 )
+from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
 from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
 from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry
-from app.domain.models import CandidateEvaluation, UserConstraints
+from app.domain.models import CandidateEvaluation, Recipe, UserConstraints
 from app.domain.ranker import rank_candidates
+from app.domain.serving_scaler import ScaledRecipe, scale_recipe_servings
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
 from app.recipe.provider import RecipeProvider, SearchStrategy
 from app.repositories.price_repository import PriceRepository
@@ -49,6 +52,7 @@ class AgentRequest:
     servings: int
     max_total_time_minutes: int | None
     excluded_raw: list[str] = field(default_factory=list)
+    allow_hard_difficulty: bool = False
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,13 @@ class AgentResult:
     stop_reason: str | None
     progress_events: list[str]
     provider_status: dict[str, str]
+    # Module E: user-facing detail for every recipe_id appearing in
+    # recommendations/closest_alternatives, for the API layer to build
+    # cards/detail views from without re-deriving anything itself.
+    recipe_by_id: dict[str, Recipe]
+    scaling_by_id: dict[str, ScaledRecipe]
+    missing_breakdown_by_id: dict[str, list[MissingIngredientBreakdown]]
+    pantry_unresolved: list[str]
 
 
 class AgentOrchestrator:
@@ -122,6 +133,7 @@ class AgentOrchestrator:
             max_total_time_minutes=request.max_total_time_minutes,
             excluded_raw=list(request.excluded_raw),
             excluded_canonical=excluded.canonical_ids,
+            pantry_unresolved=pantry.unresolved,
         )
 
     def _constraints(self, request: AgentRequest, excluded_canonical: frozenset[str]) -> UserConstraints:
@@ -131,6 +143,7 @@ class AgentOrchestrator:
             cuisine_preference=request.cuisine_preference,
             cuisine_strict=request.cuisine_strict,
             max_total_time_minutes=request.max_total_time_minutes,
+            allow_hard_difficulty=request.allow_hard_difficulty,
         )
 
     # -- decision step (LLM boundary) -------------------------------------
@@ -270,7 +283,20 @@ class AgentOrchestrator:
         capacity = state.remaining_candidate_capacity()
         to_fetch = new_items[:capacity]
 
-        recipes, _failed_ids = await fetch_recipe_details(provider, to_fetch)
+        fetched_recipes, _failed_ids = await fetch_recipe_details(provider, to_fetch)
+
+        # Module E: deterministic serving scaling, applied once per
+        # recipe right after grounding and before any evaluation/costing
+        # so the scaled quantities are what the Cost Engine sees.
+        # Never done by the LLM (docs/AGENTS.md).
+        recipes: list[Recipe] = []
+        for raw_recipe in fetched_recipes:
+            scaled = scale_recipe_servings(raw_recipe, state.servings)
+            state.scaling_by_id[raw_recipe.id] = scaled
+            normalized_scaled = normalize_recipe_ingredients(scaled.recipe)
+            state.recipe_by_id[raw_recipe.id] = normalized_scaled
+            recipes.append(scaled.recipe)
+
         for recipe in recipes:
             # Keyed by recipe.id (e.g. "recipeapi_io:1"): this string is
             # always built by app.recipe.mapping.build_recipe_id from the
@@ -286,6 +312,21 @@ class AgentOrchestrator:
         feasible, rejected = evaluate_and_rank(recipes, state.pantry_canonical, constraints, self._price_repository)
         state.evaluated_candidates.extend(feasible + rejected)
         state.best_feasible = self._merge_best_feasible(state, feasible, constraints)
+
+        # Module E: ingredient-level cost breakdown for every evaluated
+        # candidate (feasible or not -- closest alternatives need it
+        # too), derived from the same normalized+scaled recipe already
+        # cached above. Deterministic re-derivation only -- no LLM, no
+        # new pricing rule, reuses estimate_missing_ingredient_breakdown.
+        for candidate in feasible + rejected:
+            normalized_recipe = state.recipe_by_id.get(candidate.recipe_id)
+            if normalized_recipe is None:
+                continue
+            missing_ids = set(candidate.missing_ingredients)
+            missing_lines = [ing for ing in normalized_recipe.ingredients if ing.canonical_id in missing_ids]
+            state.missing_breakdown_by_id[candidate.recipe_id] = estimate_missing_ingredient_breakdown(
+                missing_lines, self._price_repository
+            )
 
         state.record_progress(
             f"attempt {state.search_attempts}: route={route} new_items={len(new_items)} feasible={len(feasible)}"
@@ -368,13 +409,23 @@ class AgentOrchestrator:
 
     def _finalize(self, state: AgentState, stop_reason: str) -> AgentResult:
         status = "completed" if state.best_feasible else "no_feasible_match"
+        recommendations = list(state.best_feasible[:MAX_FINAL_RECOMMENDATIONS])
+        closest_alternatives = [] if state.best_feasible else self._closest_alternatives(state)
+
+        relevant_ids = {c.recipe_id for c in recommendations + closest_alternatives}
         return AgentResult(
             request_id=state.request_id,
             status=status,
             search_attempts=state.search_attempts,
-            recommendations=list(state.best_feasible[:MAX_FINAL_RECOMMENDATIONS]),
-            closest_alternatives=[] if state.best_feasible else self._closest_alternatives(state),
+            recommendations=recommendations,
+            closest_alternatives=closest_alternatives,
             stop_reason=stop_reason,
             progress_events=list(state.progress_events),
             provider_status=dict(state.provider_status),
+            recipe_by_id={rid: r for rid, r in state.recipe_by_id.items() if rid in relevant_ids},
+            scaling_by_id={rid: s for rid, s in state.scaling_by_id.items() if rid in relevant_ids},
+            missing_breakdown_by_id={
+                rid: b for rid, b in state.missing_breakdown_by_id.items() if rid in relevant_ids
+            },
+            pantry_unresolved=list(state.pantry_unresolved),
         )
