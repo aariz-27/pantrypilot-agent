@@ -229,7 +229,7 @@ Agentic proof tests pass: 34 orchestrator scenario tests (`backend/tests/agent/t
 - Full backend test count: 378 passed, 2 warnings (unrelated `httpx`/`anyio` deprecation warnings), verified against `main` on 2026-09-08
 
 ### Approver
-Founder / Product Owner — this gate is reported here as exit-criteria-satisfied (for the orchestrator-level scope described above) but is **not self-declared COMPLETE**. Per this file's own Gate Rules ("no gate advances automatically because code exists" / "Founder / Product Owner remains final approval authority"), explicit Founder review and approval are still required to close G6, consistent with how G3 and G4 are handled above.
+Founder / Product Owner — this gate is reported here as exit-criteria-satisfied (for the orchestrator-level scope described above) but is **not self-declared COMPLETE**. Per this file's own Gate Rules ("No gate advances automatically" / "Code completion alone does not equal gate completion" / "Founder / Product Owner remains final approval authority"), explicit Founder review and approval are still required to close G6, consistent with how G3 and G4 are handled above.
 
 ---
 
