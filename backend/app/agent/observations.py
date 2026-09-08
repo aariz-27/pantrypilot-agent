@@ -103,20 +103,56 @@ def candidate_contains_anchor(
     recipe_by_id: dict[str, Recipe],
     anchor_canonical_id: str | None,
 ) -> bool:
-    """Single-candidate anchor-match check, factored out (PR #15 second
-    correction pass, 2026-09-08) so both the aggregate AnchorStats below
-    and AgentOrchestrator's additional_options ordering/labeling use the
-    exact same, single definition of "contains the anchor": an exact
-    canonical_id match against one of the recipe's normalized
-    ingredients. Never a fuzzy/substring match, never independently
-    guessed -- False (not "unknown") whenever no anchor is defined or
-    the recipe is unavailable, since an undefined anchor cannot be
-    "contained"."""
+    """Single-candidate anchor-RELEVANCE check, factored out (PR #15
+    second correction pass, 2026-09-08) so both the aggregate
+    AnchorStats below and AgentOrchestrator's recommendations/
+    additional_options/closest_alternatives partitioning use the exact
+    same, single definition. Used ONLY for search-relevance
+    display/observation purposes -- NEVER for pantry matching, missing-
+    ingredient computation, cost, or pricing, which live entirely in
+    app.domain.candidate_evaluation/cost_engine and compare canonical
+    ids against the user's PANTRY, not the search anchor. This function
+    is not called from, and has no path into, that code.
+
+    True on either of two grounds:
+
+    1. Exact canonical match -- the recipe has a normalized ingredient
+       whose canonical_id equals the anchor exactly. The authoritative,
+       always-correct signal.
+
+    2. Grounded relevance fallback (PR #15 sixth correction pass,
+       2026-09-08, live-audited): RecipeAPI.io's own ingredient
+       taxonomy is sometimes coarser than a specific pantry ingredient
+       -- e.g. "Ankara Pan-fried Lamb Cubes" and "Cop Shish Lamb Cubes
+       Grilled" both genuinely are lamb-cube recipes by name, but their
+       own ingredient records use "Lamb" and "Lamb leg" respectively,
+       neither of which is "Lamb cubes". A candidate with no exact
+       canonical match is still counted as anchor-relevant when the
+       recipe's own TITLE contains the anchor's human-readable phrase
+       (canonical id with underscores replaced by spaces, e.g.
+       "lamb_cubes" -> "lamb cubes"), case-insensitively. This is a
+       grounded, deterministic, generic string check against the
+       recipe's own real title -- never free-form LLM semantic scoring,
+       never an ingredient-specific branch, and it cannot make a
+       generic "lamb" recipe count as a lamb_cubes match merely because
+       it contains lamb (the title itself must contain the specific
+       phrase "lamb cubes").
+
+    Neither branch ever changes ownership/matched/missing ingredients,
+    cost, pantry coverage, or pricing -- those remain governed
+    exclusively by exact canonical_id equality elsewhere. False (not
+    "unknown") whenever no anchor is defined or the recipe is
+    unavailable, since an undefined anchor cannot be "contained"."""
 
     if anchor_canonical_id is None:
         return False
     recipe = recipe_by_id.get(candidate.recipe_id)
-    return recipe is not None and any(ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients)
+    if recipe is None:
+        return False
+    if any(ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients):
+        return True
+    anchor_phrase = anchor_canonical_id.replace("_", " ")
+    return anchor_phrase in (recipe.name or "").lower()
 
 
 def compute_anchor_stats(

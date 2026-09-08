@@ -581,6 +581,13 @@ GROCERY_INGREDIENT_ALIASES: dict[str, str] = {
     # Same US/UK synonym gap as coriander/cilantro above, not a new
     # concept.
     "ground beef": "minced_beef",
+    # PR #15 sixth correction pass (2026-09-08): found live during the
+    # lamb-family provider audit -- RecipeAPI.io's real ingredient text
+    # is "Ground lamb" (61 real recipes confirmed live), which has no
+    # path to the existing "minced_lamb" canonical id (only "Minced
+    # lamb" was an exact vocabulary match). Same US/UK synonym gap as
+    # ground beef/minced_beef above.
+    "ground lamb": "minced_lamb",
 }
 
 # ---------------------------------------------------------------------------

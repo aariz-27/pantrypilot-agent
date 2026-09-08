@@ -200,3 +200,17 @@ def test_ground_beef_normalizes_to_minced_beef():
     )
     assert result.canonical_id == "minced_beef"
     assert result.status == NormalizationStatus.ALIAS
+
+
+def test_ground_lamb_normalizes_to_minced_lamb():
+    # Regression: found live during the lamb-family provider audit
+    # (PR #15 sixth correction pass, 2026-09-08) -- "ground lamb"
+    # (RecipeAPI.io's real ingredient text, 61 recipes confirmed live)
+    # previously fell through to UNKNOWN despite "minced_lamb" already
+    # being a real canonical id, because only "Minced lamb" was an
+    # exact vocabulary match.
+    result = normalize_ingredient_name(
+        "Ground lamb", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    assert result.canonical_id == "minced_lamb"
+    assert result.status == NormalizationStatus.ALIAS

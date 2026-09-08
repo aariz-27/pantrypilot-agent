@@ -323,11 +323,15 @@ async def test_local_curated_route_permitted_for_approved_desi_intent(price_db):
 
 
 async def test_duplicate_recipe_across_attempts_evaluated_once(price_db):
-    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    # Explicit non-colliding names: the default make_recipe() title
+    # ("Tomato Onion Curry") would accidentally title-match BOTH the
+    # "tomato" and "onion" anchors via the grounded-relevance fallback
+    # (PR #15 sixth correction pass) and defeat this test's real intent.
+    recipe = make_recipe(name="Recipe One", ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
     provider = FakeRecipeProvider(
         "recipeapi_io",
         searches=[ScriptedSearch(result=_search_result("1")), ScriptedSearch(result=_search_result("1", "2"))],
-        details_by_id={"1": recipe, "2": make_recipe(id="recipeapi_io:2", provider_recipe_id="2", ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")])},
+        details_by_id={"1": recipe, "2": make_recipe(id="recipeapi_io:2", provider_recipe_id="2", name="Recipe Two", ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")])},
     )
     llm = FakeLLMProvider(
         [_search_action(["tomato"]), _search_action(["onion"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)]
@@ -719,12 +723,16 @@ async def test_same_provider_local_id_from_two_different_providers_are_not_confu
     recipeapi_item = SearchResultItem(id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", name="Recipe A")
     curated_item = SearchResultItem(id="local_curated:1", provider="local_curated", provider_recipe_id="1", name="Recipe B")
 
+    # Explicit non-colliding names: the default make_recipe() title
+    # ("Tomato Onion Curry") would accidentally title-match BOTH the
+    # "tomato" and "onion" anchors via the grounded-relevance fallback
+    # (PR #15 sixth correction pass) and defeat this test's real intent.
     recipeapi_recipe = make_recipe(
-        id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", cuisine="Asian",
+        id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", cuisine="Asian", name="Recipe A Dish",
         ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
     )
     curated_recipe = make_recipe(
-        id="local_curated:1", provider="local_curated", provider_recipe_id="1", cuisine="Pakistani",
+        id="local_curated:1", provider="local_curated", provider_recipe_id="1", cuisine="Pakistani", name="Recipe B Dish",
         ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
     )
 
@@ -1488,8 +1496,12 @@ async def test_observation_exposes_anchor_candidate_counts(price_db):
         id="recipeapi_io:1", provider_recipe_id="1",
         ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
     )
+    # Explicit non-colliding name: the default make_recipe() title
+    # ("Tomato Onion Curry") would accidentally title-match the "tomato"
+    # anchor via the grounded-relevance fallback (PR #15 sixth
+    # correction pass) and defeat this test's real intent.
     without_anchor = make_recipe(
-        id="recipeapi_io:2", provider_recipe_id="2",
+        id="recipeapi_io:2", provider_recipe_id="2", name="Onion Skillet",
         ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
     )
     provider = FakeRecipeProvider(
@@ -1515,12 +1527,16 @@ async def test_mostly_generic_overlap_true_when_anchor_underrepresented(price_db
         id="recipeapi_io:1", provider_recipe_id="1",
         ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
     )
+    # Explicit non-colliding names: the default make_recipe() title
+    # ("Tomato Onion Curry") would accidentally title-match the "tomato"
+    # anchor via the grounded-relevance fallback (PR #15 sixth
+    # correction pass) and defeat this test's real intent.
     without_a = make_recipe(
-        id="recipeapi_io:2", provider_recipe_id="2",
+        id="recipeapi_io:2", provider_recipe_id="2", name="Onion Skillet",
         ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
     )
     without_b = make_recipe(
-        id="recipeapi_io:3", provider_recipe_id="3",
+        id="recipeapi_io:3", provider_recipe_id="3", name="Rice Bowl",
         ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")],
     )
     provider = FakeRecipeProvider(
@@ -1632,8 +1648,12 @@ async def test_generic_ingredient_presence_does_not_count_as_anchor_match(price_
     # A candidate containing "onion" and "garlic" (both present in the
     # pantry) but NOT the chosen anchor "tomato" must not be counted as
     # an anchor match, however many OTHER pantry ingredients it shares.
+    # Explicit non-colliding name: the default make_recipe() title
+    # ("Tomato Onion Curry") would accidentally title-match the "tomato"
+    # anchor via the grounded-relevance fallback (PR #15 sixth
+    # correction pass) and defeat this test's real intent.
     generic_overlap = make_recipe(
-        id="recipeapi_io:1", provider_recipe_id="1",
+        id="recipeapi_io:1", provider_recipe_id="1", name="Onion Rice Skillet",
         ingredients=[
             RecipeIngredient(raw_name="onion", raw_measure="100 g"),
             RecipeIngredient(raw_name="basmati rice", raw_measure="100 g"),
@@ -2108,12 +2128,16 @@ async def test_zero_recommendations_with_non_anchor_closest_alternatives_only(pr
     # No candidate at all contains the active anchor -- recommendations
     # is legitimately empty; feasible non-anchor candidates surface only
     # via closest_alternatives, never as normal recommendations.
+    # Explicit non-colliding names: the default make_recipe() title
+    # ("Tomato Onion Curry") would accidentally title-match the "tomato"
+    # anchor via the grounded-relevance fallback (PR #15 sixth
+    # correction pass) and defeat this test's real intent.
     non_anchor_1 = make_recipe(
-        id="recipeapi_io:1", provider_recipe_id="1",
+        id="recipeapi_io:1", provider_recipe_id="1", name="Onion Skillet One",
         ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
     )
     non_anchor_2 = make_recipe(
-        id="recipeapi_io:2", provider_recipe_id="2",
+        id="recipeapi_io:2", provider_recipe_id="2", name="Onion Skillet Two",
         ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
     )
     provider = FakeRecipeProvider(
@@ -2158,3 +2182,114 @@ async def test_exact_provider_exhaustion_permits_stopping_below_reserve_target(p
     assert llm.requests[1].observation["state_summary"]["reserve_depth_target_met"] is False
     assert result.status == "completed"
     assert len(result.recommendations) == 2
+
+
+# --- Grounded relevance fallback (PR #15 sixth correction pass, 2026-09-08) ---
+# Live audit found RecipeAPI.io recipes whose TITLE clearly matches the
+# specific pantry ingredient (e.g. "Ankara Pan-fried Lamb Cubes") while
+# their own ingredient record is coarser ("Lamb", "Lamb leg") -- neither
+# exactly equals the lamb_cubes canonical. candidate_contains_anchor now
+# also counts a title-phrase match as anchor-relevant, generically (no
+# ingredient-specific branch), for DISPLAY/observation purposes only --
+# never for pantry matching, missing ingredients, cost, or pricing.
+
+
+async def test_title_phrase_match_counts_as_anchor_relevant_even_without_exact_ingredient_match(price_db):
+    # Recreates the exact live-audited case: ingredient record "Lamb"
+    # (not "Lamb cubes"), but the title unambiguously says "Lamb Cubes".
+    ankara_style = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Ankara Pan-fried Lamb Cubes",
+        ingredients=[RecipeIngredient(raw_name="Lamb", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": ankara_style},
+    )
+    llm = FakeLLMProvider([_search_action(["lamb cubes"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["Lamb Cubes"]))
+
+    assert result.anchor_match_by_id["recipeapi_io:1"] is True
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"
+    assert result.closest_alternatives == []
+
+
+async def test_title_phrase_match_also_works_when_ingredient_record_is_a_different_specific_cut(price_db):
+    # The second live-audited case: ingredient record "Lamb leg" (a
+    # DIFFERENT specific cut, not generic) -- still title-matches
+    # "lamb cubes" and counts as relevant.
+    cop_shish = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Cop Shish Lamb Cubes Grilled",
+        ingredients=[RecipeIngredient(raw_name="Lamb leg", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": cop_shish},
+    )
+    llm = FakeLLMProvider([_search_action(["lamb cubes"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["Lamb Cubes"]))
+
+    assert result.anchor_match_by_id["recipeapi_io:1"] is True
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"
+
+
+async def test_generic_lamb_recipe_without_cubes_in_title_never_becomes_a_lamb_cubes_match(price_db):
+    # Safety rule: a generic lamb recipe (contains "lamb" in its
+    # ingredient AND title) must NOT count as a lamb_cubes match merely
+    # because it mentions lamb -- the title must contain the SPECIFIC
+    # phrase "lamb cubes", not just "lamb".
+    roast_lamb = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Roast Lamb",
+        ingredients=[RecipeIngredient(raw_name="Lamb leg", raw_measure="1 kg")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": roast_lamb},
+    )
+    llm = FakeLLMProvider([_search_action(["lamb cubes"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["Lamb Cubes"]))
+
+    assert result.anchor_match_by_id["recipeapi_io:1"] is False
+    assert result.recommendations == []
+    assert result.closest_alternatives[0].recipe_id == "recipeapi_io:1"
+
+
+async def test_grounded_relevance_never_affects_pantry_matching_missing_ingredients_or_cost(price_db):
+    # Part 3's explicit requirement: search relevance and exact
+    # canonical pantry matching must never be conflated. Even though
+    # "Ankara Pan-fried Lamb Cubes" is now SEARCH-relevant (title
+    # match), its ingredient "Lamb" still does NOT normalize to
+    # lamb_cubes -- so it is NOT counted as an owned/matched pantry
+    # ingredient, still appears as missing/unresolved, and its cost is
+    # computed exactly as before (unaffected by anchor relevance).
+    ankara_style = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Ankara Pan-fried Lamb Cubes",
+        ingredients=[RecipeIngredient(raw_name="Lamb", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": ankara_style},
+    )
+    llm = FakeLLMProvider([_search_action(["lamb cubes"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["Lamb Cubes"]))
+
+    candidate = result.recommendations[0]
+    # "Lamb" (raw ingredient) never normalizes to lamb_cubes -- it is
+    # UNKNOWN, so the pantry-matching pipeline (fully independent of
+    # candidate_contains_anchor) correctly treats it as unresolved, not
+    # as a matched/owned lamb_cubes ingredient.
+    assert "lamb_cubes" not in candidate.matched_ingredients
+    stored_recipe = result.recipe_by_id["recipeapi_io:1"]
+    assert stored_recipe.ingredients[0].canonical_id is None
+
