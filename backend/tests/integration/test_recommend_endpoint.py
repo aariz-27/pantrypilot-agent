@@ -238,6 +238,39 @@ def test_pantry_unresolved_is_surfaced():
         _clear()
 
 
+def test_higher_match_time_excluded_is_surfaced_as_deterministic_summary_only():
+    result = _happy_path_result()
+    result = result.__class__(
+        **{**result.__dict__, "higher_match_time_excluded": True, "higher_match_time_excluded_count": 2, "higher_match_min_rejected_time_minutes": 45},
+    )
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        body = response.json()
+        assert body["higher_match_time_excluded"] is True
+        assert body["higher_match_time_excluded_count"] == 2
+        assert body["higher_match_min_rejected_time_minutes"] == 45
+        # Deterministic summary data only -- never raw agent internals.
+        assert "system_policy" not in response.text
+        assert "chain_of_thought" not in response.text
+    finally:
+        _clear()
+
+
+def test_higher_match_time_excluded_defaults_false():
+    _override(FakeOrchestrator(_happy_path_result()))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        body = response.json()
+        assert body["higher_match_time_excluded"] is False
+        assert body["higher_match_time_excluded_count"] == 0
+        assert body["higher_match_min_rejected_time_minutes"] is None
+    finally:
+        _clear()
+
+
 def test_agent_malformed_action_error_maps_to_503():
     _override(FakeOrchestrator(AgentMalformedActionError("bad output")))
     try:

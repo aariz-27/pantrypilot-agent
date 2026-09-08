@@ -143,4 +143,156 @@ describe('App end-to-end flow', () => {
 
     expect(screen.getByText('Cook smarter with what you already have.')).toBeInTheDocument()
   })
+
+  it('shows the higher-match-time-excluded message with a "Show longer recipes" action', async () => {
+    api.postRecommend.mockResolvedValueOnce(
+      baseResponse({ recommendations: [card()], higher_match_time_excluded: true, higher_match_time_excluded_count: 2 }),
+    )
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+
+    await waitFor(() =>
+      expect(screen.getByText(/Some better pantry matches were excluded because they exceeded your 30-minute limit\./)).toBeInTheDocument(),
+    )
+
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [card()] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Show longer recipes' }))
+
+    await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(2))
+    expect(api.postRecommend.mock.calls[1][0].max_total_time_minutes).toBe(60)
+  })
+})
+
+describe('"I have this" pantry checkbox flow', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function onionRow(overrides = {}) {
+    return { raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', normalized_unit: 'g', scaled_required_quantity: 100, packages_needed: 1, estimated_cost_aed: 2.5, price_complete: true, cost_confidence: 'high', ...overrides }
+  }
+  function garlicRow(overrides = {}) {
+    return { raw_name: 'garlic', canonical_id: 'garlic', display_name: 'Garlic', normalized_unit: 'g', scaled_required_quantity: 10, packages_needed: 1, estimated_cost_aed: 1.5, price_complete: true, cost_confidence: 'high', ...overrides }
+  }
+
+  it('checking a missing ingredient moves it to matched, increases match %, decreases missing count, and recomputes cost', async () => {
+    const twoMissingCard = card({
+      matched_ingredients: ['Chicken Breast'],
+      missing_ingredients: [onionRow(), garlicRow()],
+      unresolved_ingredients: [],
+      pantry_coverage: 1 / 3,
+      estimated_additional_spend_aed: 4.0,
+    })
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [twoMissingCard] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
+
+    // Detail view recomputed in place.
+    expect(screen.getByText('✓ Onion')).toBeInTheDocument()
+    expect(screen.queryByText('✕ Onion')).not.toBeInTheDocument()
+    expect(screen.getByText('2 of 3 ingredients available')).toBeInTheDocument()
+    expect(screen.getByText('Estimated additional spend: AED 1.50')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    // Grid card also reflects the recompute (match % up, missing count down).
+    expect(screen.getByText('67% pantry match')).toBeInTheDocument()
+    expect(screen.getByText('✕ 1 missing')).toBeInTheDocument()
+  })
+
+  it('updates multiple cards from the same pantry change', async () => {
+    const cardA = card({
+      recipe_id: 'recipeapi_io:a',
+      name: 'Recipe A',
+      matched_ingredients: [],
+      missing_ingredients: [onionRow()],
+      pantry_coverage: 0,
+    })
+    const cardB = card({
+      recipe_id: 'recipeapi_io:b',
+      name: 'Recipe B',
+      matched_ingredients: ['Tomato'],
+      missing_ingredients: [onionRow()],
+      pantry_coverage: 0.5,
+    })
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [cardA, cardB] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Recipe A'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Recipe A/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    // Both cards now show 100% match -- Recipe B was never opened.
+    const matchBadges = screen.getAllByText('100% pantry match')
+    expect(matchBadges).toHaveLength(2)
+  })
+
+  it('"Refresh recommendations" only appears after a pantry change, and submits the updated pantry', async () => {
+    const missingOnionCard = card({ missing_ingredients: [onionRow()], pantry_coverage: 0.5 })
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [missingOnionCard] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    expect(screen.queryByRole('button', { name: 'Refresh recommendations' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    const refreshButton = screen.getByRole('button', { name: 'Refresh recommendations' })
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [card()] }))
+    await userEvent.click(refreshButton)
+
+    await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(2))
+    const secondCallIngredients = api.postRecommend.mock.calls[1][0].ingredients
+    expect(secondCallIngredients).toContain('Onion')
+    // Never calls the LLM/backend merely because a checkbox was clicked
+    // -- only the explicit "Refresh recommendations" click triggers this.
+    expect(api.postRecommend).toHaveBeenCalledTimes(2)
+  })
+
+  it('deduplicates against an ingredient already in the current pantry when refreshing', async () => {
+    const missingOnionCard = card({ missing_ingredients: [onionRow()], pantry_coverage: 0.5 })
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [missingOnionCard] }))
+    render(<App />)
+
+    // The pantry already contains "Onion" from the initial search.
+    const { fetchIngredientSuggestions } = api
+    fetchIngredientSuggestions.mockResolvedValue([{ canonical_id: 'onion', display_name: 'Onion' }])
+    const input = screen.getByRole('combobox', { name: /What ingredients do you have/ })
+    await userEvent.type(input, 'onion')
+    await waitFor(() => screen.getByText('Onion'))
+    await userEvent.click(screen.getByText('Onion'))
+    await userEvent.click(screen.getByRole('button', { name: 'Find meals' }))
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [card()] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh recommendations' }))
+
+    await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(2))
+    const secondCallIngredients = api.postRecommend.mock.calls[1][0].ingredients
+    expect(secondCallIngredients.filter((name) => name === 'Onion')).toHaveLength(1)
+  })
+
+  it('never shows a checkbox for an unresolved (non-canonical) ingredient', async () => {
+    const cardWithUnresolved = card({
+      missing_ingredients: [{ raw_name: 'mystery sauce', canonical_id: null, display_name: 'mystery sauce', estimated_cost_aed: null, price_complete: false }],
+    })
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [cardWithUnresolved] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    expect(screen.queryByRole('checkbox', { name: /I have/ })).not.toBeInTheDocument()
+  })
 })

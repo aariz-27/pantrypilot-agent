@@ -379,7 +379,11 @@ async def test_timeout_then_retry_succeeds_returns_result():
     adapter = make_adapter(handler, max_retries=1)
     result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
     assert result.items == []
-    assert len(calls) == 2  # initial failed attempt + one successful retry
+    # initial failed attempt + one successful retry for the primary
+    # query, + one more call for the free-text enrichment pass that
+    # always runs after a non-empty-ingredients search (post-review
+    # fix, 2026-09-08; see RecipeAPIIOAdapter._merge_with_free_text_search)
+    assert len(calls) == 3
 
 
 async def test_server_error_then_retry_succeeds_returns_result():
@@ -394,7 +398,9 @@ async def test_server_error_then_retry_succeeds_returns_result():
     adapter = make_adapter(handler, max_retries=1)
     result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
     assert result.items == []
-    assert len(calls) == 2
+    # See test_timeout_then_retry_succeeds_returns_result above for why
+    # this is 3, not 2.
+    assert len(calls) == 3
 
 
 async def test_zero_max_retries_means_single_attempt():
@@ -502,6 +508,145 @@ async def test_search_lowercases_cuisine_for_provider_enum_compatibility():
     adapter = make_adapter(handler)
     await adapter.search(SearchStrategy(cuisine="  Italian  "))
     assert captured["cuisine"] == "italian"
+
+
+# --- free-text search enrichment (post-review retrieval fix, 2026-09-08) ------------
+#
+# Live investigation (PR #15 browser review) found RecipeAPI.io's
+# `ingredients` filter can silently contribute zero relevance signal for
+# a real, well-represented ingredient term (confirmed for "chicken_wings":
+# `ingredients=chicken_wings,garlic` returned a result set byte-identical
+# to `ingredients=garlic` alone), while its `search` free-text field finds
+# directly relevant recipes for the same concept. The fix always merges a
+# second, free-text-enriched query (using only the primary/first anchor,
+# since joining all anchors into one search phrase was confirmed live to
+# reliably return zero) into the primary result -- uniformly, never
+# conditional on which ingredient was requested.
+
+
+async def test_search_merges_free_text_enrichment_results():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        call_params.append(params)
+        if "search" in params:
+            return httpx.Response(
+                200,
+                json={"data": [{"id": 9, "name": "Enriched Match"}], "meta": {"current_page": 1, "last_page": 1}},
+            )
+        return httpx.Response(
+            200,
+            json={"data": [{"id": 1, "name": "Primary Match"}], "meta": {"current_page": 1, "last_page": 1}},
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken_wings", "garlic"]))
+
+    assert len(call_params) == 2
+    assert call_params[0]["ingredients"] == "chicken_wings,garlic"
+    assert "search" not in call_params[0]
+    assert call_params[1]["ingredients"] == "chicken_wings,garlic"  # kept, not replaced
+    assert call_params[1]["search"] == "chicken wings"  # primary anchor, humanized
+
+    names = {item.name for item in result.items}
+    assert names == {"Primary Match", "Enriched Match"}
+
+
+async def test_search_enrichment_never_runs_without_query_ingredients():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_params.append(dict(request.url.params))
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(cuisine="Italian"))
+
+    assert len(call_params) == 1
+
+
+async def test_search_enrichment_results_are_deduped_against_primary():
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Both the primary and enriched calls return the exact same
+        # recipe -- it must appear only once in the merged result.
+        return httpx.Response(
+            200, json={"data": [{"id": 1, "name": "Same Recipe"}], "meta": {"current_page": 1, "last_page": 1}}
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"]))
+
+    assert [item.provider_recipe_id for item in result.items] == ["1"]
+
+
+async def test_search_enrichment_survives_a_full_primary_page():
+    # Regression for a real bug found during implementation: naively
+    # concatenating primary-then-enriched before truncating to
+    # page_size silently discarded every enriched item whenever the
+    # primary query alone already filled a full page (the common case).
+    # Interleaving must guarantee enriched items still get a slot.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "search" in dict(request.url.params):
+            data = [{"id": 999, "name": "Enriched Only Match"}]
+        else:
+            # Primary already returns a full page on its own.
+            data = [{"id": i, "name": f"Primary {i}"} for i in range(1, 11)]
+        return httpx.Response(200, json={"data": data, "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken_wings"], page_size=10))
+
+    names = {item.name for item in result.items}
+    assert "Enriched Only Match" in names
+    assert len(result.items) == 10
+
+
+async def test_search_enrichment_result_is_capped_at_page_size():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "search" in dict(request.url.params):
+            data = [{"id": i, "name": f"Enriched {i}"} for i in range(100, 110)]
+        else:
+            data = [{"id": i, "name": f"Primary {i}"} for i in range(1, 11)]
+        return httpx.Response(200, json={"data": data, "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], page_size=10))
+
+    assert len(result.items) == 10
+
+
+async def test_search_enrichment_failure_never_fails_a_successful_primary_search():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "search" in dict(request.url.params):
+            raise httpx.ConnectError("simulated enrichment failure", request=request)
+        return httpx.Response(
+            200, json={"data": [{"id": 1, "name": "Primary Match"}], "meta": {"current_page": 1, "last_page": 1}}
+        )
+
+    adapter = make_adapter(handler, max_retries=0)
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"]))
+
+    assert [item.name for item in result.items] == ["Primary Match"]
+
+
+async def test_search_enrichment_uses_only_the_primary_anchor_not_all_anchors():
+    # Live-confirmed: joining every anchor into one `search` phrase
+    # reliably returns zero results (the field behaves like a short
+    # phrase match, not a bag-of-words match) -- only the first anchor
+    # is ever used for the enrichment pass.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if "search" in params:
+            captured["search"] = params["search"]
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["chicken_wings", "garlic", "ketchup"]))
+
+    assert captured["search"] == "chicken wings"
 
 
 # --- secret non-leakage ---------------------------------------------------------------

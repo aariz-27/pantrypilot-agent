@@ -167,4 +167,7 @@ def build_recommend_response(
         recommendations=recommendations,
         closest_alternatives=closest_alternatives,
         limitations=limitations,
+        higher_match_time_excluded=result.higher_match_time_excluded,
+        higher_match_time_excluded_count=result.higher_match_time_excluded_count,
+        higher_match_min_rejected_time_minutes=result.higher_match_min_rejected_time_minutes,
     )

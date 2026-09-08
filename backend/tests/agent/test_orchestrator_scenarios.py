@@ -1016,3 +1016,102 @@ async def test_top_candidates_are_sorted_by_pantry_coverage_not_raw_fetch_order(
     assert len(top) == 2
     assert top[0]["name"] == "Strong Match"
     assert top[0]["pantry_coverage"] > top[1]["pantry_coverage"]
+
+
+async def test_relaxing_max_total_time_admits_a_candidate_previously_rejected_for_time(price_db):
+    # Regression test requested in PR #15 review: a recipe that is a
+    # strong pantry match but takes longer than a tight time limit must
+    # be hard-rejected at the tight limit and become feasible once the
+    # user relaxes it -- the time hard constraint (unchanged) is the
+    # only thing gating this, never the search/retrieval layer.
+    slow_recipe = make_recipe(
+        prep_time_minutes=20,
+        cook_time_minutes=40,  # total 60
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="200 g"),
+            RecipeIngredient(raw_name="onion", raw_measure="100 g"),
+            RecipeIngredient(raw_name="basmati rice", raw_measure="200 g"),
+        ],
+    )
+
+    def make_orchestrator():
+        provider = FakeRecipeProvider(
+            "recipeapi_io",
+            searches=[ScriptedSearch(result=_search_result("1"))],
+            details_by_id={"1": slow_recipe},
+        )
+        llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.ATTEMPT_LIMIT_REACHED)])
+        return AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    from app.domain.models import RejectionReason
+
+    tight_result = await make_orchestrator().run(_base_request(max_total_time_minutes=30))
+    assert tight_result.status == "no_feasible_match"
+    rejected = tight_result.closest_alternatives[0]
+    assert rejected.recipe_id == slow_recipe.id
+    assert RejectionReason.MAX_TOTAL_TIME_EXCEEDED in rejected.rejection_reasons
+
+    relaxed_result = await make_orchestrator().run(_base_request(max_total_time_minutes=60))
+    assert relaxed_result.status == "completed"
+    assert relaxed_result.recommendations[0].recipe_id == slow_recipe.id
+    assert relaxed_result.recommendations[0].hard_constraint_pass is True
+
+
+# --- higher_match_time_excluded (ticket section 3, PR #15 review) -----------
+
+
+async def test_higher_match_time_excluded_true_when_a_better_match_was_time_rejected(price_db):
+    weak_but_shown = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Weak Fast Match",
+        prep_time_minutes=5, cook_time_minutes=5,
+        # Only 1 of 2 required ingredients is in the default pantry
+        # (tomato/onion/basmati rice) -- coverage 0.5, deliberately
+        # lower than strong_but_slow's full match below.
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="200 g"),
+            RecipeIngredient(raw_name="garlic", raw_measure="10 g"),
+        ],
+    )
+    strong_but_slow = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Strong Slow Match",
+        prep_time_minutes=30, cook_time_minutes=40,  # total 70, exceeds 30 min limit
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="200 g"),
+            RecipeIngredient(raw_name="onion", raw_measure="100 g"),
+            RecipeIngredient(raw_name="basmati rice", raw_measure="200 g"),
+        ],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": weak_but_shown, "2": strong_but_slow},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.ATTEMPT_LIMIT_REACHED)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(max_total_time_minutes=30))
+
+    assert result.recommendations[0].recipe_id == weak_but_shown.id
+    assert result.higher_match_time_excluded is True
+    assert result.higher_match_time_excluded_count == 1
+    assert result.higher_match_min_rejected_time_minutes == 70
+
+
+async def test_higher_match_time_excluded_false_when_nothing_better_was_time_rejected(price_db):
+    only_match = make_recipe(
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": only_match},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(max_total_time_minutes=30))
+
+    assert result.higher_match_time_excluded is False
+    assert result.higher_match_time_excluded_count == 0
+    assert result.higher_match_min_rejected_time_minutes is None

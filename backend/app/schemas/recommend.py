@@ -84,3 +84,11 @@ class RecommendResponse(BaseModel):
     recommendations: list[RecipeCard]
     closest_alternatives: list[RecipeCard]
     limitations: list[str]
+    # Module E post-review addition (ticket section 3, PR #15): a
+    # deterministic summary flag only -- never chain-of-thought, raw
+    # agent actions, or internal prompts. True when some evaluated
+    # candidate had better pantry coverage than what is shown here but
+    # was hard-rejected specifically for exceeding max_total_time_minutes.
+    higher_match_time_excluded: bool = False
+    higher_match_time_excluded_count: int = 0
+    higher_match_min_rejected_time_minutes: int | None = None

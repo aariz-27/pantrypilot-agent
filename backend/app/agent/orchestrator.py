@@ -32,7 +32,7 @@ from app.agent.tools import (
 from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
 from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
 from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry
-from app.domain.models import CandidateEvaluation, Recipe, UserConstraints
+from app.domain.models import CandidateEvaluation, Recipe, RejectionReason, UserConstraints
 from app.domain.ranker import rank_candidates
 from app.domain.serving_scaler import ScaledRecipe, scale_recipe_servings
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
@@ -72,6 +72,15 @@ class AgentResult:
     scaling_by_id: dict[str, ScaledRecipe]
     missing_breakdown_by_id: dict[str, list[MissingIngredientBreakdown]]
     pantry_unresolved: list[str]
+    # Module E post-review addition (2026-09-08, PR #15): deterministic
+    # summary only -- never chain-of-thought/raw actions/prompts -- so
+    # the UI can tell the user when a genuinely better pantry match was
+    # excluded purely for exceeding max_total_time_minutes, without
+    # silently hiding that trade-off or ever relaxing the constraint
+    # itself.
+    higher_match_time_excluded: bool = False
+    higher_match_time_excluded_count: int = 0
+    higher_match_min_rejected_time_minutes: int | None = None
 
 
 class AgentOrchestrator:
@@ -349,7 +358,6 @@ class AgentOrchestrator:
     def _build_observation(
         self, state, route, strategy, outcome, recipes, feasible, rejected
     ) -> SearchObservation:
-        from app.domain.models import RejectionReason
 
         evaluated_this_attempt = feasible + rejected
         # Documented implementation thresholds (spec gives no exact
@@ -429,10 +437,49 @@ class AgentOrchestrator:
         rejected.sort(key=lambda c: (len(c.rejection_reasons), -c.pantry_coverage))
         return rejected[:MAX_FINAL_RECOMMENDATIONS]
 
+    def _higher_match_time_excluded(
+        self, state: AgentState, shown: list[CandidateEvaluation]
+    ) -> tuple[bool, int, int | None]:
+        """Deterministic summary only (ticket section 3, PR #15 review):
+        never chain-of-thought/raw agent actions/internal prompts --
+        just whether a genuinely higher-pantry-match candidate exists
+        among ALL evaluated candidates (not only the top-3 shown) that
+        was hard-rejected specifically for exceeding
+        max_total_time_minutes, plus a safely-grounded count and the
+        minimum real total time among them. Never used to relax the
+        time constraint itself -- that remains the user's decision via
+        a new, explicit search (see app/api/recommend_mapping.py's
+        "Show longer recipes" handling)."""
+
+        best_shown_coverage = max((c.pantry_coverage for c in shown), default=0.0)
+        qualifying = [
+            c
+            for c in state.evaluated_candidates
+            if not c.hard_constraint_pass
+            and RejectionReason.MAX_TOTAL_TIME_EXCEEDED in c.rejection_reasons
+            and c.pantry_coverage > best_shown_coverage
+        ]
+        if not qualifying:
+            return False, 0, None
+
+        min_time: int | None = None
+        for c in qualifying:
+            recipe = state.recipe_by_id.get(c.recipe_id)
+            if recipe is None or recipe.prep_time_minutes is None or recipe.cook_time_minutes is None:
+                continue
+            total_time = recipe.prep_time_minutes + recipe.cook_time_minutes
+            if min_time is None or total_time < min_time:
+                min_time = total_time
+
+        return True, len(qualifying), min_time
+
     def _finalize(self, state: AgentState, stop_reason: str) -> AgentResult:
         status = "completed" if state.best_feasible else "no_feasible_match"
         recommendations = list(state.best_feasible[:MAX_FINAL_RECOMMENDATIONS])
         closest_alternatives = [] if state.best_feasible else self._closest_alternatives(state)
+        higher_match_time_excluded, higher_match_count, higher_match_min_time = self._higher_match_time_excluded(
+            state, recommendations or closest_alternatives
+        )
 
         relevant_ids = {c.recipe_id for c in recommendations + closest_alternatives}
         return AgentResult(
@@ -450,4 +497,7 @@ class AgentOrchestrator:
                 rid: b for rid, b in state.missing_breakdown_by_id.items() if rid in relevant_ids
             },
             pantry_unresolved=list(state.pantry_unresolved),
+            higher_match_time_excluded=higher_match_time_excluded,
+            higher_match_time_excluded_count=higher_match_count,
+            higher_match_min_rejected_time_minutes=higher_match_min_time,
         )

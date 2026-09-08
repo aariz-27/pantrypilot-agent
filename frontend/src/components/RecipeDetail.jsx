@@ -35,7 +35,7 @@ function Steps({ instructions }) {
   return <p className="recipe-detail__instructions">{instructions}</p>
 }
 
-export function RecipeDetail({ card, onClose }) {
+export function RecipeDetail({ card, onClose, onMarkHave }) {
   const titleId = useId()
   const dialogRef = useRef(null)
   const closeButtonRef = useRef(null)
@@ -153,7 +153,7 @@ export function RecipeDetail({ card, onClose }) {
             </div>
           </div>
 
-          <IngredientStatusList card={card} />
+          <IngredientStatusList card={card} onMarkHave={onMarkHave} />
 
           <CostSummary card={card} />
 
