@@ -21,7 +21,9 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
   const [activeIndex, setActiveIndex] = useState(-1)
   const debouncedQuery = useDebouncedValue(query, 200)
   const containerRef = useRef(null)
+  const listboxRef = useRef(null)
   const requestSeqRef = useRef(0)
+  const movedByKeyboardRef = useRef(false)
 
   const existingCanonicalIds = useMemo(
     () => new Set(items.filter((item) => item.canonical_id).map((item) => item.canonical_id)),
@@ -68,6 +70,25 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
   }, [debouncedQuery])
 
   useEffect(() => {
+    // Post-review fix (2026-09-08): ArrowDown/ArrowUp updated
+    // activeIndex but never scrolled the listbox, so the highlighted
+    // option could move outside the visible area. Only keyboard-driven
+    // moves scroll -- mouse hover (onMouseEnter) also sets activeIndex
+    // but must never yank the list while the user is pointing at it.
+    if (!movedByKeyboardRef.current) return
+    movedByKeyboardRef.current = false
+    if (activeIndex < 0 || !listboxRef.current) return
+    // Positional lookup, not an id-based querySelector: useId() values
+    // contain ':' characters that are not valid unescaped in a CSS id
+    // selector. Options render in the same order as `suggestions`, so
+    // the child at `activeIndex` is always the active option.
+    const option = listboxRef.current.children[activeIndex]
+    if (option && typeof option.scrollIntoView === 'function') {
+      option.scrollIntoView({ block: 'nearest' })
+    }
+  }, [activeIndex])
+
+  useEffect(() => {
     function handleClickOutside(event) {
       if (containerRef.current && !containerRef.current.contains(event.target)) {
         setOpen(false)
@@ -105,9 +126,11 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       setOpen(true)
+      movedByKeyboardRef.current = true
       setActiveIndex((prev) => Math.min(prev + 1, suggestions.length - 1))
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
+      movedByKeyboardRef.current = true
       setActiveIndex((prev) => Math.max(prev - 1, 0))
     } else if (event.key === 'Enter') {
       event.preventDefault()
@@ -160,7 +183,7 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
       {helpText ? <p className="field-help">{helpText}</p> : null}
 
       {open && suggestions.length > 0 ? (
-        <ul className="autocomplete__listbox" role="listbox" id={listboxId}>
+        <ul className="autocomplete__listbox" role="listbox" id={listboxId} ref={listboxRef}>
           {suggestions.map((suggestion, index) => (
             <li
               key={suggestion.canonical_id}

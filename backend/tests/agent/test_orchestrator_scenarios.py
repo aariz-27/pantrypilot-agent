@@ -931,3 +931,88 @@ async def test_hard_difficulty_recipe_excluded_from_recommendations_by_default(p
 
     assert result.status == "no_feasible_match"
     assert all(c.recipe_id != recipe.id for c in result.recommendations)
+
+
+# --- Module E post-review: observation signal fixes (2026-09-08) ------------
+#
+# Real-browser investigation (PR #15 review) found the agent's decision
+# observation had no aggregate signal for "everything rejected for
+# exceeding max_total_time_minutes" (unlike the existing all_over_budget/
+# all_strict_cuisine_mismatch flags), and that top_candidates surfaced the
+# first 5 evaluated in raw fetch order rather than the 5 most informative
+# (highest pantry_coverage) ones. Neither the ranking formula nor the
+# 3-attempt/20-candidate bounds were touched by this fix.
+
+
+async def test_all_max_total_time_exceeded_flag_set_when_every_rejection_is_time(price_db):
+    recipe = make_recipe(
+        prep_time_minutes=60,
+        cook_time_minutes=60,
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.ATTEMPT_LIMIT_REACHED)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(max_total_time_minutes=30))
+
+    observation = llm.requests[1].observation["latest_search_observation"]
+    assert observation["all_max_total_time_exceeded"] is True
+
+
+async def test_all_max_total_time_exceeded_flag_false_when_a_feasible_candidate_exists(price_db):
+    recipe = make_recipe(
+        prep_time_minutes=5,
+        cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(max_total_time_minutes=30))
+
+    observation = llm.requests[1].observation["latest_search_observation"]
+    assert observation["all_max_total_time_exceeded"] is False
+
+
+async def test_top_candidates_are_sorted_by_pantry_coverage_not_raw_fetch_order(price_db):
+    # "1" is a poor match evaluated first; "2" is a strong match
+    # evaluated second. Before the fix, top_candidates would have kept
+    # fetch order (poor match first); after the fix it must lead with
+    # the higher-coverage candidate regardless of fetch order.
+    poor_match = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Poor Match",
+        ingredients=[RecipeIngredient(raw_name="saffron", raw_measure="1 g")],
+    )
+    strong_match = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Strong Match",
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="200 g"),
+            RecipeIngredient(raw_name="onion", raw_measure="100 g"),
+            RecipeIngredient(raw_name="basmati rice", raw_measure="200 g"),
+        ],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": poor_match, "2": strong_match},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.ATTEMPT_LIMIT_REACHED)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    observation = llm.requests[1].observation["latest_search_observation"]
+    top = observation["top_candidates"]
+    assert len(top) == 2
+    assert top[0]["name"] == "Strong Match"
+    assert top[0]["pantry_coverage"] > top[1]["pantry_coverage"]

@@ -362,12 +362,32 @@ class AgentOrchestrator:
         all_strict_cuisine_mismatch = bool(rejected) and not feasible and all(
             RejectionReason.STRICT_CUISINE_MISMATCH in e.rejection_reasons for e in rejected
         )
+        # Post-review addition (2026-09-08): same pattern as
+        # all_over_budget/all_strict_cuisine_mismatch above -- was
+        # previously missing for this rejection category despite being
+        # just as common a reason a whole attempt yields no feasible
+        # candidates (see PR #15 browser-review investigation).
+        all_max_total_time_exceeded = bool(rejected) and not feasible and all(
+            RejectionReason.MAX_TOTAL_TIME_EXCEEDED in e.rejection_reasons for e in rejected
+        )
         poor_pantry_overlap = bool(evaluated_this_attempt) and (
             sum(e.pantry_coverage for e in evaluated_this_attempt) / len(evaluated_this_attempt) < (1 / 3)
         )
 
         name_by_id = {r.id: r.name for r in recipes}
         provider_by_id = {r.id: r.provider for r in recipes}
+        # Post-review fix (2026-09-08): previously the first 5 candidates
+        # in raw evaluation order (a RecipeAPI.io relevance ranking, not
+        # a pantry-match ranking) were surfaced to the LLM, which could
+        # silently omit the attempt's actual best-matching candidates
+        # from its decision context entirely. Sorting by the already-
+        # computed, deterministic pantry_coverage (descending) before
+        # truncating to 5 ensures the agent's summarized view reflects
+        # its strongest real evidence -- this only changes what is
+        # shown to the LLM for its next-action decision, never the
+        # user-facing ranking/scoring formula (app.domain.ranker is
+        # untouched).
+        best_evidence_first = sorted(evaluated_this_attempt, key=lambda c: -c.pantry_coverage)
         top = tuple(
             ObservationCandidate(
                 recipe_id=c.recipe_id,
@@ -376,8 +396,9 @@ class AgentOrchestrator:
                 cuisine_match=c.cuisine_match,
                 hard_constraint_pass=c.hard_constraint_pass,
                 rejection_reasons=tuple(r.value for r in c.rejection_reasons),
+                pantry_coverage=round(c.pantry_coverage, 4),
             )
-            for c in evaluated_this_attempt[:5]
+            for c in best_evidence_first[:5]
         )
 
         return SearchObservation(
@@ -391,6 +412,7 @@ class AgentOrchestrator:
             feasible_count_this_attempt=len(feasible),
             all_over_budget=all_over_budget,
             all_strict_cuisine_mismatch=all_strict_cuisine_mismatch,
+            all_max_total_time_exceeded=all_max_total_time_exceeded,
             poor_pantry_overlap=poor_pantry_overlap,
             has_more_pages=outcome.has_more,
             total_feasible_so_far=len(state.best_feasible),

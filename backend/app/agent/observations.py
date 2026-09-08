@@ -30,6 +30,16 @@ class ObservationCandidate:
     cuisine_match: bool
     hard_constraint_pass: bool
     rejection_reasons: tuple[str, ...] = field(default_factory=tuple)
+    # Post-review addition (2026-09-08): the LLM previously had no
+    # visibility into HOW WELL a rejected candidate matched the pantry
+    # -- only pass/fail. Without this, a batch of high-coverage
+    # candidates rejected only for exceeding max_total_time_minutes
+    # looked identical to a batch of genuinely poor matches, giving the
+    # agent no signal to distinguish "reformulate the anchor" from
+    # "this route/time constraint is just thin here." Already computed
+    # deterministically by app.domain.pantry_matcher; exposing it here
+    # adds no new calculation.
+    pantry_coverage: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -50,6 +60,15 @@ class SearchObservation:
     total_evaluated_so_far: int
     candidate_cap_remaining: int
     search_attempts_remaining: int
+    # Post-review addition (2026-09-08): mirrors all_over_budget /
+    # all_strict_cuisine_mismatch, which already existed for those two
+    # rejection categories -- max_total_time_minutes had no equivalent
+    # aggregate signal, even though it is just as common a hard-reject
+    # reason. Computed identically (see all_over_budget's own
+    # docstring pattern in AgentOrchestrator._build_observation).
+    # Placed after the non-default fields (dataclass field-ordering
+    # requirement), not for any semantic reason.
+    all_max_total_time_exceeded: bool = False
     top_candidates: tuple[ObservationCandidate, ...] = field(default_factory=tuple)
 
 

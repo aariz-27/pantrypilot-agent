@@ -96,4 +96,42 @@ describe('IngredientAutocomplete', () => {
     await userEvent.keyboard('{ArrowDown}{Enter}')
     expect(onAdd).toHaveBeenCalledWith({ id: 'onion', label: 'Onion', canonical_id: 'onion', unresolved: false })
   })
+
+  describe('keyboard scrolling', () => {
+    // jsdom does not implement real layout/scrolling; Element.prototype
+    // .scrollIntoView is stubbed per test to assert it was invoked.
+    beforeEach(() => {
+      Element.prototype.scrollIntoView = vi.fn()
+    })
+
+    async function setupWithManySuggestions() {
+      const suggestions = Array.from({ length: 8 }, (_, i) => ({
+        canonical_id: `rice_${i}`,
+        display_name: `Rice Variety ${i}`,
+      }))
+      api.fetchIngredientSuggestions.mockResolvedValue(suggestions)
+      setup()
+      await userEvent.type(screen.getByRole('combobox'), 'rice')
+      await waitFor(() => screen.getByText('Rice Variety 0'))
+      return suggestions
+    }
+
+    it('scrolls the active option into view on ArrowDown', async () => {
+      await setupWithManySuggestions()
+      await userEvent.keyboard('{ArrowDown}')
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    })
+
+    it('scrolls the active option into view on ArrowUp', async () => {
+      await setupWithManySuggestions()
+      await userEvent.keyboard('{ArrowDown}{ArrowDown}{ArrowUp}')
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    })
+
+    it('does not scroll on mouse hover (preserves existing mouse behavior)', async () => {
+      await setupWithManySuggestions()
+      await userEvent.hover(screen.getByText('Rice Variety 3'))
+      expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+    })
+  })
 })

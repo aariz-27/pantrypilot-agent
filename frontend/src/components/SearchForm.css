@@ -10,6 +10,12 @@
 }
 
 .search-form__more-toggle {
+  /* Post-review fix (2026-09-08): a plain <button> is inline-block by
+     default, so without an explicit block display it could render on
+     the same line as the Find meals submit button (both are buttons
+     with room to fit side by side at wider viewports) instead of
+     stacking above it. */
+  display: block;
   margin-top: var(--space-4);
   background: none;
   border: none;
@@ -62,7 +68,11 @@
 }
 
 .search-form__submit {
-  margin-top: var(--space-5);
+  /* Post-review fix (2026-09-08): slightly more breathing room above
+     the primary CTA so it reads as a distinct next step, not part of
+     the More/Fewer options cluster above it. */
+  display: block;
+  margin-top: var(--space-6);
   width: 100%;
 }
 
