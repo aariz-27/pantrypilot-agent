@@ -38,13 +38,13 @@ Establish the governed application foundation and then deliver the PantryPilot M
 
 ## Active Ticket
 
-None. PP-001, PP-002, and PP-003 have all been completed and merged (see "Completed" below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
+None. PP-001, PP-002, PP-003, and the Module D agent orchestrator (M03, plus follow-on fix/audit/validation/docs work, PRs #6-#13) have all been completed and merged (see "Completed" below). The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
 ## Ready Queue
 
-None. PP-001, PP-002, and PP-003 have been completed and merged. The next coding ticket will be added once the Founder/Product Owner authorizes it.
+None. The next coding ticket will be added once the Founder/Product Owner authorizes it.
 
 ---
 
@@ -54,20 +54,20 @@ Delivered by PP-001 (see Done section below): repository/application scaffold, b
 
 Delivered by PP-002 (see Done section below): `RecipeProvider` abstraction, RecipeAPI.io adapter, `LocalCuratedRecipeProvider` foundation (zero production data — DEC-012 still open).
 
-Delivered by PP-003 (see "Completed" below): LuLu UAE grocery ingestion pipeline (M14), read-only `PriceRepository` (M10), deterministic `CostEngine` (M11), DEC-013 median reference-pricing policy.
+Delivered by PP-003 and its follow-on gap-resolution work (PRs #5-#10; see "Completed" below): LuLu UAE grocery ingestion pipeline (M14), read-only `PriceRepository` (M10), deterministic `CostEngine` (M11), DEC-013 median reference-pricing policy, plus a pre-Module-D audit and further incompatible-unit-group gap fixes.
+
+Delivered by the Module D agent orchestrator (PRs #11-#12; see "Completed" below): bounded LLM agent orchestrator (M03) with an allow-listed tool layer, `AnthropicLLMProvider`, and full Modules A-D integration validation including a live full-pipeline smoke script.
 
 Remaining planned implementation areas include:
 
 - frontend scaffold
-- agent tool layer
-- agent orchestrator
-- recommendation API (`/api/recommend` end-to-end wiring)
+- recommendation API (`/api/recommend` end-to-end HTTP wiring for the now-merged Module D orchestrator)
 - frontend/backend integration
 - observability
 - deployment
 - release verification
 - final curated recipe dataset content (blocked on DEC-012)
-- grocery taxonomy gap-fill / manual curated price entries (optional, informed by PP-003's QA report — 381 of 2,699 real products remain unmapped)
+- grocery taxonomy gap-fill / manual curated price entries (optional; residual unmapped-product count should be re-pulled from the current QA report rather than reused from the pre-PR-#9 figure)
 
 These are implementation areas, not automatically authorized tickets.
 
@@ -92,6 +92,22 @@ None currently.
 ---
 
 ## Completed
+
+### Module D — Agent Orchestrator (M03) and Post-Merge Hardening
+
+**Status:** DONE
+**Priority:** P0
+**Requirements:** FR-07, FR-15, FR-17, AR-01, AR-11, SEC-01, SEC-02, SEC-03, REL-05, REL-06, REL-07 (implemented); AR-15 (in-implementation, agent side only); REL-02 (designed only — latency target not test-measured) — see `docs/REQUIREMENTS_TRACEABILITY.md`
+**Decision Dependencies:** DEC-010 (recorded, APPROVED/CLOSED via PR #13)
+**Branches:** `feature/module-c-final-pricing-gap-resolution` (#9), `quality/pre-module-d-full-codebase-audit` (#10), `feature/module-d-agent-orchestration` (#11), `test/module-a-d-integration-validation` (#12), `docs/dec-010-close-competition-llm` (#13) — all merged
+
+**Objective:**
+Implement the M03 bounded LLM agent orchestrator (search-strategy selection, pagination/reformulation, stop conditions) over the existing deterministic Module A/B/C tool layer, per DEC-005/DEC-006's single-agent-over-deterministic-core architecture, then integration-validate it end-to-end and freeze the competition runtime LLM decision.
+
+**Notes:**
+Merged via PR #11 (`feat(module-d): implement M03 agent orchestrator with bounded LLM decision-making`), with two same-PR review fixes (pantry context added to the LLM payload with a cross-provider dedupe identity fix; deterministic enforcement of pantry-grounded search anchors). PR #12 closed remaining orchestrator integration gaps and added a live full-pipeline (Modules A-D) smoke script. PR #13 closed DEC-010 (Claude Sonnet 5 / `AnthropicLLMProvider` frozen as the competition runtime). PRs #9 and #10 (final Module C pricing-gap resolution and a pre-Module-D full codebase audit) preceded and unblocked this work. 378 backend tests pass on `main` as of this entry (2026-09-08). Not yet done: `/api/recommend` HTTP endpoint wiring, frontend, deployment. `APPROVAL_GATES.md` (G6) now reports exit criteria technically satisfied, awaiting Founder review; `docs/REQUIREMENTS_TRACEABILITY.md` has been reconciled for the Module D requirement rows. See `CURRENT_STATUS.md` and `DECISION_REGISTER.md` (DEC-010) for full evidence.
+
+---
 
 ### PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine
 
