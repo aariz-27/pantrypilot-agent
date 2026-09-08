@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from app.agent.orchestrator import AgentResult
 from app.domain.ingredient_autocomplete import humanize_canonical_id
+from app.domain.ingredient_normalizer import normalize_raw_text_identity
 from app.domain.models import CandidateEvaluation, RejectionReason
-from app.schemas.recommend import MissingIngredientCost, RecipeCard, RecommendResponse
+from app.schemas.recommend import MissingIngredientCost, RecipeCard, RecommendResponse, UnresolvedIngredient
 
 # Rejection reasons that represent a flexible target (time/budget) a
 # "closest alternative" may legitimately exceed, per ticket section 18.
@@ -56,6 +57,14 @@ def _deviation_reasons(candidate: CandidateEvaluation, recipe, max_total_time_mi
             if over > 0:
                 reasons.append(f"Est. AED {over:.2f} over budget")
     return reasons
+
+
+def build_unresolved_ingredient(raw_name: str) -> UnresolvedIngredient:
+    return UnresolvedIngredient(
+        raw_name=raw_name,
+        display_name=raw_name,
+        identity_key=normalize_raw_text_identity(raw_name),
+    )
 
 
 def build_missing_ingredient_cost(breakdown_row) -> MissingIngredientCost:
@@ -109,7 +118,7 @@ def build_recipe_card(
         pantry_coverage=candidate.pantry_coverage,
         matched_ingredients=[humanize_canonical_id(cid) for cid in candidate.matched_ingredients],
         missing_ingredients=[build_missing_ingredient_cost(row) for row in breakdown],
-        unresolved_ingredients=list(candidate.unresolved_ingredients),
+        unresolved_ingredients=[build_unresolved_ingredient(name) for name in candidate.unresolved_ingredients],
         estimated_additional_spend_aed=candidate.estimated_purchase_cost_aed,
         price_complete=candidate.price_complete,
         cost_confidence=candidate.cost_confidence.value,

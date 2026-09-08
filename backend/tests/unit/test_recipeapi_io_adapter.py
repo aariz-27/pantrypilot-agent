@@ -380,10 +380,10 @@ async def test_timeout_then_retry_succeeds_returns_result():
     result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
     assert result.items == []
     # initial failed attempt + one successful retry for the primary
-    # query, + one more call for the free-text enrichment pass that
-    # always runs after a non-empty-ingredients search (post-review
-    # fix, 2026-09-08; see RecipeAPIIOAdapter._merge_with_free_text_search)
-    assert len(calls) == 3
+    # query. Free-text enrichment is opt-in (enrich_free_text=False by
+    # default, PR #15 correction pass, 2026-09-08) and was not
+    # requested here, so no third call is made.
+    assert len(calls) == 2
 
 
 async def test_server_error_then_retry_succeeds_returns_result():
@@ -398,9 +398,8 @@ async def test_server_error_then_retry_succeeds_returns_result():
     adapter = make_adapter(handler, max_retries=1)
     result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
     assert result.items == []
-    # See test_timeout_then_retry_succeeds_returns_result above for why
-    # this is 3, not 2.
-    assert len(calls) == 3
+    # See test_timeout_then_retry_succeeds_returns_result above.
+    assert len(calls) == 2
 
 
 async def test_zero_max_retries_means_single_attempt():
@@ -510,21 +509,40 @@ async def test_search_lowercases_cuisine_for_provider_enum_compatibility():
     assert captured["cuisine"] == "italian"
 
 
-# --- free-text search enrichment (post-review retrieval fix, 2026-09-08) ------------
+# --- free-text search enrichment (retrieval fix 2026-09-08; made opt-in ------------
+# in the PR #15 correction pass, same date)
 #
 # Live investigation (PR #15 browser review) found RecipeAPI.io's
 # `ingredients` filter can silently contribute zero relevance signal for
 # a real, well-represented ingredient term (confirmed for "chicken_wings":
 # `ingredients=chicken_wings,garlic` returned a result set byte-identical
 # to `ingredients=garlic` alone), while its `search` free-text field finds
-# directly relevant recipes for the same concept. The fix always merges a
-# second, free-text-enriched query (using only the primary/first anchor,
-# since joining all anchors into one search phrase was confirmed live to
-# reliably return zero) into the primary result -- uniformly, never
-# conditional on which ingredient was requested.
+# directly relevant recipes for the same concept. The merge behavior
+# itself (interleave, dedupe, page_size cap, graceful degrade-on-failure)
+# is unchanged; it now only runs when the caller sets
+# SearchStrategy.enrich_free_text=True (Priority-1 efficiency fix: this
+# used to double every non-empty-ingredients search's RecipeAPI.io
+# request cost unconditionally).
 
 
-async def test_search_merges_free_text_enrichment_results():
+async def test_search_enrichment_does_not_run_by_default():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_params.append(dict(request.url.params))
+        return httpx.Response(
+            200,
+            json={"data": [{"id": 1, "name": "Primary Match"}], "meta": {"current_page": 1, "last_page": 1}},
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken_wings", "garlic"]))
+
+    assert len(call_params) == 1
+    assert [item.name for item in result.items] == ["Primary Match"]
+
+
+async def test_search_merges_free_text_enrichment_results_when_requested():
     call_params = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -541,7 +559,9 @@ async def test_search_merges_free_text_enrichment_results():
         )
 
     adapter = make_adapter(handler)
-    result = await adapter.search(SearchStrategy(query_ingredients=["chicken_wings", "garlic"]))
+    result = await adapter.search(
+        SearchStrategy(query_ingredients=["chicken_wings", "garlic"], enrich_free_text=True)
+    )
 
     assert len(call_params) == 2
     assert call_params[0]["ingredients"] == "chicken_wings,garlic"
@@ -553,7 +573,7 @@ async def test_search_merges_free_text_enrichment_results():
     assert names == {"Primary Match", "Enriched Match"}
 
 
-async def test_search_enrichment_never_runs_without_query_ingredients():
+async def test_search_enrichment_never_runs_without_query_ingredients_even_if_requested():
     call_params = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -561,7 +581,7 @@ async def test_search_enrichment_never_runs_without_query_ingredients():
         return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
 
     adapter = make_adapter(handler)
-    await adapter.search(SearchStrategy(cuisine="Italian"))
+    await adapter.search(SearchStrategy(cuisine="Italian", enrich_free_text=True))
 
     assert len(call_params) == 1
 
@@ -575,7 +595,7 @@ async def test_search_enrichment_results_are_deduped_against_primary():
         )
 
     adapter = make_adapter(handler)
-    result = await adapter.search(SearchStrategy(query_ingredients=["onion"]))
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], enrich_free_text=True))
 
     assert [item.provider_recipe_id for item in result.items] == ["1"]
 
@@ -595,7 +615,9 @@ async def test_search_enrichment_survives_a_full_primary_page():
         return httpx.Response(200, json={"data": data, "meta": {"current_page": 1, "last_page": 1}})
 
     adapter = make_adapter(handler)
-    result = await adapter.search(SearchStrategy(query_ingredients=["chicken_wings"], page_size=10))
+    result = await adapter.search(
+        SearchStrategy(query_ingredients=["chicken_wings"], page_size=10, enrich_free_text=True)
+    )
 
     names = {item.name for item in result.items}
     assert "Enriched Only Match" in names
@@ -611,7 +633,7 @@ async def test_search_enrichment_result_is_capped_at_page_size():
         return httpx.Response(200, json={"data": data, "meta": {"current_page": 1, "last_page": 1}})
 
     adapter = make_adapter(handler)
-    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], page_size=10))
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], page_size=10, enrich_free_text=True))
 
     assert len(result.items) == 10
 
@@ -625,7 +647,7 @@ async def test_search_enrichment_failure_never_fails_a_successful_primary_search
         )
 
     adapter = make_adapter(handler, max_retries=0)
-    result = await adapter.search(SearchStrategy(query_ingredients=["onion"]))
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], enrich_free_text=True))
 
     assert [item.name for item in result.items] == ["Primary Match"]
 
@@ -644,9 +666,80 @@ async def test_search_enrichment_uses_only_the_primary_anchor_not_all_anchors():
         return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
 
     adapter = make_adapter(handler)
-    await adapter.search(SearchStrategy(query_ingredients=["chicken_wings", "garlic", "ketchup"]))
+    await adapter.search(
+        SearchStrategy(query_ingredients=["chicken_wings", "garlic", "ketchup"], enrich_free_text=True)
+    )
 
     assert captured["search"] == "chicken wings"
+
+
+# --- full recipe from list response, no separate detail fetch needed (Priority-1) ---
+#
+# Live investigation (2026-09-08) found RecipeAPI.io's /recipes
+# (search/list) response items already carry the exact same
+# ingredients/instructions/difficulty/servings/timing fields as a
+# /recipes/{id} detail response, not a lightweight stub. When present,
+# app.agent.tools.fetch_recipe_details uses this directly and skips the
+# get_details() round trip for that candidate.
+
+_FULL_LIST_ITEM = {
+    "id": 42,
+    "name": "Chicken Biryani",
+    "cuisine": "Indian",
+    "meal_type": "main",
+    "difficulty": "medium",
+    "servings": 4,
+    "prep_time": 20,
+    "cook_time": 45,
+    "instructions": ["Marinate chicken.", "Cook rice."],
+    "ingredients": [
+        {"id": 1, "name": "chicken", "category": "meat", "quantity": 500, "unit": "g", "optional": False},
+    ],
+}
+
+
+async def test_search_item_carries_full_recipe_when_list_response_is_complete():
+    payload = {"data": [_FULL_LIST_ITEM], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    item = result.items[0]
+    assert item.full_recipe is not None
+    assert item.full_recipe.name == "Chicken Biryani"
+    assert item.full_recipe.ingredients[0].raw_name == "chicken"
+    assert item.full_recipe.instructions == "Marinate chicken.\nCook rice."
+
+
+async def test_search_item_full_recipe_is_none_when_ingredients_missing():
+    thin_item = {"id": 1, "name": "Thin Listing"}
+    payload = {"data": [thin_item], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    assert result.items[0].full_recipe is None
+
+
+async def test_search_item_full_recipe_is_none_when_instructions_missing():
+    item = {**_FULL_LIST_ITEM, "instructions": []}
+    payload = {"data": [item], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    assert result.items[0].full_recipe is None
+
+
+async def test_search_item_full_recipe_skips_malformed_ingredient_entries_without_crashing():
+    # A malformed nested ingredient entry (not a dict) must never crash
+    # the whole search -- app._map_ingredient already skips it, exactly
+    # as the existing get_details() path does; full_recipe is still
+    # populated from whatever ingredients validly mapped.
+    item = {**_FULL_LIST_ITEM, "ingredients": [_FULL_LIST_ITEM["ingredients"][0], "not-a-dict"]}
+    payload = {"data": [item], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    assert result.items[0].full_recipe is not None
+    assert len(result.items[0].full_recipe.ingredients) == 1
 
 
 # --- secret non-leakage ---------------------------------------------------------------

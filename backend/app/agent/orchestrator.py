@@ -240,8 +240,24 @@ class AgentOrchestrator:
                 "local_curated route requested outside its approved Indian/Pakistani/desi regional scope"
             )
 
-        strategy = SearchStrategy(query_ingredients=args.anchor_ingredients, cuisine=args.cuisine, page=1)
-        signature = (route, tuple(sorted(i.lower() for i in args.anchor_ingredients)), (args.cuisine or "").lower())
+        strategy = SearchStrategy(
+            query_ingredients=args.anchor_ingredients,
+            cuisine=args.cuisine,
+            page=1,
+            enrich_free_text=args.enrich_free_text,
+        )
+        # enrich_free_text is included (PR #15 correction pass,
+        # 2026-09-08): re-issuing the same anchors with enrichment now
+        # requested is a materially different provider request (an extra
+        # free-text query merged in), not a repeat -- excluding it here
+        # previously made that legitimate corrective action bounce as
+        # "identical", discovered via a live Test A run.
+        signature = (
+            route,
+            tuple(sorted(i.lower() for i in args.anchor_ingredients)),
+            (args.cuisine or "").lower(),
+            args.enrich_free_text,
+        )
         if signature in state.distinct_search_signatures:
             raise AgentUnsupportedActionError(
                 "an identical search strategy was already attempted; use retry only after a transient "

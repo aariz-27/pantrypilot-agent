@@ -26,10 +26,10 @@ from app.repositories.price_repository import PriceRepository
 from .conftest import FakeLLMProvider, FakeRecipeProvider, ScriptedSearch, make_recipe
 
 
-def _search_action(anchors, route=SearchRoute.RECIPEAPI_IO, cuisine=None) -> AgentAction:
+def _search_action(anchors, route=SearchRoute.RECIPEAPI_IO, cuisine=None, enrich_free_text=False) -> AgentAction:
     return AgentAction(
         action_type=ActionType.SEARCH,
-        search=SearchArgs(route=route, anchor_ingredients=anchors, cuisine=cuisine),
+        search=SearchArgs(route=route, anchor_ingredients=anchors, cuisine=cuisine, enrich_free_text=enrich_free_text),
     )
 
 
@@ -1115,3 +1115,231 @@ async def test_higher_match_time_excluded_false_when_nothing_better_was_time_rej
     assert result.higher_match_time_excluded is False
     assert result.higher_match_time_excluded_count == 0
     assert result.higher_match_min_rejected_time_minutes is None
+
+
+# --- Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08) -----------
+
+
+async def test_enrich_free_text_flag_flows_from_action_into_search_strategy(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"], enrich_free_text=True),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    assert provider.search_calls[0].enrich_free_text is True
+
+
+async def test_enrich_free_text_defaults_false_when_agent_does_not_request_it(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    assert provider.search_calls[0].enrich_free_text is False
+
+
+async def test_full_recipe_on_search_item_skips_the_detail_fetch_round_trip(price_db):
+    # Priority-1 efficiency fix: when a search-result item already
+    # carries a full_recipe (the provider's list response already had
+    # complete recipe data), app.agent.tools.fetch_recipe_details must
+    # use it directly rather than calling provider.get_details() again.
+    full = make_recipe(
+        id="recipeapi_io:1",
+        provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    result_with_full_recipe = SearchResult(
+        items=[
+            SearchResultItem(
+                id="recipeapi_io:1",
+                provider="recipeapi_io",
+                provider_recipe_id="1",
+                name="Dish 1",
+                full_recipe=full,
+            )
+        ],
+        page=1,
+        page_size=10,
+        has_more=False,
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=result_with_full_recipe)],
+        details_by_id={},  # no scripted detail -- must never be called
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert provider.detail_calls == []
+    assert result.status == "completed"
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"
+
+
+async def test_items_without_full_recipe_still_use_get_details(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    assert provider.detail_calls == ["1"]
+
+
+async def test_sufficient_feasible_found_flag_reflects_best_feasible_threshold(price_db):
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}",
+            provider_recipe_id=str(i),
+            name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    assert llm.requests[1].observation["state_summary"]["sufficient_feasible_found"] is True
+
+
+async def test_sufficient_feasible_found_false_below_threshold(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    assert llm.requests[1].observation["state_summary"]["sufficient_feasible_found"] is False
+
+
+async def test_same_anchors_with_enrich_free_text_toggled_is_not_treated_as_identical(price_db):
+    # Regression (found via a live Test A run, PR #15 correction pass,
+    # 2026-09-08): re-issuing the same anchors with enrich_free_text
+    # newly requested must be accepted as a materially different
+    # strategy, not bounced by the identical-strategy guard.
+    weak = make_recipe(id="recipeapi_io:1", provider_recipe_id="1", ingredients=[])
+    strong = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")]
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1")), ScriptedSearch(result=_search_result("2"))],
+        details_by_id={"1": weak, "2": strong},
+    )
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"]),
+            _search_action(["tomato"], enrich_free_text=True),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert result.search_attempts == 2
+    assert provider.search_calls[0].enrich_free_text is False
+    assert provider.search_calls[1].enrich_free_text is True
+
+
+async def test_identical_anchors_and_enrich_free_text_is_still_rejected_as_identical(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _search_action(["tomato"])])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    with pytest.raises(AgentUnsupportedActionError):
+        await orch.run(_base_request())
+
+
+# --- Priority-2: recipe_by_id / deterministic-pipeline agreement (PR #15 ------
+# correction pass, 2026-09-08)
+#
+# Ticket-required trace: confirm state.recipe_by_id (built by
+# AgentOrchestrator._run_attempt via normalize_recipe_ingredients on the
+# SCALED recipe) and the object actually fed into evaluate_and_rank
+# (app.agent.tools, which re-normalizes internally) never disagree.
+# They provably cannot: scale_recipe_servings only ever touches
+# quantity/raw_measure, never raw_name, and normalize_ingredient_name is
+# a pure function of raw_name -- so both normalization passes always see
+# identical input and produce identical canonical_ids. This end-to-end
+# test locks that agreement in through the real orchestrator path,
+# using the exact singular/plural gap traced above as the payload.
+
+
+async def test_recipe_by_id_and_deterministic_pipeline_agree_on_a_singular_plural_match(price_db):
+    from app.agent.actions import SearchRoute
+
+    recipe = make_recipe(
+        id="recipeapi_io:1",
+        provider_recipe_id="1",
+        name="Sticky Chicken Wing",
+        ingredients=[RecipeIngredient(raw_name="Chicken wing", raw_measure="500 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider(
+        [
+            AgentAction(
+                action_type=ActionType.SEARCH,
+                search=SearchArgs(route=SearchRoute.RECIPEAPI_IO, anchor_ingredients=["chicken wings"]),
+            ),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["Chicken Wings"]))
+
+    stored_recipe = result.recipe_by_id["recipeapi_io:1"]
+    assert stored_recipe.ingredients[0].canonical_id == "chicken_wings"
+
+    candidate = result.recommendations[0]
+    assert candidate.recipe_id == "recipeapi_io:1"
+    # Matched via the pantry, not missing -- the deterministic pipeline's
+    # own normalization pass (inside evaluate_and_rank) must have reached
+    # the identical canonical_id as recipe_by_id above.
+    assert "chicken_wings" not in candidate.missing_ingredients
+    assert candidate.pantry_coverage == 1.0

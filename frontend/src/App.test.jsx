@@ -296,3 +296,95 @@ describe('"I have this" pantry checkbox flow', () => {
     expect(screen.queryByRole('checkbox', { name: /I have/ })).not.toBeInTheDocument()
   })
 })
+
+describe('"I have this" for unresolved ingredients (Priority 3, PR #15 correction pass)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function mysteryRow(overrides = {}) {
+    return { raw_name: 'Mystery Sauce', display_name: 'Mystery Sauce', identity_key: 'mystery sauce', ...overrides }
+  }
+
+  it('checking an uncertain row moves it to "You already have", increases match %, and never assigns a price', async () => {
+    const uncertainCard = card({
+      matched_ingredients: ['Chicken Breast'],
+      missing_ingredients: [],
+      unresolved_ingredients: [mysteryRow()],
+      pantry_coverage: 0.5,
+      estimated_additional_spend_aed: null,
+      price_complete: false,
+    })
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [uncertainCard] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    expect(screen.getByText('◐ Mystery Sauce')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Mystery Sauce' }))
+
+    // Moved out of Uncertain and into "You already have" -- never
+    // fabricates a price for it (still no cost row/estimate for it).
+    expect(screen.queryByText('◐ Mystery Sauce')).not.toBeInTheDocument()
+    expect(screen.getByText('✓ Mystery Sauce')).toBeInTheDocument()
+    expect(screen.getByText('2 of 2 ingredients available')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+    expect(screen.getByText('100% pantry match')).toBeInTheDocument()
+  })
+
+  it('shows "Refresh recommendations" after an unresolved confirmation and submits the raw ingredient with no canonical assumption', async () => {
+    const uncertainCard = card({ unresolved_ingredients: [mysteryRow()], pantry_coverage: 0.5 })
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [uncertainCard] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    expect(screen.queryByRole('button', { name: 'Refresh recommendations' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Mystery Sauce' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    const refreshButton = screen.getByRole('button', { name: 'Refresh recommendations' })
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [card()] }))
+    await userEvent.click(refreshButton)
+
+    await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(2))
+    const secondCallIngredients = api.postRecommend.mock.calls[1][0].ingredients
+    // Submitted as plain raw text -- the request schema has no
+    // canonical_id field at all, so there is no way to smuggle a
+    // trusted identity through this path even if we wanted to.
+    expect(secondCallIngredients).toContain('Mystery Sauce')
+  })
+
+  it('updates the same unresolved ingredient across multiple displayed cards by identity_key', async () => {
+    const cardA = card({
+      recipe_id: 'recipeapi_io:a',
+      name: 'Recipe A',
+      matched_ingredients: [],
+      unresolved_ingredients: [mysteryRow({ raw_name: 'Mystery Sauce' })],
+      pantry_coverage: 0,
+    })
+    const cardB = card({
+      recipe_id: 'recipeapi_io:b',
+      name: 'Recipe B',
+      matched_ingredients: ['Tomato'],
+      unresolved_ingredients: [mysteryRow({ raw_name: 'mystery sauce!!' })],
+      pantry_coverage: 0.5,
+    })
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [cardA, cardB] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Recipe A'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Recipe A/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Mystery Sauce' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    // Recipe B was never opened, but its card-level match % must also
+    // reflect the same confirmed raw-text identity.
+    const matchBadges = screen.getAllByText('100% pantry match')
+    expect(matchBadges).toHaveLength(2)
+  })
+})

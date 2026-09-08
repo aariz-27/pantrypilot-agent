@@ -29,6 +29,26 @@ _PUNCTUATION_PATTERN = re.compile(r"[^a-z0-9\s-]")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
+def normalize_raw_text_identity(raw_name: str) -> str:
+    """Deterministic, safe raw-text identity key for grouping/matching
+    genuinely UNRESOLVED ingredients across recipe cards (Priority-3,
+    PR #15 correction pass, 2026-09-08) -- e.g. "I have this" on an
+    unresolved row in one card should update the same raw ingredient
+    shown on another card, without ever assigning it a canonical_id or
+    promoting it into the taxonomy/pricing tables.
+
+    Reuses the exact same cleaning stage normalize_ingredient_name uses
+    for its own exact-match check (unicode normalize, lowercase, trim,
+    punctuation cleanup) -- deliberately NOT the singular/plural
+    fallback candidates, since this is an identity key for raw text a
+    canonical match was already impossible for, not another attempt at
+    canonical resolution."""
+
+    if not isinstance(raw_name, str):
+        return ""
+    return _clean(raw_name)
+
+
 @dataclass(frozen=True)
 class IngredientNormalizationResult:
     raw_name: str
@@ -58,6 +78,29 @@ def _singular_candidates(cleaned: str) -> list[str]:
     return candidates
 
 
+def _plural_candidates(cleaned: str) -> list[str]:
+    """Priority-2 fix (PR #15 correction pass, 2026-09-08): the reverse
+    direction of _singular_candidates above.
+
+    Root cause of a real bug (traced live, 2026-09-08): a raw recipe
+    ingredient already singular ("chicken wing") never matched the
+    canonical taxonomy entry stored in its plural form
+    ("chicken_wings") -- _singular_candidates only ever strips a
+    trailing "s"/"es" (plural -> singular), so a singular raw name that
+    doesn't itself end in "s" produced zero candidates and fell through
+    to UNKNOWN, even though the exact same concept the user picked from
+    autocomplete ("Chicken Wings") was already in their pantry. This
+    mirrors that same crude, conservative suffix heuristic in the other
+    direction (append "s") so plural canonical entries are reachable
+    from a singular raw name generically -- not a chicken-wings-specific
+    rule, and no more aggressive than the existing singular direction
+    already is."""
+
+    if cleaned and not cleaned.endswith("s"):
+        return [f"{cleaned}s"]
+    return []
+
+
 def normalize_ingredient_name(
     raw_name: str,
     canonical_vocabulary: frozenset[str] = CANONICAL_INGREDIENTS,
@@ -77,12 +120,12 @@ def normalize_ingredient_name(
     if cleaned in aliases:
         return IngredientNormalizationResult(raw_name, aliases[cleaned], NormalizationStatus.ALIAS)
 
-    for singular in _singular_candidates(cleaned):
-        singular_snake = _to_snake(singular)
-        if singular_snake in canonical_vocabulary:
-            return IngredientNormalizationResult(raw_name, singular_snake, NormalizationStatus.EXACT)
-        if singular in aliases:
-            return IngredientNormalizationResult(raw_name, aliases[singular], NormalizationStatus.ALIAS)
+    for variant in _singular_candidates(cleaned) + _plural_candidates(cleaned):
+        variant_snake = _to_snake(variant)
+        if variant_snake in canonical_vocabulary:
+            return IngredientNormalizationResult(raw_name, variant_snake, NormalizationStatus.EXACT)
+        if variant in aliases:
+            return IngredientNormalizationResult(raw_name, aliases[variant], NormalizationStatus.ALIAS)
 
     return IngredientNormalizationResult(raw_name, None, NormalizationStatus.UNKNOWN)
 

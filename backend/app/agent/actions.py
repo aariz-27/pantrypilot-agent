@@ -62,6 +62,16 @@ class SearchArgs(BaseModel):
     route: SearchRoute
     anchor_ingredients: list[str] = Field(min_length=1, max_length=4)
     cuisine: str | None = Field(default=None, max_length=50)
+    # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08):
+    # opt-in only. RecipeAPI.io's `ingredients` filter can silently miss
+    # relevant recipes for some well-represented pantry terms; setting
+    # this true adds one extra free-text-search request to merge in
+    # results the primary query may have missed. Only set this when the
+    # PREVIOUS observation for this same route showed weak deterministic
+    # evidence (poor_pantry_overlap or zero feasible candidates) -- never
+    # as a default/blanket choice, since it doubles this search's
+    # RecipeAPI.io request cost.
+    enrich_free_text: bool = False
     rationale_category: RationaleCategory | None = None
 
     @field_validator("anchor_ingredients")

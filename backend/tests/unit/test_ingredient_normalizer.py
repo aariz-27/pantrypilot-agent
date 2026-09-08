@@ -118,3 +118,72 @@ def test_salted_and_unsalted_butter_never_collapse_into_each_other():
     assert salted.canonical_id == "salted_butter"
     assert unsalted.canonical_id == "unsalted_butter"
     assert salted.canonical_id != unsalted.canonical_id
+
+
+# --- Priority-2 fix (PR #15 correction pass, 2026-09-08): singular raw ------
+# name -> plural canonical entry (the reverse of the existing plural ->
+# singular direction above). Uses the real grocery taxonomy
+# (app.domain.grocery_taxonomy), since that is where the canonical id
+# involved in the traced live bug ("chicken_wings") actually lives --
+# not the small PP-001 recipe-normalization fixture the rest of this
+# file defaults to.
+
+from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES  # noqa: E402
+
+
+def test_singular_raw_name_reaches_a_plural_canonical_entry():
+    # Root cause of a real bug traced live 2026-09-08: a recipe's raw
+    # "Chicken wing" (singular) previously fell through to UNKNOWN even
+    # though the user's pantry had the same concept via "Chicken Wings"
+    # (canonical id "chicken_wings", plural).
+    result = normalize_ingredient_name(
+        "Chicken wing", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    assert result.canonical_id == "chicken_wings"
+    assert result.status == NormalizationStatus.EXACT
+
+
+def test_plural_raw_name_still_matches_the_same_canonical_entry():
+    result = normalize_ingredient_name(
+        "Chicken Wings", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    assert result.canonical_id == "chicken_wings"
+    assert result.status == NormalizationStatus.EXACT
+
+
+def test_pantry_and_recipe_side_chicken_wing_variants_resolve_to_the_same_id():
+    # The specific invariant the ticket requires: a trusted canonical
+    # ingredient must classify as matched regardless of which
+    # singular/plural spelling produced it.
+    pantry_side = normalize_ingredient_name(
+        "Chicken Wings", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    recipe_side = normalize_ingredient_name(
+        "Chicken wing", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    assert pantry_side.canonical_id == recipe_side.canonical_id == "chicken_wings"
+
+
+def test_generic_chicken_does_not_overmatch_to_a_specific_cut_via_pluralization():
+    # Guardrail explicitly required by the ticket: pluralizing "chicken"
+    # must not accidentally land on chicken_wings/chicken_breast/etc --
+    # there is no bare "chicken" canonical id in the taxonomy at all, so
+    # this must remain UNKNOWN, not silently guessed.
+    result = normalize_ingredient_name(
+        "chicken", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    assert result.canonical_id is None
+    assert result.status == NormalizationStatus.UNKNOWN
+
+
+def test_pluralization_is_not_attempted_for_already_plural_names():
+    # _plural_candidates only fires when the cleaned name does not
+    # already end in "s" -- an unresolvable plural-looking word must not
+    # spuriously grow an extra "s".
+    result = normalize_ingredient_name(
+        "totally unknown thingamajigs",
+        canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS,
+        aliases=GROCERY_INGREDIENT_ALIASES,
+    )
+    assert result.canonical_id is None
+    assert result.status == NormalizationStatus.UNKNOWN

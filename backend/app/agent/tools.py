@@ -86,11 +86,25 @@ async def fetch_recipe_details(
     """Fetch full recipe detail for each search-result item. An
     individual malformed/not-found recipe is skipped (its id recorded),
     rather than failing the whole batch -- consistent with M07's
-    listing-vs-detail strictness split."""
+    listing-vs-detail strictness split.
+
+    Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08): when
+    a search-result item already carries `full_recipe` (the provider's
+    search/list response already contained the complete recipe -- see
+    RecipeAPIIOAdapter._try_map_full_recipe_from_list_item), that Recipe
+    is used directly and no separate get_details() network round trip
+    is made for it. This is the same grounded, provider-mapped Recipe
+    object either way -- never a different mapping path -- so this is a
+    pure request-count optimization, not a groundedness change. Any
+    item without a usable full_recipe falls back to get_details()
+    exactly as before."""
 
     recipes: list[Recipe] = []
     failed_ids: list[str] = []
     for item in items:
+        if item.full_recipe is not None:
+            recipes.append(item.full_recipe)
+            continue
         try:
             recipes.append(await provider.get_details(item.provider_recipe_id))
         except RecipeProviderError:

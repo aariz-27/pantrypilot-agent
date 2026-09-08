@@ -49,6 +49,20 @@ class MissingIngredientCost(BaseModel):
     cost_confidence: str
 
 
+class UnresolvedIngredient(BaseModel):
+    """A recipe ingredient the deterministic pipeline could not resolve
+    to any canonical id (Priority-3, PR #15 correction pass,
+    2026-09-08). `identity_key` is a deterministic, safe raw-text
+    identity (app.domain.ingredient_normalizer.normalize_raw_text_identity)
+    -- never a canonical_id -- used only so the frontend can match the
+    SAME raw ingredient across multiple displayed cards when the user
+    confirms they already own it."""
+
+    raw_name: str
+    display_name: str
+    identity_key: str
+
+
 class RecipeCard(BaseModel):
     recipe_id: str
     provider: str
@@ -66,7 +80,7 @@ class RecipeCard(BaseModel):
     pantry_coverage: float
     matched_ingredients: list[str]
     missing_ingredients: list[MissingIngredientCost]
-    unresolved_ingredients: list[str]
+    unresolved_ingredients: list[UnresolvedIngredient]
     estimated_additional_spend_aed: float | None
     price_complete: bool
     cost_confidence: str

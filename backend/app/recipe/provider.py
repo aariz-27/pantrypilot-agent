@@ -46,6 +46,19 @@ class SearchStrategy(BaseModel):
     max_prep_time_minutes: int | None = Field(default=None, gt=0)
     page: int = Field(default=1, ge=1, le=1000)
     page_size: int = Field(default=MAX_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
+    # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08): the
+    # RecipeAPI.io adapter's ingredients filter can silently contribute
+    # zero relevance for some well-represented pantry ingredient terms
+    # (see RecipeAPIIOAdapter.enrich_with_free_text_search's docstring).
+    # This used to run unconditionally on every search, doubling
+    # RecipeAPI.io request volume regardless of need. It is now an
+    # explicit, agent-controlled opt-in (app.agent.actions.SearchArgs)
+    # so the LLM -- which DEC-005 assigns search-strategy control to --
+    # requests it only when the deterministic observation evidence
+    # (poor_pantry_overlap / zero feasible candidates) indicates the
+    # primary query under-represented the user's actual pantry. Default
+    # False: a normal search never pays the extra request.
+    enrich_free_text: bool = False
 
     @field_validator("query_ingredients")
     @classmethod
@@ -71,6 +84,18 @@ class SearchResultItem(BaseModel):
     name: str
     image_url: str | None = None
     cuisine: str | None = None
+    # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08): set
+    # ONLY when the provider's search/list response for this item already
+    # contained a complete recipe object (ingredients + instructions),
+    # not merely display metadata -- confirmed live for RecipeAPI.io
+    # (2026-09-08: /recipes list items carry the exact same fields as
+    # /recipes/{id} detail items). When present, app.agent.tools skips
+    # the separate get_details() round trip entirely for this candidate.
+    # Never fabricated/guessed: a provider whose list response is
+    # genuinely lightweight (or an item missing ingredients/instructions)
+    # simply leaves this None, and the normal get_details() fallback
+    # runs unchanged.
+    full_recipe: Recipe | None = None
 
 
 class SearchResult(BaseModel):

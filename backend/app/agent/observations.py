@@ -14,12 +14,27 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-from app.agent.state import AgentState
+from app.agent.state import MAX_FINAL_RECOMMENDATIONS, AgentState
 
 # Bound the number of individual candidates surfaced to the model --
 # the agent needs aggregate signals to decide, not a full listing
 # (ticket section 10: "Do not expose unnecessary raw/internal details").
 _MAX_OBSERVED_CANDIDATES = 5
+
+# Same conservative threshold AgentOrchestrator._build_observation uses
+# for poor_pantry_overlap. Deliberately reused here (Priority-1
+# correction, PR #15 correction pass, 2026-09-08): "feasible" only means
+# hard_constraint_pass (budget/time/cuisine), which says nothing about
+# actual pantry match quality -- a recipe can be fully feasible with
+# near-zero pantry overlap. An earlier version of
+# sufficient_feasible_found counted feasible candidates alone, which a
+# live Test A run showed caused the agent to stop after finding 3+
+# feasible-but-irrelevant candidates before ever seeing the genuinely
+# relevant ones the free-text enrichment path exists to surface --
+# regressing the exact relevance fix Priority-1 item F requires
+# preserving. Requiring a minimum average coverage among the best
+# feasible candidates closes that gap.
+_MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT = 1 / 3
 
 
 @dataclass(frozen=True)
@@ -86,6 +101,10 @@ def build_decision_payload(state: AgentState) -> dict:
     independent review finding that fixed this (2026-09-07)."""
 
     observation = state.last_observation
+    top_best_feasible = state.best_feasible[:MAX_FINAL_RECOMMENDATIONS]
+    best_feasible_avg_coverage = (
+        sum(c.pantry_coverage for c in top_best_feasible) / len(top_best_feasible) if top_best_feasible else 0.0
+    )
     return {
         "state_summary": {
             "pantry_canonical": sorted(state.pantry_canonical),
@@ -94,6 +113,23 @@ def build_decision_payload(state: AgentState) -> dict:
             "candidates_evaluated_total": len(state.evaluated_candidates),
             "candidate_cap_remaining": state.remaining_candidate_capacity(),
             "current_best_feasible_count": len(state.best_feasible),
+            # Priority-1 efficiency fix (PR #15 correction pass,
+            # 2026-09-08): explicit, unmissable boolean mirroring
+            # MAX_FINAL_RECOMMENDATIONS -- SYSTEM_POLICY already said
+            # "stop once enough strong feasible candidates exist" in
+            # prose, but nothing forced the model to compare
+            # current_best_feasible_count against the actual threshold
+            # itself. This never overrides the LLM's stop decision
+            # (DEC-005: the LLM controls stop conditions) -- it only
+            # makes the deterministic evidence for that decision explicit
+            # rather than implicit. Requires BOTH enough feasible
+            # candidates AND a minimum average pantry match among them
+            # (see _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT above) -- feasible
+            # alone (hard_constraint_pass) says nothing about relevance.
+            "sufficient_feasible_found": (
+                len(state.best_feasible) >= MAX_FINAL_RECOMMENDATIONS
+                and best_feasible_avg_coverage >= _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT
+            ),
             "cuisine_preference": state.cuisine_preference,
             "cuisine_strict": state.cuisine_strict,
             "budget_set": state.budget_aed is not None,

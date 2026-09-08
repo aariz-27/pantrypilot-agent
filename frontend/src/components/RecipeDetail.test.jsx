@@ -126,4 +126,34 @@ describe('RecipeDetail', () => {
     expect(lists.some((el) => el.tagName === 'OL')).toBe(true)
     expect(screen.getByText('Chop onions.')).toBeInTheDocument()
   })
+
+  describe('unresolved ingredient "I have this" (Priority 3, PR #15 correction pass)', () => {
+    function cardWithUnresolved() {
+      return makeCard({
+        unresolved_ingredients: [{ raw_name: 'Mystery Sauce', display_name: 'Mystery Sauce', identity_key: 'mystery sauce' }],
+      })
+    }
+
+    it('shows an "I have this" checkbox on an uncertain row and calls onMarkHaveUnresolved with its identity_key', async () => {
+      const onMarkHaveUnresolved = vi.fn()
+      render(<RecipeDetail card={cardWithUnresolved()} onClose={vi.fn()} onMarkHaveUnresolved={onMarkHaveUnresolved} />)
+
+      expect(screen.getByText('◐ Mystery Sauce')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('checkbox', { name: 'I have Mystery Sauce' }))
+      expect(onMarkHaveUnresolved).toHaveBeenCalledWith('mystery sauce', 'Mystery Sauce')
+    })
+
+    it('does not render a checkbox for an uncertain row when no handler is supplied', () => {
+      render(<RecipeDetail card={cardWithUnresolved()} onClose={vi.fn()} />)
+      expect(screen.getByText('◐ Mystery Sauce')).toBeInTheDocument()
+      expect(screen.queryByRole('checkbox', { name: 'I have Mystery Sauce' })).not.toBeInTheDocument()
+    })
+
+    it('counts unresolved ingredients in the total denominator (never inflates when one is later confirmed)', () => {
+      // matched(2) + missing(1) + unresolved(1) = 4 -- stable regardless
+      // of which bucket an ingredient currently sits in.
+      render(<RecipeDetail card={cardWithUnresolved()} onClose={vi.fn()} />)
+      expect(screen.getByText('2 of 4 ingredients available')).toBeInTheDocument()
+    })
+  })
 })

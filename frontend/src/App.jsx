@@ -45,6 +45,13 @@ export default function App() {
   // Frontend-only, deterministic state -- never sent anywhere until the
   // user explicitly asks to "Refresh recommendations".
   const [extraPantry, setExtraPantry] = useState(() => new Map())
+  // Priority 3 (ticket, PR #15 correction pass, 2026-09-08): the same
+  // idea for UNRESOLVED ingredient rows, keyed by the backend's
+  // deterministic raw-text identity_key (never a canonical_id) ->
+  // raw_name. Confirming one never promotes it into the taxonomy or
+  // pricing tables -- it only records the user's own confirmed raw
+  // pantry state for this session.
+  const [extraUnresolvedPantry, setExtraUnresolvedPantry] = useState(() => new Map())
 
   const runSearch = useCallback(async (currentFormState) => {
     setView('loading')
@@ -53,6 +60,7 @@ export default function App() {
       const result = await postRecommend(buildPayload(currentFormState))
       setResponse(result)
       setExtraPantry(new Map())
+      setExtraUnresolvedPantry(new Map())
       setView('results')
     } catch (err) {
       setError(err)
@@ -61,12 +69,13 @@ export default function App() {
   }, [])
 
   const extraCanonicalIds = useMemo(() => new Set(extraPantry.keys()), [extraPantry])
+  const extraUnresolvedIdentityKeys = useMemo(() => new Set(extraUnresolvedPantry.keys()), [extraUnresolvedPantry])
 
   // Deterministic, frontend-only recompute -- never calls the backend
   // or the LLM merely because a checkbox was clicked.
   const displayResponse = useMemo(
-    () => applyExtraPantryToResponse(response, extraCanonicalIds),
-    [response, extraCanonicalIds],
+    () => applyExtraPantryToResponse(response, extraCanonicalIds, extraUnresolvedIdentityKeys),
+    [response, extraCanonicalIds, extraUnresolvedIdentityKeys],
   )
 
   const selectedCard = displayResponse
@@ -84,6 +93,7 @@ export default function App() {
     setResponse(null)
     setError(null)
     setExtraPantry(new Map())
+    setExtraUnresolvedPantry(new Map())
   }
 
   function handleMarkHave(canonicalId) {
@@ -97,8 +107,21 @@ export default function App() {
     })
   }
 
+  // Priority 3 (ticket, PR #15 correction pass, 2026-09-08): identical
+  // shape to handleMarkHave above, but for an UNRESOLVED row -- keyed by
+  // identity_key (never a canonical_id), so it can never be promoted
+  // into the taxonomy.
+  function handleMarkHaveUnresolved(identityKey, rawName) {
+    if (!identityKey) return
+    setExtraUnresolvedPantry((prev) => {
+      const next = new Map(prev)
+      next.set(identityKey, rawName)
+      return next
+    })
+  }
+
   function handleRefreshRecommendations() {
-    if (extraPantry.size === 0) return
+    if (extraPantry.size === 0 && extraUnresolvedPantry.size === 0) return
     const existingCanonicalIds = new Set(formState.pantryItems.map((item) => item.canonical_id).filter(Boolean))
     const newChips = [...extraPantry.entries()]
       .filter(([canonicalId]) => !existingCanonicalIds.has(canonicalId))
@@ -108,7 +131,25 @@ export default function App() {
         canonical_id: canonicalId,
         unresolved: false,
       }))
-    const updatedFormState = { ...formState, pantryItems: [...formState.pantryItems, ...newChips] }
+    // Priority 3: confirmed-unresolved raw text is submitted as raw
+    // pantry input too ("include confirmed unresolved ingredients as
+    // raw pantry inputs"), with no canonical_id -- if the backend still
+    // cannot normalize it, it is preserved as unresolved again, never
+    // silently promoted. Deduped by raw label so a term the user already
+    // typed into the pantry isn't sent twice.
+    const existingRawLabels = new Set(formState.pantryItems.map((item) => item.label.trim().toLowerCase()))
+    const newUnresolvedChips = [...extraUnresolvedPantry.entries()]
+      .filter(([, rawName]) => !existingRawLabels.has(rawName.trim().toLowerCase()))
+      .map(([identityKey, rawName]) => ({
+        id: `unresolved:${identityKey}`,
+        label: rawName,
+        canonical_id: null,
+        unresolved: true,
+      }))
+    const updatedFormState = {
+      ...formState,
+      pantryItems: [...formState.pantryItems, ...newChips, ...newUnresolvedChips],
+    }
     setFormState(updatedFormState)
     runSearch(updatedFormState)
   }
@@ -151,7 +192,7 @@ export default function App() {
             response={displayResponse}
             onOpen={(card) => setSelectedCardId(card.recipe_id)}
             onNewSearch={handleNewSearch}
-            pendingHaveCount={extraPantry.size}
+            pendingHaveCount={extraPantry.size + extraUnresolvedPantry.size}
             onRefreshRecommendations={handleRefreshRecommendations}
             onShowLongerRecipes={handleShowLongerRecipes}
             currentTotalTimeMinutes={formState.totalTimeMinutes}
@@ -160,7 +201,12 @@ export default function App() {
       </main>
 
       {selectedCard ? (
-        <RecipeDetail card={selectedCard} onClose={() => setSelectedCardId(null)} onMarkHave={handleMarkHave} />
+        <RecipeDetail
+          card={selectedCard}
+          onClose={() => setSelectedCardId(null)}
+          onMarkHave={handleMarkHave}
+          onMarkHaveUnresolved={handleMarkHaveUnresolved}
+        />
       ) : null}
     </>
   )

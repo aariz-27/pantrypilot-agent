@@ -219,7 +219,7 @@ class RecipeAPIIOAdapter:
             f"RecipeAPI.io returned unexpected status {response.status_code} for {path}"
         )
 
-    async def search(self, strategy: SearchStrategy) -> SearchResult:
+    def _build_search_params(self, strategy: SearchStrategy) -> dict[str, object]:
         params: dict[str, object] = {
             "page": strategy.page,
             "per_page": min(strategy.page_size, MAX_PAGE_SIZE),
@@ -237,16 +237,28 @@ class RecipeAPIIOAdapter:
             params["cuisine"] = strategy.cuisine.strip().lower()
         if strategy.max_prep_time_minutes is not None:
             params["max_prep_time"] = strategy.max_prep_time_minutes
+        return params
 
+    async def search(self, strategy: SearchStrategy) -> SearchResult:
+        params = self._build_search_params(strategy)
         payload = await self._request("GET", "/recipes", params=params)
         result = self._map_search_response(payload, strategy)
 
-        if not strategy.query_ingredients:
+        # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08):
+        # the free-text enrichment pass below used to run unconditionally
+        # whenever query_ingredients was non-empty, doubling RecipeAPI.io
+        # request volume on every search regardless of whether the
+        # primary query already worked. It is now strictly opt-in via
+        # strategy.enrich_free_text, set by the agent orchestrator only
+        # when a prior attempt's deterministic evidence indicated the
+        # `ingredients` filter under-represented the pantry (see
+        # app.agent.policy.SYSTEM_POLICY and AgentOrchestrator._run_attempt).
+        if not strategy.query_ingredients or not strategy.enrich_free_text:
             return result
-        return await self._merge_with_free_text_search(strategy, params, result)
+        return await self.enrich_with_free_text_search(strategy, result)
 
-    async def _merge_with_free_text_search(
-        self, strategy: SearchStrategy, base_params: dict[str, object], primary_result: SearchResult
+    async def enrich_with_free_text_search(
+        self, strategy: SearchStrategy, primary_result: SearchResult
     ) -> SearchResult:
         """Retrieval-quality fix (PR #15 browser review, 2026-09-08).
 
@@ -268,24 +280,22 @@ class RecipeAPIIOAdapter:
         not a bag of unrelated words -- so only the single primary
         anchor is ever used here).
 
-        This always runs (uniformly, for every multi/single-ingredient
-        search -- never conditional on which ingredient was requested,
-        so it is not a "chicken wings" special case) and MERGES the
+        Public (not merged into `search()` unconditionally, PR #15
+        correction pass): the orchestrator calls this explicitly, only
+        when the agent requests it, exactly once per attempt. MERGES the
         free-text results into the primary result set (deduped by
         provider identity, primary result first) rather than replacing
         it -- this can only ever add candidates the primary query
         missed, never remove or bias away from what already worked.
         Bounded exactly like the primary call (same page_size cap,
-        same per-request timeout/retry policy); doubles RecipeAPI.io
-        calls per agent search attempt, still bounded by the existing
-        3-attempt/20-candidate agent-level caps (unchanged).
+        same per-request timeout/retry policy).
         """
 
         primary_anchor = strategy.query_ingredients[0].replace("_", " ").strip()
         if not primary_anchor:
             return primary_result
 
-        enriched_params = dict(base_params)
+        enriched_params = self._build_search_params(strategy)
         enriched_params["search"] = primary_anchor
         try:
             enriched_payload = await self._request("GET", "/recipes", params=enriched_params)
@@ -368,7 +378,42 @@ class RecipeAPIIOAdapter:
             name=name.strip(),
             image_url=raw.get("image_url") if isinstance(raw.get("image_url"), str) else None,
             cuisine=raw.get("cuisine") if isinstance(raw.get("cuisine"), str) else None,
+            full_recipe=self._try_map_full_recipe_from_list_item(raw),
         )
+
+    def _try_map_full_recipe_from_list_item(self, raw: dict) -> Recipe | None:
+        """Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08).
+
+        Live investigation (real RecipeAPI.io calls, not assumed) found
+        that /recipes (search/list) items are NOT lightweight stubs --
+        confirmed live to already carry the exact same ingredients/
+        instructions/difficulty/servings/timing fields as a /recipes/{id}
+        detail response. Reusing _map_recipe here (the same mapping
+        already proven for detail responses) means a candidate whose
+        list item already has real ingredients+instructions needs no
+        separate get_details() round trip at all.
+
+        Conservative by construction, never inferring unsupported data:
+        only attempted when the raw item actually has a non-empty
+        ingredients array AND non-empty instructions; any mapping
+        failure (or a genuinely thin list item, some other provider
+        version, a future RecipeAPI.io response shape) silently leaves
+        this None so app.agent.tools.fetch_recipe_details falls back to
+        the real get_details() call for that one candidate, unchanged.
+        """
+
+        raw_ingredients = raw.get("ingredients")
+        raw_instructions = raw.get("instructions")
+        has_ingredients = isinstance(raw_ingredients, list) and len(raw_ingredients) > 0
+        has_instructions = (isinstance(raw_instructions, list) and len(raw_instructions) > 0) or (
+            isinstance(raw_instructions, str) and bool(raw_instructions.strip())
+        )
+        if not (has_ingredients and has_instructions):
+            return None
+        try:
+            return self._map_recipe(raw)
+        except RecipeProviderError:
+            return None
 
     def _map_recipe(self, raw: dict) -> Recipe:
         recipe_recipe_id, name = require_usable_identity(

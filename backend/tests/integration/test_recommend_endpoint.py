@@ -224,6 +224,44 @@ def test_excluded_ingredient_violation_never_shown_as_closest_alternative():
         _clear()
 
 
+def test_unresolved_ingredients_carry_a_stable_identity_key_across_cards():
+    # Priority-3 (PR #15 correction pass, 2026-09-08): the frontend needs
+    # a safe, deterministic way to recognize the SAME unresolved raw
+    # ingredient across multiple displayed cards when the user confirms
+    # they already own it -- never a canonical_id, never taxonomy
+    # promotion.
+    recipe_a = _recipe(id="recipeapi_io:1", provider_recipe_id="1")
+    recipe_b = _recipe(id="recipeapi_io:2", provider_recipe_id="2", name="Other Dish")
+    candidate_a = _candidate(recipe_id="recipeapi_io:1", unresolved_ingredients=["  Special Sauce X!! "])
+    candidate_b = _candidate(recipe_id="recipeapi_io:2", unresolved_ingredients=["special sauce x"])
+    result = AgentResult(
+        request_id="req_x",
+        status="completed",
+        search_attempts=1,
+        recommendations=[candidate_a, candidate_b],
+        closest_alternatives=[],
+        stop_reason="sufficient_feasible_candidates",
+        progress_events=[],
+        provider_status={},
+        recipe_by_id={recipe_a.id: recipe_a, recipe_b.id: recipe_b},
+        scaling_by_id={},
+        missing_breakdown_by_id={recipe_a.id: [], recipe_b.id: []},
+        pantry_unresolved=[],
+    )
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        body = response.json()
+        card_a, card_b = body["recommendations"]
+        row_a = card_a["unresolved_ingredients"][0]
+        row_b = card_b["unresolved_ingredients"][0]
+        assert row_a["raw_name"] == "  Special Sauce X!! "
+        assert row_a["identity_key"] == row_b["identity_key"] == "special sauce x"
+    finally:
+        _clear()
+
+
 def test_pantry_unresolved_is_surfaced():
     result = _happy_path_result()
     result.pantry_unresolved.append("kohlrabi")

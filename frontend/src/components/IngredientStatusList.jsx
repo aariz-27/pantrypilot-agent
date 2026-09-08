@@ -1,4 +1,4 @@
-export function IngredientStatusList({ card, onMarkHave }) {
+export function IngredientStatusList({ card, onMarkHave, onMarkHaveUnresolved }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
@@ -56,9 +56,28 @@ export function IngredientStatusList({ card, onMarkHave }) {
         <>
           <h3 style={{ fontSize: 14, margin: '0 0 var(--space-2)' }}>Uncertain</h3>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {card.unresolved_ingredients.map((name) => (
-              <li key={name} style={{ color: 'var(--color-warning)', fontWeight: 600, fontSize: 14 }}>
-                ◐ {name}
+            {card.unresolved_ingredients.map((row) => (
+              <li
+                key={row.identity_key || row.raw_name}
+                style={{ color: 'var(--color-warning)', fontWeight: 600, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
+              >
+                <span>◐ {row.display_name}</span>
+                {/* Priority 3 (ticket, PR #15 correction pass): the user
+                    may genuinely own this even though PantryPilot could
+                    not normalize it -- confirming it never assigns a
+                    canonical_id or promotes it into the taxonomy/pricing
+                    tables; it only records the user's own raw pantry
+                    state for this session. */}
+                {onMarkHaveUnresolved ? (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500, color: 'var(--color-text)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      onChange={() => onMarkHaveUnresolved(row.identity_key, row.raw_name)}
+                      aria-label={`I have ${row.display_name}`}
+                    />
+                    I have this
+                  </label>
+                ) : null}
               </li>
             ))}
           </ul>

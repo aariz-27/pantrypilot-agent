@@ -35,7 +35,7 @@ function Steps({ instructions }) {
   return <p className="recipe-detail__instructions">{instructions}</p>
 }
 
-export function RecipeDetail({ card, onClose, onMarkHave }) {
+export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved }) {
   const titleId = useId()
   const dialogRef = useRef(null)
   const closeButtonRef = useRef(null)
@@ -146,14 +146,24 @@ export function RecipeDetail({ card, onClose, onMarkHave }) {
 
           <div className="card" style={{ padding: 'var(--space-4)' }}>
             <p style={{ margin: '0 0 var(--space-2)', fontWeight: 700 }}>
-              {card.matched_ingredients.length} of {card.matched_ingredients.length + card.missing_ingredients.length} ingredients available
+              {/* Priority 3 (PR #15 correction pass, 2026-09-08): the
+                  total must include unresolved ingredients too, or
+                  confirming an uncertain one as owned would make this
+                  denominator jump upward (it "graduates" into
+                  matched_ingredients) even though the recipe's real
+                  ingredient count never changed. Summing all three
+                  buckets is invariant across "I have this" confirmations
+                  either way -- an item only ever moves between them. */}
+              {card.matched_ingredients.length} of{' '}
+              {card.matched_ingredients.length + card.missing_ingredients.length + card.unresolved_ingredients.length} ingredients
+              available
             </p>
             <div className="recipe-card__progress-track">
               <div className="recipe-card__progress-fill" style={{ width: `${Math.round(card.pantry_coverage * 100)}%` }} />
             </div>
           </div>
 
-          <IngredientStatusList card={card} onMarkHave={onMarkHave} />
+          <IngredientStatusList card={card} onMarkHave={onMarkHave} onMarkHaveUnresolved={onMarkHaveUnresolved} />
 
           <CostSummary card={card} />
 
