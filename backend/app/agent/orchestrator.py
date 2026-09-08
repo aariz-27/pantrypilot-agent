@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from app.agent.actions import ActionType, AgentAction, SearchArgs
 from app.agent.errors import AgentMalformedActionError, AgentUnsupportedActionError
-from app.agent.observations import ObservationCandidate, SearchObservation, build_decision_payload
+from app.agent.observations import ObservationCandidate, SearchObservation, build_decision_payload, compute_anchor_stats
 from app.agent.policy import SYSTEM_POLICY
 from app.agent.state import MAX_CORRECTIVE_RETRIES_PER_STEP, MAX_FINAL_RECOMMENDATIONS, AgentState, SearchAttemptRecord
 from app.agent.tools import (
@@ -81,6 +81,18 @@ class AgentResult:
     higher_match_time_excluded: bool = False
     higher_match_time_excluded_count: int = 0
     higher_match_min_rejected_time_minutes: int | None = None
+    # Priority 4 (PR #15 correction pass, 2026-09-08): already-evaluated,
+    # already-hard-constraint-passing candidates ranked 4th or lower --
+    # never a "final recommendation" (max 3 remains unchanged), never a
+    # hard-rejected candidate (that is closest_alternatives' job). Lets
+    # the UI reveal more good options with zero additional provider/LLM
+    # calls, since these were already fully retrieved and evaluated
+    # during the normal bounded search. Defaulted (unlike recommendations/
+    # closest_alternatives) purely so existing keyword-constructed test
+    # fixtures that don't care about it don't all need updating --
+    # _finalize (the only production constructor) always sets it
+    # explicitly.
+    additional_options: list[CandidateEvaluation] = field(default_factory=list)
 
 
 class AgentOrchestrator:
@@ -234,6 +246,17 @@ class AgentOrchestrator:
     async def _handle_search(self, state: AgentState, args: SearchArgs, constraints: UserConstraints) -> None:
         self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
 
+        # Priority 5 (PR #15 correction pass, 2026-09-08): carry the
+        # LLM's own primary-anchor choice into the observation loop.
+        # Already validated above to resolve to a real pantry canonical
+        # id -- re-normalizing here (pure, deterministic) just recovers
+        # that same id rather than re-deriving trust. Same "first anchor
+        # is the primary one" convention RecipeAPIIOAdapter.
+        # enrich_with_free_text_search already uses, not a new one.
+        state.active_anchor_canonical = normalize_ingredient_name(
+            args.anchor_ingredients[0], CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
+        ).canonical_id
+
         route = args.route.value
         if route == "local_curated" and not is_approved_local_curated_intent(args.cuisine, state.cuisine_preference):
             raise AgentUnsupportedActionError(
@@ -361,6 +384,19 @@ class AgentOrchestrator:
     def _merge_best_feasible(
         self, state: AgentState, new_feasible: list[CandidateEvaluation], constraints: UserConstraints
     ) -> list[CandidateEvaluation]:
+        """Priority-4 change (PR #15 correction pass, 2026-09-08): returns
+        the FULL ranked feasible pool (bounded only by
+        MAX_EVALUATED_CANDIDATES=20, same as state.evaluated_candidates),
+        not just the top 3. Previously this truncated to
+        MAX_FINAL_RECOMMENDATIONS here, silently discarding already-
+        evaluated, already-feasible candidates ranked 4th or lower --
+        exactly the "additional_options" reserve candidates Priority 4
+        needs to expose without any new provider/LLM call. Truncation to
+        the top-3 "final recommendations" now happens only once, in
+        _finalize, which is also where the max-3 invariant is enforced
+        for the public AgentResult.recommendations contract -- this
+        method's own return value was never itself the invariant."""
+
         combined: dict[str, CandidateEvaluation] = {c.recipe_id: c for c in state.best_feasible}
         for c in new_feasible:
             combined[c.recipe_id] = c
@@ -368,8 +404,7 @@ class AgentOrchestrator:
             return []
         cuisine_by_id = {rid: meta[0] for rid, meta in state.recipe_meta_by_id.items()}
         name_by_id = {rid: meta[1] for rid, meta in state.recipe_meta_by_id.items()}
-        ranked = rank_candidates(list(combined.values()), constraints, cuisine_by_id, name_by_id)
-        return ranked[:MAX_FINAL_RECOMMENDATIONS]
+        return rank_candidates(list(combined.values()), constraints, cuisine_by_id, name_by_id)
 
     def _build_observation(
         self, state, route, strategy, outcome, recipes, feasible, rejected
@@ -412,6 +447,14 @@ class AgentOrchestrator:
         # user-facing ranking/scoring formula (app.domain.ranker is
         # untouched).
         best_evidence_first = sorted(evaluated_this_attempt, key=lambda c: -c.pantry_coverage)
+
+        # Priority 5 (PR #15 correction pass, 2026-09-08): per-attempt
+        # anchor-relevance evidence (see AnchorStats' docstring --
+        # never Python's own choice of anchor, only how well the LLM's
+        # own current choice is represented among what THIS attempt
+        # returned).
+        anchor_stats = compute_anchor_stats(evaluated_this_attempt, state.recipe_by_id, state.active_anchor_canonical)
+
         top = tuple(
             ObservationCandidate(
                 recipe_id=c.recipe_id,
@@ -444,6 +487,12 @@ class AgentOrchestrator:
             candidate_cap_remaining=state.remaining_candidate_capacity(),
             search_attempts_remaining=max(0, state.max_search_attempts - state.search_attempts),
             top_candidates=top,
+            active_search_anchor=anchor_stats.anchor_canonical_id,
+            anchor_candidates_this_attempt=anchor_stats.anchor_candidate_count,
+            feasible_anchor_candidates_this_attempt=anchor_stats.feasible_anchor_candidate_count,
+            best_coverage_among_anchor_candidates_this_attempt=anchor_stats.best_coverage_among_anchor_candidates,
+            best_coverage_among_non_anchor_candidates_this_attempt=anchor_stats.best_coverage_among_non_anchor_candidates,
+            mostly_generic_overlap_this_attempt=anchor_stats.mostly_generic_overlap,
         )
 
     # -- finalization ------------------------------------------------------
@@ -491,18 +540,27 @@ class AgentOrchestrator:
 
     def _finalize(self, state: AgentState, stop_reason: str) -> AgentResult:
         status = "completed" if state.best_feasible else "no_feasible_match"
+        # Priority 4 (PR #15 correction pass, 2026-09-08): state.best_feasible
+        # is now the FULL ranked feasible pool (see _merge_best_feasible) --
+        # the top-3 "final recommendations" invariant is enforced exactly
+        # here, once, and everything ranked below it becomes
+        # additional_options (never rejected candidates -- those remain
+        # closest_alternatives, built only when there is no feasible
+        # candidate at all, unchanged).
         recommendations = list(state.best_feasible[:MAX_FINAL_RECOMMENDATIONS])
+        additional_options = list(state.best_feasible[MAX_FINAL_RECOMMENDATIONS:])
         closest_alternatives = [] if state.best_feasible else self._closest_alternatives(state)
         higher_match_time_excluded, higher_match_count, higher_match_min_time = self._higher_match_time_excluded(
             state, recommendations or closest_alternatives
         )
 
-        relevant_ids = {c.recipe_id for c in recommendations + closest_alternatives}
+        relevant_ids = {c.recipe_id for c in recommendations + additional_options + closest_alternatives}
         return AgentResult(
             request_id=state.request_id,
             status=status,
             search_attempts=state.search_attempts,
             recommendations=recommendations,
+            additional_options=additional_options,
             closest_alternatives=closest_alternatives,
             stop_reason=stop_reason,
             progress_events=list(state.progress_events),

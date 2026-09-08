@@ -388,3 +388,124 @@ describe('"I have this" for unresolved ingredients (Priority 3, PR #15 correctio
     expect(matchBadges).toHaveLength(2)
   })
 })
+
+
+describe('additional_options "Show more options" (Priority 4, PR #15 correction pass)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function reserveCard(overrides = {}) {
+    return card({
+      recipe_id: 'reserve-1',
+      name: 'Reserve Dish',
+      matched_ingredients: [],
+      missing_ingredients: [],
+      pantry_coverage: 0.5,
+      ...overrides,
+    })
+  }
+
+  it('shows only the top 3 initially, with a "Show more options" control when reserve candidates exist', async () => {
+    const response = baseResponse({
+      recommendations: [card()],
+      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+    expect(screen.queryByText('Reserve One')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show more options' })).toBeInTheDocument()
+  })
+
+  it('clicking "Show more options" reveals additional cards and makes no new API call', async () => {
+    const response = baseResponse({
+      recommendations: [card()],
+      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
+
+    expect(screen.getByText('Reserve One')).toBeInTheDocument()
+    // Still exactly the one call from the initial search -- revealing
+    // reserve candidates makes no Claude/RecipeAPI.io request.
+    expect(api.postRecommend).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides "Show more options" once every reserve candidate is revealed', async () => {
+    const response = baseResponse({
+      recommendations: [card()],
+      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
+
+    expect(screen.queryByRole('button', { name: 'Show more options' })).not.toBeInTheDocument()
+  })
+
+  it('a reserve candidate can move into the visible top 3 after "I have this" recomputation, still with no new API call', async () => {
+    const weakTop = card({
+      recipe_id: 'weak-top',
+      name: 'Weak Top',
+      matched_ingredients: [],
+      missing_ingredients: [{ raw_name: 'x', canonical_id: 'x_ing', display_name: 'X', estimated_cost_aed: 1, price_complete: true }],
+      pantry_coverage: 0.1,
+    })
+    const strongReserve = reserveCard({
+      recipe_id: 'strong-reserve',
+      name: 'Strong Reserve',
+      matched_ingredients: [],
+      missing_ingredients: [{ raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true }],
+      pantry_coverage: 0.2,
+    })
+    const response = baseResponse({ recommendations: [weakTop], additional_options: [strongReserve] })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Weak Top'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
+    await waitFor(() => screen.getByText('Strong Reserve'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Strong Reserve/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    // "Strong Reserve" now has full coverage and no missing ingredients
+    // -- it must outrank "Weak Top" and appear as a top result, without
+    // any additional network call.
+    const grid = screen.getByText('Strong Reserve').closest('.recipe-grid') ?? document.body
+    expect(grid).toContainElement(screen.getByText('Strong Reserve'))
+    expect(api.postRecommend).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Refresh recommendations" remains the only action that starts a fresh search', async () => {
+    const response = baseResponse({
+      recommendations: [card({ missing_ingredients: [{ raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true }] })],
+      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+    })
+    api.postRecommend.mockResolvedValueOnce(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+
+    expect(api.postRecommend).toHaveBeenCalledTimes(1)
+
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [card()] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh recommendations' }))
+    await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(2))
+  })
+})

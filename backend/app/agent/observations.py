@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from app.agent.state import MAX_FINAL_RECOMMENDATIONS, AgentState
+from app.domain.models import CandidateEvaluation, Recipe
 
 # Bound the number of individual candidates surfaced to the model --
 # the agent needs aggregate signals to decide, not a full listing
@@ -35,6 +36,91 @@ _MAX_OBSERVED_CANDIDATES = 5
 # preserving. Requiring a minimum average coverage among the best
 # feasible candidates closes that gap.
 _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT = 1 / 3
+
+# Priority 5 (PR #15 correction pass, 2026-09-08): a live trace of the
+# ticket's own reproduction pantry (Chicken Wings, Garlic, Soy Sauce,
+# Ginger, Salt, Pepper) found the agent stopped with 6 feasible
+# candidates and a passing average top-3 coverage, yet only 4 of 8
+# retained candidates actually contained the chosen anchor
+# (chicken_wings) -- the deterministic ranker (frozen, unmodified) then
+# legitimately ranked one cheap/few-missing NON-anchor candidate ahead
+# of two genuinely relevant anchor candidates. Feasible-count and
+# average-coverage alone cannot see this: a pool "diluted" with
+# generic-overlap matches (chosen anchor mostly absent) can still clear
+# both bars. This conservative majority threshold flags exactly that
+# "mostly generic overlap" condition described in the ticket, styled
+# the same way as _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT above.
+_MIN_ANCHOR_FRACTION_FOR_SUFFICIENT = 0.5
+
+
+@dataclass(frozen=True)
+class AnchorStats:
+    """Deterministic, Python-only evidence of how well the LLM's OWN
+    most recent anchor choice (AgentState.active_anchor_canonical) is
+    represented among evaluated candidates. Never independently chooses
+    or judges which pantry ingredient is "the" anchor -- that remains
+    the LLM's call (DEC-005); this only reports how the search results
+    reflect that choice, so the LLM can decide whether to keep
+    searching, reformulate, or stop with genuine grounds."""
+
+    anchor_canonical_id: str | None
+    evaluated_count: int
+    anchor_candidate_count: int
+    feasible_anchor_candidate_count: int
+    best_coverage_among_anchor_candidates: float | None
+    best_coverage_among_non_anchor_candidates: float | None
+
+    @property
+    def anchor_candidate_fraction(self) -> float | None:
+        if self.evaluated_count == 0:
+            return None
+        return self.anchor_candidate_count / self.evaluated_count
+
+    @property
+    def mostly_generic_overlap(self) -> bool:
+        """True when an anchor is defined, at least one candidate has
+        been evaluated, and fewer than half of them actually contain
+        it -- the ticket's "results return mostly generic recipes...
+        but not chicken wings" condition, expressed generically."""
+
+        if self.anchor_canonical_id is None or self.evaluated_count == 0:
+            return False
+        return (self.anchor_candidate_fraction or 0.0) < _MIN_ANCHOR_FRACTION_FOR_SUFFICIENT
+
+
+def compute_anchor_stats(
+    candidates: list[CandidateEvaluation],
+    recipe_by_id: dict[str, Recipe],
+    anchor_canonical_id: str | None,
+) -> AnchorStats:
+    if anchor_canonical_id is None or not candidates:
+        return AnchorStats(anchor_canonical_id, len(candidates), 0, 0, None, None)
+
+    anchor_coverages: list[float] = []
+    non_anchor_coverages: list[float] = []
+    anchor_count = 0
+    feasible_anchor_count = 0
+    for candidate in candidates:
+        recipe = recipe_by_id.get(candidate.recipe_id)
+        has_anchor = recipe is not None and any(
+            ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients
+        )
+        if has_anchor:
+            anchor_count += 1
+            anchor_coverages.append(candidate.pantry_coverage)
+            if candidate.hard_constraint_pass:
+                feasible_anchor_count += 1
+        else:
+            non_anchor_coverages.append(candidate.pantry_coverage)
+
+    return AnchorStats(
+        anchor_canonical_id=anchor_canonical_id,
+        evaluated_count=len(candidates),
+        anchor_candidate_count=anchor_count,
+        feasible_anchor_candidate_count=feasible_anchor_count,
+        best_coverage_among_anchor_candidates=max(anchor_coverages) if anchor_coverages else None,
+        best_coverage_among_non_anchor_candidates=max(non_anchor_coverages) if non_anchor_coverages else None,
+    )
 
 
 @dataclass(frozen=True)
@@ -85,6 +171,16 @@ class SearchObservation:
     # requirement), not for any semantic reason.
     all_max_total_time_exceeded: bool = False
     top_candidates: tuple[ObservationCandidate, ...] = field(default_factory=tuple)
+    # Priority 5 (PR #15 correction pass, 2026-09-08): per-attempt
+    # anchor-relevance evidence (see AnchorStats/compute_anchor_stats
+    # above) -- None fields mean no anchor was defined for this attempt
+    # (e.g. an empty pantry), never a fabricated/guessed value.
+    active_search_anchor: str | None = None
+    anchor_candidates_this_attempt: int = 0
+    feasible_anchor_candidates_this_attempt: int = 0
+    best_coverage_among_anchor_candidates_this_attempt: float | None = None
+    best_coverage_among_non_anchor_candidates_this_attempt: float | None = None
+    mostly_generic_overlap_this_attempt: bool = False
 
 
 def build_decision_payload(state: AgentState) -> dict:
@@ -105,6 +201,12 @@ def build_decision_payload(state: AgentState) -> dict:
     best_feasible_avg_coverage = (
         sum(c.pantry_coverage for c in top_best_feasible) / len(top_best_feasible) if top_best_feasible else 0.0
     )
+    # Priority 5 (PR #15 correction pass, 2026-09-08): cumulative anchor
+    # evidence across every candidate evaluated so far (any attempt/
+    # anchor), scored against the CURRENT anchor -- if the LLM
+    # reformulates to a different anchor, this recomputes fresh rather
+    # than conflating two different anchors' evidence.
+    anchor_stats = compute_anchor_stats(state.evaluated_candidates, state.recipe_by_id, state.active_anchor_canonical)
     return {
         "state_summary": {
             "pantry_canonical": sorted(state.pantry_canonical),
@@ -113,6 +215,17 @@ def build_decision_payload(state: AgentState) -> dict:
             "candidates_evaluated_total": len(state.evaluated_candidates),
             "candidate_cap_remaining": state.remaining_candidate_capacity(),
             "current_best_feasible_count": len(state.best_feasible),
+            # Priority 5 additions: makes the LLM's own anchor choice's
+            # real-world retrieval quality explicit and cumulative (never
+            # Python's own classification of which ingredient matters --
+            # see AnchorStats' docstring).
+            "active_search_anchor": anchor_stats.anchor_canonical_id,
+            "anchor_candidates_evaluated_total": anchor_stats.anchor_candidate_count,
+            "anchor_candidate_fraction": anchor_stats.anchor_candidate_fraction,
+            "feasible_anchor_candidates_total": anchor_stats.feasible_anchor_candidate_count,
+            "best_coverage_among_anchor_candidates": anchor_stats.best_coverage_among_anchor_candidates,
+            "best_coverage_among_non_anchor_candidates": anchor_stats.best_coverage_among_non_anchor_candidates,
+            "mostly_generic_overlap": anchor_stats.mostly_generic_overlap,
             # Priority-1 efficiency fix (PR #15 correction pass,
             # 2026-09-08): explicit, unmissable boolean mirroring
             # MAX_FINAL_RECOMMENDATIONS -- SYSTEM_POLICY already said
@@ -122,13 +235,25 @@ def build_decision_payload(state: AgentState) -> dict:
             # itself. This never overrides the LLM's stop decision
             # (DEC-005: the LLM controls stop conditions) -- it only
             # makes the deterministic evidence for that decision explicit
-            # rather than implicit. Requires BOTH enough feasible
-            # candidates AND a minimum average pantry match among them
-            # (see _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT above) -- feasible
-            # alone (hard_constraint_pass) says nothing about relevance.
+            # rather than implicit. Requires enough feasible candidates,
+            # a minimum average pantry match among them (see
+            # _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT), AND -- Priority 5 --
+            # when an anchor is defined and anchor matches exist at all,
+            # enough of those feasible candidates actually contain the
+            # anchor and the pool isn't mostly generic overlap. Feasible
+            # alone (hard_constraint_pass) says nothing about relevance;
+            # coverage alone says nothing about WHY it's low.
             "sufficient_feasible_found": (
                 len(state.best_feasible) >= MAX_FINAL_RECOMMENDATIONS
                 and best_feasible_avg_coverage >= _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT
+                and (
+                    anchor_stats.anchor_canonical_id is None
+                    or anchor_stats.anchor_candidate_count == 0
+                    or (
+                        anchor_stats.feasible_anchor_candidate_count >= MAX_FINAL_RECOMMENDATIONS
+                        and not anchor_stats.mostly_generic_overlap
+                    )
+                )
             ),
             "cuisine_preference": state.cuisine_preference,
             "cuisine_strict": state.cuisine_strict,

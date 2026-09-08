@@ -434,3 +434,47 @@ def test_valid_request_passes_allow_hard_difficulty_through():
         assert fake.request.allow_hard_difficulty is True
     finally:
         _clear()
+
+
+def test_additional_options_are_mapped_into_the_response():
+    recipe_a = _recipe(id="recipeapi_io:1", provider_recipe_id="1")
+    recipe_b = _recipe(id="recipeapi_io:2", provider_recipe_id="2", name="Reserve Dish")
+    candidate_a = _candidate(recipe_id="recipeapi_io:1")
+    candidate_b = _candidate(recipe_id="recipeapi_io:2")
+    result = AgentResult(
+        request_id="req_x",
+        status="completed",
+        search_attempts=1,
+        recommendations=[candidate_a],
+        additional_options=[candidate_b],
+        closest_alternatives=[],
+        stop_reason="sufficient_feasible_candidates",
+        progress_events=[],
+        provider_status={},
+        recipe_by_id={recipe_a.id: recipe_a, recipe_b.id: recipe_b},
+        scaling_by_id={},
+        missing_breakdown_by_id={recipe_a.id: [], recipe_b.id: []},
+        pantry_unresolved=[],
+    )
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        body = response.json()
+        assert len(body["recommendations"]) == 1
+        assert len(body["additional_options"]) == 1
+        assert body["additional_options"][0]["name"] == "Reserve Dish"
+        assert body["additional_options"][0]["is_exact_match"] is True
+    finally:
+        _clear()
+
+
+def test_additional_options_defaults_to_empty_list():
+    result = _happy_path_result()
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.json()["additional_options"] == []
+    finally:
+        _clear()

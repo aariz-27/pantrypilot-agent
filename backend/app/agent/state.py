@@ -79,6 +79,16 @@ class AgentState:
     missing_breakdown_by_id: dict[str, list[MissingIngredientBreakdown]] = field(default_factory=dict)
     progress_events: list[str] = field(default_factory=list)
     last_observation: object | None = None
+    # Priority 5 (PR #15 correction pass, 2026-09-08): the canonical id
+    # of the FIRST anchor ingredient in the most recent SEARCH action --
+    # i.e. exactly the same "primary anchor" convention already used by
+    # RecipeAPIIOAdapter.enrich_with_free_text_search, just carried
+    # forward into the observation loop so anchor relevance is visible
+    # to the agent. Never independently chosen/classified by Python --
+    # this only ever mirrors the LLM's own most recent anchor choice
+    # (DEC-005: the LLM owns search strategy, including which pantry
+    # ingredient is the strongest anchor). None until the first search.
+    active_anchor_canonical: str | None = None
 
     def record_progress(self, event: str) -> None:
         self.progress_events.append(event)

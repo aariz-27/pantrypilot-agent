@@ -1343,3 +1343,330 @@ async def test_recipe_by_id_and_deterministic_pipeline_agree_on_a_singular_plura
     # the identical canonical_id as recipe_by_id above.
     assert "chicken_wings" not in candidate.missing_ingredients
     assert candidate.pantry_coverage == 1.0
+
+
+# --- Priority 4: additional_options reserve candidates (PR #15 correction ----
+# pass, 2026-09-08)
+
+
+async def test_additional_options_holds_feasible_candidates_beyond_the_top_3(price_db):
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}",
+            provider_recipe_id=str(i),
+            name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in range(1, 6)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4", "5"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert len(result.recommendations) == 3
+    assert len(result.additional_options) == 2
+    # Disjoint -- no candidate appears in both.
+    rec_ids = {c.recipe_id for c in result.recommendations}
+    extra_ids = {c.recipe_id for c in result.additional_options}
+    assert rec_ids.isdisjoint(extra_ids)
+    assert len(rec_ids | extra_ids) == 5
+
+
+async def test_additional_options_empty_when_three_or_fewer_feasible(price_db):
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i),
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert len(result.recommendations) == 2
+    assert result.additional_options == []
+
+
+async def test_hard_rejected_candidates_never_enter_additional_options(price_db):
+    feasible_recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i),
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3, 4)
+    }
+    # "5" is excluded -- present in the same search result but must never
+    # surface in recommendations OR additional_options, only (if at all)
+    # closest_alternatives, and only when there is no feasible candidate.
+    excluded_recipe = make_recipe(
+        id="recipeapi_io:5", provider_recipe_id="5",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4", "5"))],
+        details_by_id={**feasible_recipes, "5": excluded_recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(excluded_raw=["onion"]))
+
+    all_shown_ids = {c.recipe_id for c in result.recommendations + result.additional_options}
+    assert "recipeapi_io:5" not in all_shown_ids
+    assert len(result.recommendations) == 3
+    assert len(result.additional_options) == 1
+
+
+# --- Priority 5: anchor-relevance observation loop (PR #15 correction pass, --
+# 2026-09-08)
+
+
+async def test_active_anchor_canonical_set_from_first_search_anchor(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato", "onion"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    # The observation sent for the SECOND decision must echo back
+    # "tomato" (the first anchor of the search just issued), not
+    # "onion" or anything else -- the LLM's own primary-anchor choice,
+    # never independently picked by Python.
+    assert llm.requests[1].observation["state_summary"]["active_search_anchor"] == "tomato"
+
+
+async def test_observation_exposes_anchor_candidate_counts(price_db):
+    with_anchor = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    without_anchor = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": with_anchor, "2": without_anchor},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    obs = llm.requests[1].observation["latest_search_observation"]
+    assert obs["active_search_anchor"] == "tomato"
+    assert obs["anchor_candidates_this_attempt"] == 1
+    assert obs["feasible_anchor_candidates_this_attempt"] == 1
+
+
+async def test_mostly_generic_overlap_true_when_anchor_underrepresented(price_db):
+    # 1 of 3 evaluated candidates contains the anchor -- a third fraction
+    # is below the 0.5 majority threshold.
+    with_anchor = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    without_a = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    without_b = make_recipe(
+        id="recipeapi_io:3", provider_recipe_id="3",
+        ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id={"1": with_anchor, "2": without_a, "3": without_b},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    obs = llm.requests[1].observation["latest_search_observation"]
+    assert obs["mostly_generic_overlap_this_attempt"] is True
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["mostly_generic_overlap"] is True
+
+
+async def test_sufficient_feasible_found_false_when_mostly_generic_overlap_despite_enough_raw_feasible_count(price_db):
+    # Regression for a real bug caught via live validation (2026-09-08):
+    # 3+ feasible candidates with an acceptable average top-3 coverage
+    # can still be a "mostly generic overlap" pool (chosen anchor barely
+    # represented) -- sufficient_feasible_found must not fire on raw
+    # count/coverage alone once an anchor is defined.
+    anchor_recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Anchor Dish",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    generic_recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Generic {i}",
+            ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+        )
+        for i in (2, 3, 4)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4"))],
+        details_by_id={"1": anchor_recipe, **generic_recipes},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    # 4 feasible total, avg coverage among top 3 is comfortably high
+    # (all candidates share the same single-ingredient full-coverage
+    # shape here), yet only 1 of 4 contains the anchor -- must not
+    # report sufficient.
+    assert state_summary["current_best_feasible_count"] == 4
+    assert state_summary["feasible_anchor_candidates_total"] == 1
+    assert state_summary["sufficient_feasible_found"] is False
+
+
+async def test_sufficient_feasible_found_true_when_anchor_well_represented(price_db):
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["feasible_anchor_candidates_total"] == 3
+    assert state_summary["mostly_generic_overlap"] is False
+    assert state_summary["sufficient_feasible_found"] is True
+
+
+async def test_weak_anchor_relevance_permits_another_bounded_agent_action(price_db):
+    # After a mostly-generic-overlap attempt, the agent must still be
+    # ALLOWED to issue another search (never blocked/forced by Python --
+    # DEC-005: the LLM controls this decision, Python only informs it).
+    weak_attempt = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    strong_attempt = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1")), ScriptedSearch(result=_search_result("2"))],
+        details_by_id={"1": weak_attempt, "2": strong_attempt},
+    )
+    llm = FakeLLMProvider(
+        [_search_action(["tomato"]), _search_action(["tomato", "garlic"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["tomato", "onion", "basmati rice", "garlic"]))
+
+    assert result.search_attempts == 2
+    assert result.status == "completed"
+
+
+async def test_generic_ingredient_presence_does_not_count_as_anchor_match(price_db):
+    # A candidate containing "onion" and "garlic" (both present in the
+    # pantry) but NOT the chosen anchor "tomato" must not be counted as
+    # an anchor match, however many OTHER pantry ingredients it shares.
+    generic_overlap = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[
+            RecipeIngredient(raw_name="onion", raw_measure="100 g"),
+            RecipeIngredient(raw_name="basmati rice", raw_measure="100 g"),
+        ],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": generic_overlap},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    obs = llm.requests[1].observation["latest_search_observation"]
+    assert obs["anchor_candidates_this_attempt"] == 0
+
+
+async def test_anchor_mechanism_is_generic_not_chicken_specific(price_db):
+    # Same mechanism, a completely different anchor ingredient (salmon)
+    # -- proves nothing here is chicken/wing-specific.
+    salmon_dish = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="salmon fillet", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": salmon_dish},
+    )
+    llm = FakeLLMProvider([_search_action(["salmon fillet"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(pantry_raw=["salmon fillet", "onion", "basmati rice"]))
+
+    obs = llm.requests[1].observation["latest_search_observation"]
+    assert obs["active_search_anchor"] == "salmon_fillet"
+    assert obs["anchor_candidates_this_attempt"] == 1
+
+
+async def test_generic_chicken_ingredient_does_not_imply_chicken_wing_anchor_match(price_db):
+    # A recipe containing generic "chicken" ingredient text that fails
+    # to normalize to any canonical id (or normalizes to a DIFFERENT
+    # specific cut) must never be counted as matching a chicken_wings
+    # anchor -- canonical-id equality only, never a substring/fuzzy
+    # ingredient-name match.
+    chicken_breast_dish = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="Boneless Chicken Breast", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": chicken_breast_dish},
+    )
+    llm = FakeLLMProvider([_search_action(["chicken_wings"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(pantry_raw=["chicken_wings", "onion", "basmati rice"]))
+
+    obs = llm.requests[1].observation["latest_search_observation"]
+    assert obs["active_search_anchor"] == "chicken_wings"
+    # chicken_breast != chicken_wings -- must not match.
+    assert obs["anchor_candidates_this_attempt"] == 0

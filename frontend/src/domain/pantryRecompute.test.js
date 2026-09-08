@@ -217,3 +217,92 @@ describe('applyExtraPantryToResponse', () => {
     expect(result.recommendations[1].matched_ingredients).toContain('some weird sauce!!')
   })
 })
+
+
+describe('applyExtraPantryToResponse -- additional_options local rerank (Priority 4, PR #15 correction pass)', () => {
+  function feasibleCard(overrides = {}) {
+    return {
+      recipe_id: 'r',
+      name: 'Card',
+      cuisine: null,
+      matched_ingredients: [],
+      missing_ingredients: [],
+      unresolved_ingredients: [],
+      pantry_coverage: 0.5,
+      price_complete: true,
+      estimated_additional_spend_aed: 5,
+      cost_confidence: 'high',
+      ...overrides,
+    }
+  }
+
+  it('recomputes additional_options cards the same way as recommendations', () => {
+    const response = {
+      recommendations: [feasibleCard({ recipe_id: 'top1' })],
+      additional_options: [
+        feasibleCard({
+          recipe_id: 'reserve1',
+          matched_ingredients: ['Chicken Breast'],
+          missing_ingredients: [
+            { raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true },
+          ],
+          unresolved_ingredients: [],
+          pantry_coverage: 0.5,
+        }),
+      ],
+      closest_alternatives: [],
+    }
+    const result = applyExtraPantryToResponse(response, new Set(['onion']), new Set())
+    const allCards = [...result.recommendations, ...result.additional_options]
+    const reserve = allCards.find((c) => c.recipe_id === 'reserve1')
+    expect(reserve.matched_ingredients).toContain('Onion')
+    expect(reserve.missing_ingredients).toEqual([])
+  })
+
+  it('a reserve candidate can move into the visible top 3 after deterministic recomputation', () => {
+    const weakTop = feasibleCard({ recipe_id: 'weak-top', pantry_coverage: 0.3, missing_ingredients: [{ raw_name: 'x' }, { raw_name: 'y' }] })
+    const okTop2 = feasibleCard({ recipe_id: 'ok-top-2', pantry_coverage: 0.4 })
+    const okTop3 = feasibleCard({ recipe_id: 'ok-top-3', pantry_coverage: 0.4 })
+    const reserve = feasibleCard({
+      recipe_id: 'reserve-strong',
+      matched_ingredients: [],
+      missing_ingredients: [
+        { raw_name: 'garlic', canonical_id: 'garlic', display_name: 'Garlic', estimated_cost_aed: 1.0, price_complete: true },
+      ],
+      pantry_coverage: 0.2,
+    })
+    const response = {
+      recommendations: [weakTop, okTop2, okTop3],
+      additional_options: [reserve],
+      closest_alternatives: [],
+    }
+    // Confirming "garlic" pushes reserve-strong's coverage/missing well
+    // past weak-top's.
+    const result = applyExtraPantryToResponse(response, new Set(['garlic']), new Set())
+    const topIds = result.recommendations.map((c) => c.recipe_id)
+    expect(topIds).toContain('reserve-strong')
+    expect(result.additional_options.map((c) => c.recipe_id)).toContain('weak-top')
+  })
+
+  it('never mixes closest_alternatives into the reranked recommendations/additional_options pool', () => {
+    const response = {
+      recommendations: [feasibleCard({ recipe_id: 'top1' })],
+      additional_options: [],
+      closest_alternatives: [feasibleCard({ recipe_id: 'rejected1', pantry_coverage: 0.99 })],
+    }
+    const result = applyExtraPantryToResponse(response, new Set(['some_canonical']), new Set())
+    const promotedIds = [...result.recommendations, ...result.additional_options].map((c) => c.recipe_id)
+    expect(promotedIds).not.toContain('rejected1')
+  })
+
+  it('is a no-op (same reference) when neither extra pantry set has anything', () => {
+    const response = { recommendations: [feasibleCard()], additional_options: [feasibleCard({ recipe_id: 'r2' })], closest_alternatives: [] }
+    expect(applyExtraPantryToResponse(response, new Set(), new Set())).toBe(response)
+  })
+
+  it('treats a missing additional_options field as an empty reserve pool', () => {
+    const response = { recommendations: [feasibleCard()], closest_alternatives: [] }
+    const result = applyExtraPantryToResponse(response, new Set(['some_id']), new Set())
+    expect(result.additional_options).toEqual([])
+  })
+})

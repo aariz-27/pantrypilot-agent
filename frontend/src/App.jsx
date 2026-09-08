@@ -52,6 +52,11 @@ export default function App() {
   // pricing tables -- it only records the user's own confirmed raw
   // pantry state for this session.
   const [extraUnresolvedPantry, setExtraUnresolvedPantry] = useState(() => new Map())
+  // Priority 4 (ticket, PR #15 correction pass, 2026-09-08): how many
+  // additional_options are currently revealed, in batches of 3. Purely
+  // a display cursor over data the search already returned -- "Show
+  // more options" never calls the backend.
+  const [visibleAdditionalCount, setVisibleAdditionalCount] = useState(0)
 
   const runSearch = useCallback(async (currentFormState) => {
     setView('loading')
@@ -61,6 +66,7 @@ export default function App() {
       setResponse(result)
       setExtraPantry(new Map())
       setExtraUnresolvedPantry(new Map())
+      setVisibleAdditionalCount(0)
       setView('results')
     } catch (err) {
       setError(err)
@@ -70,18 +76,28 @@ export default function App() {
 
   const extraCanonicalIds = useMemo(() => new Set(extraPantry.keys()), [extraPantry])
   const extraUnresolvedIdentityKeys = useMemo(() => new Set(extraUnresolvedPantry.keys()), [extraUnresolvedPantry])
+  // Priority 4: the SAME constraints the current search used, so a
+  // local rerank scores cost/cuisine identically to how the backend
+  // originally ranked these cards (backend/app/domain/ranker.py's
+  // exact contract: budget_aed / cuisine_preference).
+  const rankingConstraints = useMemo(
+    () => ({ budgetAed: formState.budgetAed, cuisinePreference: formState.cuisine }),
+    [formState.budgetAed, formState.cuisine],
+  )
 
   // Deterministic, frontend-only recompute -- never calls the backend
   // or the LLM merely because a checkbox was clicked.
   const displayResponse = useMemo(
-    () => applyExtraPantryToResponse(response, extraCanonicalIds, extraUnresolvedIdentityKeys),
-    [response, extraCanonicalIds, extraUnresolvedIdentityKeys],
+    () => applyExtraPantryToResponse(response, extraCanonicalIds, extraUnresolvedIdentityKeys, rankingConstraints),
+    [response, extraCanonicalIds, extraUnresolvedIdentityKeys, rankingConstraints],
   )
 
   const selectedCard = displayResponse
-    ? [...displayResponse.recommendations, ...displayResponse.closest_alternatives].find(
-        (card) => card.recipe_id === selectedCardId,
-      ) ?? null
+    ? [
+        ...displayResponse.recommendations,
+        ...(displayResponse.additional_options ?? []),
+        ...displayResponse.closest_alternatives,
+      ].find((card) => card.recipe_id === selectedCardId) ?? null
     : null
 
   function handleSubmit() {
@@ -94,6 +110,14 @@ export default function App() {
     setError(null)
     setExtraPantry(new Map())
     setExtraUnresolvedPantry(new Map())
+    setVisibleAdditionalCount(0)
+  }
+
+  // Priority 4: reveals 3 more already-evaluated candidates. Purely a
+  // local counter over displayResponse.additional_options -- makes no
+  // Claude or RecipeAPI.io call.
+  function handleShowMoreOptions() {
+    setVisibleAdditionalCount((prev) => prev + 3)
   }
 
   function handleMarkHave(canonicalId) {
@@ -196,6 +220,8 @@ export default function App() {
             onRefreshRecommendations={handleRefreshRecommendations}
             onShowLongerRecipes={handleShowLongerRecipes}
             currentTotalTimeMinutes={formState.totalTimeMinutes}
+            visibleAdditionalCount={visibleAdditionalCount}
+            onShowMoreOptions={handleShowMoreOptions}
           />
         ) : null}
       </main>
@@ -220,9 +246,18 @@ function ResultsView({
   onRefreshRecommendations,
   onShowLongerRecipes,
   currentTotalTimeMinutes,
+  visibleAdditionalCount,
+  onShowMoreOptions,
 }) {
   const hasExact = response.recommendations.length > 0
-  const cardsToShow = hasExact ? response.recommendations : response.closest_alternatives
+  const additionalOptions = response.additional_options ?? []
+  // Priority 4: additional_options are only ever meaningful alongside
+  // actual top-3 final recommendations -- the closest-alternatives
+  // (fallback) path never has a "show more" reserve pool, since those
+  // candidates were hard-rejected, not merely ranked lower.
+  const revealedAdditional = hasExact ? additionalOptions.slice(0, visibleAdditionalCount) : []
+  const cardsToShow = hasExact ? [...response.recommendations, ...revealedAdditional] : response.closest_alternatives
+  const hasMoreToShow = hasExact && visibleAdditionalCount < additionalOptions.length
 
   if (!hasExact && cardsToShow.length === 0) {
     return <EmptyState onNewSearch={onNewSearch} />
@@ -264,6 +299,17 @@ function ResultsView({
       {!hasExact ? <ClosestMatchNotice hasExactMatches={false} /> : null}
 
       <RecipeGrid cards={cardsToShow} onOpen={onOpen} />
+
+      {hasMoreToShow ? (
+        <button
+          type="button"
+          className="btn btn-secondary"
+          style={{ alignSelf: 'center' }}
+          onClick={onShowMoreOptions}
+        >
+          Show more options
+        </button>
+      ) : null}
     </div>
   )
 }

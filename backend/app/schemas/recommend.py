@@ -96,6 +96,13 @@ class RecommendResponse(BaseModel):
     progress_events: list[str]
     pantry_unresolved: list[str]
     recommendations: list[RecipeCard]
+    # Priority 4 (PR #15 correction pass, 2026-09-08): already-evaluated,
+    # already-feasible candidates ranked below the top 3 -- never a hard-
+    # rejected candidate (see closest_alternatives for those). Lets the
+    # frontend reveal more good options with zero additional
+    # RecipeAPI.io/Claude calls, since these were already retrieved and
+    # evaluated during the normal bounded search.
+    additional_options: list[RecipeCard] = Field(default_factory=list)
     closest_alternatives: list[RecipeCard]
     limitations: list[str]
     # Module E post-review addition (ticket section 3, PR #15): a

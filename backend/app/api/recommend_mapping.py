@@ -146,6 +146,20 @@ def build_recommend_response(
         if card is not None:
             recommendations.append(card)
 
+    # Priority 4 (PR #15 correction pass, 2026-09-08): additional_options
+    # are drawn from the SAME hard-constraint-passing pool as
+    # recommendations (is_exact_match=True is correct for them too --
+    # they differ from recommendations only by rank position, never by
+    # constraint outcome), so they get the identical, unmodified mapping
+    # path recommendations already use.
+    additional_options = []
+    for c in result.additional_options:
+        card = build_recipe_card(
+            c, result, is_exact_match=True, max_total_time_minutes=max_total_time_minutes, budget_aed=budget_aed
+        )
+        if card is not None:
+            additional_options.append(card)
+
     closest_alternatives = []
     for c in result.closest_alternatives:
         if _is_never_relax_violation(c):
@@ -174,6 +188,7 @@ def build_recommend_response(
         progress_events=result.progress_events,
         pantry_unresolved=result.pantry_unresolved,
         recommendations=recommendations,
+        additional_options=additional_options,
         closest_alternatives=closest_alternatives,
         limitations=limitations,
         higher_match_time_excluded=result.higher_match_time_excluded,

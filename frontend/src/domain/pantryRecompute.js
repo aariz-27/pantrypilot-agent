@@ -21,6 +21,21 @@
 //   contributing cost/match UNCERTAINTY for this card (ticket
 //   Priority 3: "this remains user-confirmed raw pantry state, not
 //   taxonomy/pricing truth").
+//
+// Priority 4 (PR #15 correction pass, 2026-09-08): the backend now also
+// returns additional_options -- already-evaluated, already-feasible
+// candidates ranked below the top 3 (never a hard-rejected candidate;
+// those stay in closest_alternatives, untouched here). When a
+// confirmation changes any card's coverage/cost, the FULL local pool
+// (recommendations + additional_options) is recomputed, then RE-RANKED
+// with the exact frozen formula (./ranking.js, a port of
+// backend/app/domain/ranker.py) and re-split into a new top 3 / rest --
+// entirely client-side, zero Claude/RecipeAPI.io calls. A reserve
+// candidate ranked #5 can become #1 this way.
+
+import { rerankCards } from './ranking'
+
+const MAX_FINAL_RECOMMENDATIONS = 3 // mirrors backend/app/agent/state.py
 
 function round2(value) {
   return Math.round(value * 100) / 100
@@ -96,15 +111,29 @@ export function applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedI
 // recipe cards, not only the card clicked" / "same unresolved raw
 // ingredient updates across multiple cards where identity matching is
 // safe").
-export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnresolvedIdentityKeys) {
+export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnresolvedIdentityKeys, rankingConstraints = {}) {
   const hasCanonical = extraCanonicalIds && extraCanonicalIds.size > 0
   const hasUnresolved = extraUnresolvedIdentityKeys && extraUnresolvedIdentityKeys.size > 0
   if (!response || (!hasCanonical && !hasUnresolved)) return response
+
+  const recomputedRecommendations = response.recommendations.map((card) =>
+    applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
+  )
+  const recomputedAdditional = (response.additional_options ?? []).map((card) =>
+    applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
+  )
+
+  // Priority 4: rerank the COMBINED pool (never mixing in
+  // closest_alternatives -- those are hard-rejected and can never
+  // become a recommendation/additional_option) and re-split at the
+  // frozen max-3 boundary. A reserve candidate whose coverage improved
+  // can now outrank an original top-3 card.
+  const rerankedPool = rerankCards([...recomputedRecommendations, ...recomputedAdditional], rankingConstraints)
+
   return {
     ...response,
-    recommendations: response.recommendations.map((card) =>
-      applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
-    ),
+    recommendations: rerankedPool.slice(0, MAX_FINAL_RECOMMENDATIONS),
+    additional_options: rerankedPool.slice(MAX_FINAL_RECOMMENDATIONS),
     closest_alternatives: response.closest_alternatives.map((card) =>
       applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
     ),
