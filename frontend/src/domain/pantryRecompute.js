@@ -43,7 +43,14 @@ export function applyExtraPantryToCard(card, extraCanonicalIds) {
   const totalRequired = card.matched_ingredients.length + card.missing_ingredients.length + card.unresolved_ingredients.length
   const pantry_coverage = totalRequired === 0 ? card.pantry_coverage : matched_ingredients.length / totalRequired
 
-  const allRemainingComplete = stillMissing.every((row) => row.price_complete)
+  // Post-review fix (2026-09-08): stillMissing.every(...) on an EMPTY
+  // array is vacuously true, so once every recognized missing
+  // ingredient was checked off, cost was wrongly marked complete (AED
+  // 0) even when an unresolved required ingredient (unknown price,
+  // never promoted into a trusted match) was still present. An
+  // unresolved required ingredient's cost is never known, so
+  // completeness must also require there to be none left.
+  const allRemainingComplete = card.unresolved_ingredients.length === 0 && stillMissing.every((row) => row.price_complete)
   const estimated_additional_spend_aed = allRemainingComplete
     ? round2(stillMissing.reduce((sum, row) => sum + (row.estimated_cost_aed ?? 0), 0))
     : null

@@ -34,7 +34,10 @@ describe('applyExtraPantryToCard', () => {
   })
 
   it('recomputes estimated cost as the sum of remaining missing items', () => {
-    const card = makeCard()
+    // No unresolved ingredients here -- isolates the sum-of-remaining-
+    // costs arithmetic from the unresolved-uncertainty rule (covered
+    // separately below).
+    const card = makeCard({ unresolved_ingredients: [] })
     const result = applyExtraPantryToCard(card, new Set(['onion']))
     expect(result.estimated_additional_spend_aed).toBe(1.5)
   })
@@ -67,12 +70,44 @@ describe('applyExtraPantryToCard', () => {
     expect(result).toBe(card)
   })
 
-  it('handles multiple ingredients checked at once', () => {
+  it('handles multiple ingredients checked at once, coverage improves, but cost stays incomplete while an unresolved ingredient remains', () => {
+    // Post-review fix (2026-09-08): the default makeCard() fixture
+    // carries one unresolved ingredient ("Some weird sauce"), whose
+    // price is fundamentally unknown. Checking off every RECOGNIZED
+    // missing ingredient must never be read as "nothing left to buy" --
+    // that would imply the user needs to spend AED 0 while an unknown-
+    // cost required ingredient still exists. price_complete must stay
+    // false and the spend must stay null, never a fabricated 0.
     const card = makeCard()
     const result = applyExtraPantryToCard(card, new Set(['onion', 'garlic']))
     expect(result.missing_ingredients).toEqual([])
     expect(result.pantry_coverage).toBeCloseTo(3 / 4)
+    expect(result.price_complete).toBe(false)
+    expect(result.estimated_additional_spend_aed).toBeNull()
+    expect(result.estimated_additional_spend_aed).not.toBe(0)
+  })
+
+  it('AED 0 is valid only when all required ingredients are matched AND there are no unresolved ingredients', () => {
+    const fullyResolvableCard = makeCard({ unresolved_ingredients: [] })
+    const result = applyExtraPantryToCard(fullyResolvableCard, new Set(['onion', 'garlic']))
+
+    expect(result.missing_ingredients).toEqual([])
+    expect(result.unresolved_ingredients).toEqual([])
+    expect(result.price_complete).toBe(true)
     expect(result.estimated_additional_spend_aed).toBe(0)
+  })
+
+  it('cost stays incomplete when ingredients are fully matched but an unresolved ingredient alone remains', () => {
+    const card = makeCard({
+      missing_ingredients: [{ raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true }],
+      unresolved_ingredients: ['Mystery spice blend'],
+    })
+    const result = applyExtraPantryToCard(card, new Set(['onion']))
+
+    expect(result.missing_ingredients).toEqual([])
+    expect(result.unresolved_ingredients).toEqual(['Mystery spice blend'])
+    expect(result.price_complete).toBe(false)
+    expect(result.estimated_additional_spend_aed).toBeNull()
   })
 })
 
