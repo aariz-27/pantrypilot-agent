@@ -573,6 +573,14 @@ GROCERY_INGREDIENT_ALIASES: dict[str, str] = {
     "bell pepper": "bell_pepper",
     "atta": "whole_wheat_flour",
     "whole wheat flour": "whole_wheat_flour",
+    # PR #15 second correction pass (2026-09-08): found live during
+    # multi-anchor validation -- RecipeAPI.io ingredient text and the
+    # ticket's own pantry example both use the US term "ground beef",
+    # which has no path to the existing "minced_beef" canonical id
+    # (only the UK term "Minced Beef" was an exact vocabulary match).
+    # Same US/UK synonym gap as coriander/cilantro above, not a new
+    # concept.
+    "ground beef": "minced_beef",
 }
 
 # ---------------------------------------------------------------------------

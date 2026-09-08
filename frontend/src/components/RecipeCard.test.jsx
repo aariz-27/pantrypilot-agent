@@ -81,6 +81,21 @@ describe('RecipeCard', () => {
     expect(screen.getByText('No image available')).toBeInTheDocument()
   })
 
+  it('shows an "Alternative pick" badge when contains_active_anchor is explicitly false', () => {
+    render(<RecipeCard card={makeCard({ contains_active_anchor: false })} onOpen={vi.fn()} />)
+    expect(screen.getByText('Alternative pick')).toBeInTheDocument()
+  })
+
+  it('does not show the badge when contains_active_anchor is true', () => {
+    render(<RecipeCard card={makeCard({ contains_active_anchor: true })} onOpen={vi.fn()} />)
+    expect(screen.queryByText('Alternative pick')).not.toBeInTheDocument()
+  })
+
+  it('does not show the badge when contains_active_anchor is null (no anchor tracked)', () => {
+    render(<RecipeCard card={makeCard({ contains_active_anchor: null })} onOpen={vi.fn()} />)
+    expect(screen.queryByText('Alternative pick')).not.toBeInTheDocument()
+  })
+
   it('calls onOpen with the card when clicked (whole card is tappable)', async () => {
     const onOpen = vi.fn()
     const card = makeCard()

@@ -124,6 +124,7 @@ def build_recipe_card(
         cost_confidence=candidate.cost_confidence.value,
         instructions=recipe.instructions,
         is_exact_match=is_exact_match,
+        contains_active_anchor=result.anchor_match_by_id.get(candidate.recipe_id),
         deviation_reasons=(
             []
             if is_exact_match

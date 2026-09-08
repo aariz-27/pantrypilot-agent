@@ -88,6 +88,27 @@ class AnchorStats:
         return (self.anchor_candidate_fraction or 0.0) < _MIN_ANCHOR_FRACTION_FOR_SUFFICIENT
 
 
+def candidate_contains_anchor(
+    candidate: CandidateEvaluation,
+    recipe_by_id: dict[str, Recipe],
+    anchor_canonical_id: str | None,
+) -> bool:
+    """Single-candidate anchor-match check, factored out (PR #15 second
+    correction pass, 2026-09-08) so both the aggregate AnchorStats below
+    and AgentOrchestrator's additional_options ordering/labeling use the
+    exact same, single definition of "contains the anchor": an exact
+    canonical_id match against one of the recipe's normalized
+    ingredients. Never a fuzzy/substring match, never independently
+    guessed -- False (not "unknown") whenever no anchor is defined or
+    the recipe is unavailable, since an undefined anchor cannot be
+    "contained"."""
+
+    if anchor_canonical_id is None:
+        return False
+    recipe = recipe_by_id.get(candidate.recipe_id)
+    return recipe is not None and any(ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients)
+
+
 def compute_anchor_stats(
     candidates: list[CandidateEvaluation],
     recipe_by_id: dict[str, Recipe],
@@ -101,10 +122,7 @@ def compute_anchor_stats(
     anchor_count = 0
     feasible_anchor_count = 0
     for candidate in candidates:
-        recipe = recipe_by_id.get(candidate.recipe_id)
-        has_anchor = recipe is not None and any(
-            ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients
-        )
+        has_anchor = candidate_contains_anchor(candidate, recipe_by_id, anchor_canonical_id)
         if has_anchor:
             anchor_count += 1
             anchor_coverages.append(candidate.pantry_coverage)

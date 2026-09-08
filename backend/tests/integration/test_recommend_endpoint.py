@@ -478,3 +478,46 @@ def test_additional_options_defaults_to_empty_list():
         assert response.json()["additional_options"] == []
     finally:
         _clear()
+
+
+def test_contains_active_anchor_is_mapped_into_the_response():
+    recipe_a = _recipe(id="recipeapi_io:1", provider_recipe_id="1")
+    recipe_b = _recipe(id="recipeapi_io:2", provider_recipe_id="2", name="Reserve Dish")
+    candidate_a = _candidate(recipe_id="recipeapi_io:1")
+    candidate_b = _candidate(recipe_id="recipeapi_io:2")
+    result = AgentResult(
+        request_id="req_x",
+        status="completed",
+        search_attempts=1,
+        recommendations=[candidate_a],
+        additional_options=[candidate_b],
+        closest_alternatives=[],
+        stop_reason="sufficient_feasible_candidates",
+        progress_events=[],
+        provider_status={},
+        recipe_by_id={recipe_a.id: recipe_a, recipe_b.id: recipe_b},
+        scaling_by_id={},
+        missing_breakdown_by_id={recipe_a.id: [], recipe_b.id: []},
+        pantry_unresolved=[],
+        anchor_match_by_id={"recipeapi_io:1": True, "recipeapi_io:2": False},
+    )
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        body = response.json()
+        assert body["recommendations"][0]["contains_active_anchor"] is True
+        assert body["additional_options"][0]["contains_active_anchor"] is False
+    finally:
+        _clear()
+
+
+def test_contains_active_anchor_defaults_to_none_when_no_anchor_tracked():
+    result = _happy_path_result()
+    _override(FakeOrchestrator(result))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.json()["recommendations"][0]["contains_active_anchor"] is None
+    finally:
+        _clear()

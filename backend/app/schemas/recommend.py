@@ -87,6 +87,13 @@ class RecipeCard(BaseModel):
     instructions: str | None
     is_exact_match: bool
     deviation_reasons: list[str]
+    # PR #15 second correction pass (2026-09-08): whether this card
+    # contains the run's active anchor (the LLM's own most recent
+    # primary search-anchor choice). None when no anchor was ever
+    # defined for this run. Lets the frontend clearly label a reserve
+    # candidate that only appears because the anchor-matching pool was
+    # exhausted, instead of presenting it as an equally strong match.
+    contains_active_anchor: bool | None = None
 
 
 class RecommendResponse(BaseModel):

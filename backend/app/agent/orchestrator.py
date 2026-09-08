@@ -18,7 +18,13 @@ from pydantic import ValidationError
 
 from app.agent.actions import ActionType, AgentAction, SearchArgs
 from app.agent.errors import AgentMalformedActionError, AgentUnsupportedActionError
-from app.agent.observations import ObservationCandidate, SearchObservation, build_decision_payload, compute_anchor_stats
+from app.agent.observations import (
+    ObservationCandidate,
+    SearchObservation,
+    build_decision_payload,
+    candidate_contains_anchor,
+    compute_anchor_stats,
+)
 from app.agent.policy import SYSTEM_POLICY
 from app.agent.state import MAX_CORRECTIVE_RETRIES_PER_STEP, MAX_FINAL_RECOMMENDATIONS, AgentState, SearchAttemptRecord
 from app.agent.tools import (
@@ -93,6 +99,14 @@ class AgentResult:
     # _finalize (the only production constructor) always sets it
     # explicitly.
     additional_options: list[CandidateEvaluation] = field(default_factory=list)
+    # PR #15 second correction pass (2026-09-08): whether each candidate
+    # in recommendations/additional_options contains the run's active
+    # anchor (see AgentState.active_anchor_canonical / observations.
+    # candidate_contains_anchor). Lets the API/UI layer clearly label a
+    # reserve candidate that only appears because the anchor-matching
+    # pool was exhausted, rather than presenting it as an equally strong
+    # match. Empty when no anchor was ever defined for this run.
+    anchor_match_by_id: dict[str, bool] = field(default_factory=dict)
 
 
 class AgentOrchestrator:
@@ -538,17 +552,54 @@ class AgentOrchestrator:
 
         return True, len(qualifying), min_time
 
+    def _anchor_first_ordering(self, state: AgentState) -> list[CandidateEvaluation]:
+        """PR #15 second correction pass (2026-09-08): stable-partitions
+        the already fully-ranked feasible pool (state.best_feasible,
+        unchanged, still produced by the frozen rank_candidates formula)
+        into anchor-containing candidates first, non-anchor candidates
+        second -- WITHIN each group, the existing frozen-ranking order
+        is preserved exactly (this is not a re-score, just a grouping of
+        already-scored candidates). This is what makes both
+        recommendations AND additional_options prefer anchor-matching
+        recipes while any remain, and only spill into non-anchor
+        candidates once that pool is exhausted -- without touching a
+        single weight, score, or the ranker itself.
+
+        No-op (returns state.best_feasible unchanged) when no anchor was
+        ever defined for this run -- there is nothing to group by."""
+
+        if state.active_anchor_canonical is None:
+            return list(state.best_feasible)
+
+        anchor_matching: list[CandidateEvaluation] = []
+        non_anchor: list[CandidateEvaluation] = []
+        for candidate in state.best_feasible:
+            if candidate_contains_anchor(candidate, state.recipe_by_id, state.active_anchor_canonical):
+                anchor_matching.append(candidate)
+            else:
+                non_anchor.append(candidate)
+        return anchor_matching + non_anchor
+
     def _finalize(self, state: AgentState, stop_reason: str) -> AgentResult:
         status = "completed" if state.best_feasible else "no_feasible_match"
         # Priority 4 (PR #15 correction pass, 2026-09-08): state.best_feasible
-        # is now the FULL ranked feasible pool (see _merge_best_feasible) --
+        # is the FULL ranked feasible pool (see _merge_best_feasible) --
         # the top-3 "final recommendations" invariant is enforced exactly
         # here, once, and everything ranked below it becomes
         # additional_options (never rejected candidates -- those remain
         # closest_alternatives, built only when there is no feasible
-        # candidate at all, unchanged).
-        recommendations = list(state.best_feasible[:MAX_FINAL_RECOMMENDATIONS])
-        additional_options = list(state.best_feasible[MAX_FINAL_RECOMMENDATIONS:])
+        # candidate at all, unchanged). PR #15 second correction pass:
+        # split from the ANCHOR-FIRST ordering, not the raw ranked pool,
+        # so a lower-scored anchor-matching candidate is never bumped
+        # out of the reserve pool by a higher-scored non-anchor one
+        # while anchor supply remains.
+        ordered_pool = self._anchor_first_ordering(state)
+        recommendations = list(ordered_pool[:MAX_FINAL_RECOMMENDATIONS])
+        additional_options = list(ordered_pool[MAX_FINAL_RECOMMENDATIONS:])
+        anchor_match_by_id = {
+            c.recipe_id: candidate_contains_anchor(c, state.recipe_by_id, state.active_anchor_canonical)
+            for c in recommendations + additional_options
+        } if state.active_anchor_canonical is not None else {}
         closest_alternatives = [] if state.best_feasible else self._closest_alternatives(state)
         higher_match_time_excluded, higher_match_count, higher_match_min_time = self._higher_match_time_excluded(
             state, recommendations or closest_alternatives
@@ -574,4 +625,5 @@ class AgentOrchestrator:
             higher_match_time_excluded=higher_match_time_excluded,
             higher_match_time_excluded_count=higher_match_count,
             higher_match_min_rejected_time_minutes=higher_match_min_time,
+            anchor_match_by_id=anchor_match_by_id,
         )

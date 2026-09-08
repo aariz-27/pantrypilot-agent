@@ -187,3 +187,16 @@ def test_pluralization_is_not_attempted_for_already_plural_names():
     )
     assert result.canonical_id is None
     assert result.status == NormalizationStatus.UNKNOWN
+
+
+def test_ground_beef_normalizes_to_minced_beef():
+    # Regression: found live during PR #15 second correction pass
+    # multi-anchor validation -- "ground beef" (both the US pantry term
+    # and RecipeAPI.io's own ingredient text) previously fell through
+    # to UNKNOWN despite "minced_beef" already being a real canonical
+    # id, because only the UK term "Minced Beef" was an exact match.
+    result = normalize_ingredient_name(
+        "Ground beef", canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+    )
+    assert result.canonical_id == "minced_beef"
+    assert result.status == NormalizationStatus.ALIAS

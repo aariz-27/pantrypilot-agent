@@ -306,3 +306,80 @@ describe('applyExtraPantryToResponse -- additional_options local rerank (Priorit
     expect(result.additional_options).toEqual([])
   })
 })
+
+
+describe('applyExtraPantryToResponse -- additional_options anchor discipline (PR #15 second correction pass)', () => {
+  function anchorCard(overrides = {}) {
+    return {
+      recipe_id: 'anchor',
+      name: 'Anchor Dish',
+      cuisine: null,
+      matched_ingredients: [],
+      missing_ingredients: [],
+      unresolved_ingredients: [],
+      pantry_coverage: 0.5,
+      price_complete: true,
+      estimated_additional_spend_aed: 5,
+      cost_confidence: 'high',
+      contains_active_anchor: true,
+      ...overrides,
+    }
+  }
+  function nonAnchorCard(overrides = {}) {
+    return { ...anchorCard(), recipe_id: 'non-anchor', name: 'Non Anchor Dish', contains_active_anchor: false, ...overrides }
+  }
+
+  it('keeps a non-anchor additional_option behind anchor-matching ones even after recompute improves its score', () => {
+    const weakAnchor = anchorCard({ recipe_id: 'weak-anchor', pantry_coverage: 0.2 })
+    const anchorFiller1 = anchorCard({ recipe_id: 'anchor-2', pantry_coverage: 0.2 })
+    const anchorFiller2 = anchorCard({ recipe_id: 'anchor-3', pantry_coverage: 0.2 })
+    const strongNonAnchor = nonAnchorCard({
+      recipe_id: 'strong-non-anchor',
+      pantry_coverage: 0.2,
+      missing_ingredients: [
+        { raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 1, price_complete: true },
+      ],
+    })
+    const response = {
+      recommendations: [weakAnchor, anchorFiller1, anchorFiller2],
+      additional_options: [strongNonAnchor],
+      closest_alternatives: [],
+    }
+    // Confirming "onion" pushes strong-non-anchor's coverage well past
+    // the anchor cards' -- it must still not outrank any anchor-
+    // matching card in the displayed order, since 3 anchor candidates
+    // already fill every recommendation slot.
+    const result = applyExtraPantryToResponse(response, new Set(['onion']), new Set())
+    expect(result.recommendations.map((c) => c.recipe_id)).toEqual(
+      expect.arrayContaining(['weak-anchor', 'anchor-2', 'anchor-3']),
+    )
+    expect(result.additional_options[0].recipe_id).toBe('strong-non-anchor')
+  })
+
+  it('allows a non-anchor candidate into recommendations once the anchor pool is exhausted', () => {
+    const onlyAnchor = anchorCard({ recipe_id: 'only-anchor' })
+    const nonAnchor1 = nonAnchorCard({ recipe_id: 'na1' })
+    const nonAnchor2 = nonAnchorCard({ recipe_id: 'na2' })
+    const response = {
+      recommendations: [onlyAnchor, nonAnchor1, nonAnchor2],
+      additional_options: [],
+      closest_alternatives: [],
+    }
+    // Trigger a recompute pass (no-op confirmation) to exercise the
+    // ordering path.
+    const result = applyExtraPantryToResponse(response, new Set(['nonexistent']), new Set())
+    const ids = result.recommendations.map((c) => c.recipe_id)
+    expect(ids[0]).toBe('only-anchor')
+    expect(ids.slice(1)).toEqual(expect.arrayContaining(['na1', 'na2']))
+  })
+
+  it('treats a null contains_active_anchor as "keep in place" (no anchor tracked for this response)', () => {
+    const a = anchorCard({ recipe_id: 'a', contains_active_anchor: null })
+    const b = anchorCard({ recipe_id: 'b', contains_active_anchor: null, pantry_coverage: 0.9 })
+    const response = { recommendations: [a], additional_options: [b], closest_alternatives: [] }
+    const result = applyExtraPantryToResponse(response, new Set(['x']), new Set())
+    // Pure score-based order (b has higher coverage) -- no anchor
+    // grouping applied when nothing is trackable.
+    expect([...result.recommendations, ...result.additional_options][0].recipe_id).toBe('b')
+  })
+})

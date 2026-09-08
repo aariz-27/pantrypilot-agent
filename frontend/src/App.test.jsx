@@ -509,3 +509,27 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
     await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(2))
   })
 })
+
+
+describe('additional_options anchor discipline end-to-end (PR #15 second correction pass)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('shows the "Alternative pick" badge only on a non-anchor reserve card', async () => {
+    const anchorReserve = card({ recipe_id: 'reserve-anchor', name: 'Reserve Anchor Dish', contains_active_anchor: true })
+    const nonAnchorReserve = card({ recipe_id: 'reserve-non-anchor', name: 'Reserve Non Anchor Dish', contains_active_anchor: false })
+    const response = baseResponse({
+      recommendations: [card({ contains_active_anchor: true })],
+      additional_options: [anchorReserve, nonAnchorReserve],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
+
+    expect(screen.getAllByText('Alternative pick')).toHaveLength(1)
+    const nonAnchorCardEl = screen.getByText('Reserve Non Anchor Dish').closest('button')
+    expect(nonAnchorCardEl).toContainElement(screen.getByText('Alternative pick'))
+  })
+})

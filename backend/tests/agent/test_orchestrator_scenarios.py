@@ -1670,3 +1670,133 @@ async def test_generic_chicken_ingredient_does_not_imply_chicken_wing_anchor_mat
     assert obs["active_search_anchor"] == "chicken_wings"
     # chicken_breast != chicken_wings -- must not match.
     assert obs["anchor_candidates_this_attempt"] == 0
+
+
+# --- PR #15 second correction pass: additional_options anchor discipline ------
+# (2026-09-08)
+
+
+async def test_additional_options_prefers_anchor_matching_over_higher_scored_non_anchor(price_db):
+    # Regression for the exact remaining gap: a non-anchor candidate
+    # with a strong cost/missing profile (and therefore a HIGHER
+    # deterministic_score) must still rank BELOW an anchor-matching
+    # candidate in additional_options, as long as anchor supply remains
+    # -- reordering happens after ranking, never by changing scores.
+    anchor_weak = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Anchor Weak",
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="100 g"),
+            RecipeIngredient(raw_name="saffron", raw_measure="1 g"),
+        ],
+    )
+    non_anchor_strong = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Non Anchor Strong",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    filler_1 = make_recipe(
+        id="recipeapi_io:3", provider_recipe_id="3", name="Filler 1",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    filler_2 = make_recipe(
+        id="recipeapi_io:4", provider_recipe_id="4", name="Filler 2",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    anchor_weak_2 = make_recipe(
+        id="recipeapi_io:5", provider_recipe_id="5", name="Anchor Weak 2",
+        ingredients=[
+            RecipeIngredient(raw_name="tomato", raw_measure="100 g"),
+            RecipeIngredient(raw_name="saffron", raw_measure="1 g"),
+        ],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4", "5"))],
+        details_by_id={
+            "1": anchor_weak, "2": non_anchor_strong, "3": filler_1, "4": filler_2, "5": anchor_weak_2,
+        },
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    all_shown = result.recommendations + result.additional_options
+    non_anchor_position = next(i for i, c in enumerate(all_shown) if c.recipe_id == "recipeapi_io:2")
+    # All 4 anchor-matching candidates (1, 3, 4, 5) must occupy every
+    # slot before the non-anchor one -- "Non Anchor Strong" must be last.
+    assert non_anchor_position == 4
+    assert result.anchor_match_by_id["recipeapi_io:2"] is False
+    assert result.anchor_match_by_id["recipeapi_io:1"] is True
+
+
+async def test_non_anchor_candidates_enter_additional_options_only_after_anchor_pool_exhausted(price_db):
+    anchor_recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Anchor Dish",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    non_anchor_recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Non Anchor {i}",
+            ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+        )
+        for i in (2, 3, 4)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4"))],
+        details_by_id={"1": anchor_recipe, **non_anchor_recipes},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    # Only 1 anchor-matching candidate exists -- it takes the only
+    # anchor "slot" (in recommendations, since there's room), and the
+    # non-anchor candidates fill the remaining recommendation slot(s)
+    # and all of additional_options, since the anchor pool (size 1) is
+    # exhausted after that single candidate.
+    assert result.anchor_match_by_id["recipeapi_io:1"] is True
+    all_shown_ids = [c.recipe_id for c in result.recommendations + result.additional_options]
+    assert all_shown_ids[0] == "recipeapi_io:1"
+    assert all(result.anchor_match_by_id[rid] is False for rid in all_shown_ids[1:])
+
+
+async def test_anchor_match_by_id_empty_when_no_anchor_ever_defined(price_db):
+    # No search action is ever issued (immediate stop) -- active_anchor_canonical
+    # stays None, so there is nothing to group/label by.
+    provider = FakeRecipeProvider("recipeapi_io", searches=[], details_by_id={})
+    llm = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=[]))
+
+    assert result.anchor_match_by_id == {}
+
+
+async def test_additional_options_anchor_discipline_is_generic_across_ingredient_families(price_db):
+    # Same mechanism, a completely different anchor/ingredient family
+    # (ground beef vs a generic pasta dish) -- proves no ingredient-
+    # specific branching.
+    beef_dish = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Beef Dish",
+        ingredients=[RecipeIngredient(raw_name="minced beef", raw_measure="200 g")],
+    )
+    generic_pasta = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Generic Pasta",
+        ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": beef_dish, "2": generic_pasta},
+    )
+    llm = FakeLLMProvider([_search_action(["minced beef"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["minced beef", "onion", "basmati rice"]))
+
+    all_shown = result.recommendations + result.additional_options
+    assert all_shown[0].recipe_id == "recipeapi_io:1"
+    assert result.anchor_match_by_id["recipeapi_io:1"] is True
+    assert result.anchor_match_by_id["recipeapi_io:2"] is False

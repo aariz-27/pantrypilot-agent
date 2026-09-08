@@ -39,6 +39,15 @@ export function RecipeCard({ card, onOpen }) {
         <div className="recipe-card__tags">
           <span className="badge badge-success">{DIFFICULTY_LABEL[card.difficulty]}</span>
           {card.cuisine ? <span className="badge badge-neutral">{card.cuisine}</span> : null}
+          {/* PR #15 second correction pass (2026-09-08): a reserve card
+              only ever appears here when the search's active anchor's
+              own matching pool was exhausted -- never presented as an
+              equally strong match. */}
+          {card.contains_active_anchor === false ? (
+            <span className="badge" style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning)' }}>
+              Alternative pick
+            </span>
+          ) : null}
         </div>
 
         <h3 className="recipe-card__title">{card.name}</h3>

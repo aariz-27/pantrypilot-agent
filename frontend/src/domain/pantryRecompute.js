@@ -37,6 +37,29 @@ import { rerankCards } from './ranking'
 
 const MAX_FINAL_RECOMMENDATIONS = 3 // mirrors backend/app/agent/state.py
 
+// PR #15 second correction pass (2026-09-08): mirrors
+// AgentOrchestrator._anchor_first_ordering exactly -- a STABLE
+// partition applied AFTER scoring/ranking (never a re-score, the
+// frozen formula in ./ranking.js is untouched), so anchor-matching
+// cards keep filling recommendations/additional_options ahead of any
+// non-anchor card while anchor supply remains. `contains_active_anchor`
+// is `null` for every card when no anchor was ever tracked for this
+// response -- treated as "no information", grouped with the
+// anchor-matching side so nothing is demoted on a false negative; only
+// a card explicitly marked `false` is pushed to the back.
+function applyAnchorFirstOrdering(cards) {
+  const anchorGroup = []
+  const nonAnchorGroup = []
+  for (const card of cards) {
+    if (card.contains_active_anchor === false) {
+      nonAnchorGroup.push(card)
+    } else {
+      anchorGroup.push(card)
+    }
+  }
+  return [...anchorGroup, ...nonAnchorGroup]
+}
+
 function round2(value) {
   return Math.round(value * 100) / 100
 }
@@ -125,15 +148,19 @@ export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnr
 
   // Priority 4: rerank the COMBINED pool (never mixing in
   // closest_alternatives -- those are hard-rejected and can never
-  // become a recommendation/additional_option) and re-split at the
-  // frozen max-3 boundary. A reserve candidate whose coverage improved
-  // can now outrank an original top-3 card.
+  // become a recommendation/additional_option). A reserve candidate
+  // whose coverage improved can now outrank an original top-3 card.
+  // PR #15 second correction pass: the anchor-first partition is
+  // applied AFTER ranking, so the local "I have this" recompute can
+  // never undo the same anchor-relevance discipline the initial search
+  // establishes server-side.
   const rerankedPool = rerankCards([...recomputedRecommendations, ...recomputedAdditional], rankingConstraints)
+  const orderedPool = applyAnchorFirstOrdering(rerankedPool)
 
   return {
     ...response,
-    recommendations: rerankedPool.slice(0, MAX_FINAL_RECOMMENDATIONS),
-    additional_options: rerankedPool.slice(MAX_FINAL_RECOMMENDATIONS),
+    recommendations: orderedPool.slice(0, MAX_FINAL_RECOMMENDATIONS),
+    additional_options: orderedPool.slice(MAX_FINAL_RECOMMENDATIONS),
     closest_alternatives: response.closest_alternatives.map((card) =>
       applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
     ),
