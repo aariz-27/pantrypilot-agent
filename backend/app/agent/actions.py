@@ -72,6 +72,19 @@ class SearchArgs(BaseModel):
     # as a default/blanket choice, since it doubles this search's
     # RecipeAPI.io request cost.
     enrich_free_text: bool = False
+    # PR #15 fourth correction pass (2026-09-08, Blocker 2): opt-in
+    # request to use a REVIEWED broader provider-search term for the
+    # primary anchor when one exists (e.g. searching "rice" instead of
+    # "basmati_rice") -- costs no extra request, only changes the query
+    # TEXT. Has no effect at all for an anchor with no reviewed mapping
+    # (e.g. chicken_wings never broadens to chicken -- there is no such
+    # entry). Never changes canonical matching/scoring, which always
+    # uses the exact canonical id regardless of this flag. Set this only
+    # when the observation shows the current anchor already has few
+    # same-anchor candidates and a reviewed broader term is available
+    # (state_summary.provider_broadening_available) -- never as a
+    # default choice.
+    broaden_provider_search: bool = False
     rationale_category: RationaleCategory | None = None
 
     @field_validator("anchor_ingredients")

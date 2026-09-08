@@ -329,7 +329,7 @@ describe('applyExtraPantryToResponse -- additional_options anchor discipline (PR
     return { ...anchorCard(), recipe_id: 'non-anchor', name: 'Non Anchor Dish', contains_active_anchor: false, ...overrides }
   }
 
-  it('keeps a non-anchor additional_option behind anchor-matching ones even after recompute improves its score', () => {
+  it('never lets a non-anchor candidate into additional_options even after recompute improves its score (Blocker 3)', () => {
     const weakAnchor = anchorCard({ recipe_id: 'weak-anchor', pantry_coverage: 0.2 })
     const anchorFiller1 = anchorCard({ recipe_id: 'anchor-2', pantry_coverage: 0.2 })
     const anchorFiller2 = anchorCard({ recipe_id: 'anchor-3', pantry_coverage: 0.2 })
@@ -347,13 +347,14 @@ describe('applyExtraPantryToResponse -- additional_options anchor discipline (PR
     }
     // Confirming "onion" pushes strong-non-anchor's coverage well past
     // the anchor cards' -- it must still not outrank any anchor-
-    // matching card in the displayed order, since 3 anchor candidates
-    // already fill every recommendation slot.
+    // matching card AND, per Blocker 3, must not appear in
+    // additional_options at all -- it is simply dropped, not shown
+    // anywhere, since the 3 recommendation slots are already anchor-filled.
     const result = applyExtraPantryToResponse(response, new Set(['onion']), new Set())
     expect(result.recommendations.map((c) => c.recipe_id)).toEqual(
       expect.arrayContaining(['weak-anchor', 'anchor-2', 'anchor-3']),
     )
-    expect(result.additional_options[0].recipe_id).toBe('strong-non-anchor')
+    expect(result.additional_options).toEqual([])
   })
 
   it('allows a non-anchor candidate into recommendations once the anchor pool is exhausted', () => {

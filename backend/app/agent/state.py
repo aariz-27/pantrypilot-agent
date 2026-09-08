@@ -89,6 +89,14 @@ class AgentState:
     # (DEC-005: the LLM owns search strategy, including which pantry
     # ingredient is the strongest anchor). None until the first search.
     active_anchor_canonical: str | None = None
+    # PR #15 fourth correction pass (2026-09-08, Blocker 4): whether a
+    # reviewed broader provider-search term has already been tried FOR
+    # THE CURRENT active_anchor_canonical -- resets to False whenever
+    # the anchor itself changes (a fresh anchor has never had broadening
+    # tried for it yet). Lets the observation loop tell the agent "you
+    # already tried the broader term" instead of only "a broader term
+    # exists", so it does not repeat the exact same broadening attempt.
+    active_anchor_broadening_used: bool = False
 
     def record_progress(self, event: str) -> None:
         self.progress_events.append(event)

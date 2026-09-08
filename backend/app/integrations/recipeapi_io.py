@@ -76,6 +76,7 @@ from app.domain.provider_errors import (
 from app.recipe.mapping import build_recipe_id, require_usable_identity
 from app.recipe.provider import (
     MAX_PAGE_SIZE,
+    PROVIDER_SEARCH_TERM_OVERRIDES,
     SearchResult,
     SearchResultItem,
     SearchStrategy,
@@ -103,6 +104,7 @@ class RecipeAPIIOAdapter:
     # deterministic termination, or the approved timeout ceiling.
     MAX_TIMEOUT_SECONDS = 5.0
     ALLOWED_MAX_RETRIES = (0, 1)
+
 
     def __init__(
         self,
@@ -219,6 +221,16 @@ class RecipeAPIIOAdapter:
             f"RecipeAPI.io returned unexpected status {response.status_code} for {path}"
         )
 
+    def _provider_search_term(self, canonical_id: str, *, broaden: bool) -> str:
+        """Resolves ONE anchor's canonical id to the text actually sent
+        to RecipeAPI.io. A no-op (returns canonical_id unchanged) unless
+        broadening was explicitly requested AND a reviewed override
+        exists for this exact id -- see PROVIDER_SEARCH_TERM_OVERRIDES."""
+
+        if broaden and canonical_id in PROVIDER_SEARCH_TERM_OVERRIDES:
+            return PROVIDER_SEARCH_TERM_OVERRIDES[canonical_id]
+        return canonical_id
+
     def _build_search_params(self, strategy: SearchStrategy) -> dict[str, object]:
         params: dict[str, object] = {
             "page": strategy.page,
@@ -226,7 +238,11 @@ class RecipeAPIIOAdapter:
             "lang": "en",
         }
         if strategy.query_ingredients:
-            params["ingredients"] = ",".join(strategy.query_ingredients)
+            terms = [
+                self._provider_search_term(cid, broaden=strategy.broaden_provider_search)
+                for cid in strategy.query_ingredients
+            ]
+            params["ingredients"] = ",".join(terms)
         if strategy.cuisine:
             # Live smoke test (2026-09-05) found the provider's cuisine
             # enum values are lowercase (observed "french", "american" in
@@ -291,7 +307,16 @@ class RecipeAPIIOAdapter:
         same per-request timeout/retry policy).
         """
 
-        primary_anchor = strategy.query_ingredients[0].replace("_", " ").strip()
+        # PR #15 fourth correction pass (2026-09-08, Blocker 2): the
+        # free-text phrase uses the same broadened term as the primary
+        # `ingredients` filter when broadening was requested and a
+        # reviewed override exists (e.g. "rice" instead of "basmati
+        # rice") -- consistent broadening across both retrieval paths,
+        # still zero extra requests (this is still exactly one
+        # additional call, unchanged from before this pass).
+        primary_anchor = self._provider_search_term(
+            strategy.query_ingredients[0], broaden=strategy.broaden_provider_search
+        ).replace("_", " ").strip()
         if not primary_anchor:
             return primary_result
 

@@ -791,3 +791,93 @@ async def test_aclose_does_not_close_an_injected_client():
     await adapter.aclose()
     assert injected_client.is_closed is False
     await injected_client.aclose()
+
+
+# --- Blocker 2: canonical identity vs provider-search wording (PR #15 --------
+# fourth correction pass, 2026-09-08)
+
+
+async def test_basmati_rice_provider_search_broadens_to_rice_when_requested():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["basmati_rice"], broaden_provider_search=True))
+    assert captured["ingredients"] == "rice"
+
+
+async def test_jasmine_rice_provider_search_broadens_to_rice_when_requested():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["jasmine_rice"], broaden_provider_search=True))
+    assert captured["ingredients"] == "rice"
+
+
+async def test_basmati_rice_provider_search_stays_exact_when_broadening_not_requested():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["basmati_rice"], broaden_provider_search=False))
+    assert captured["ingredients"] == "basmati_rice"
+
+
+async def test_chicken_wings_never_broadens_to_generic_chicken():
+    # Blocker 2 safety rule: a specific animal cut must never broaden to
+    # its generic parent, even when broadening is explicitly requested --
+    # chicken_wings has no entry in PROVIDER_SEARCH_TERM_OVERRIDES, so
+    # this is a no-op regardless of the flag.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["chicken_wings"], broaden_provider_search=True))
+    assert captured["ingredients"] == "chicken_wings"
+    assert "chicken" != captured["ingredients"]
+
+
+async def test_provider_search_broadening_only_affects_ids_with_a_reviewed_override():
+    # A multi-anchor query broadens only the anchors that have a
+    # reviewed entry -- others pass through unchanged, same as before
+    # this pass.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(
+        SearchStrategy(query_ingredients=["basmati_rice", "chicken_wings"], broaden_provider_search=True)
+    )
+    assert captured["ingredients"] == "rice,chicken_wings"
+
+
+async def test_provider_search_broadening_applies_to_free_text_enrichment_term_too():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        call_params.append(params)
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(
+        SearchStrategy(query_ingredients=["basmati_rice"], enrich_free_text=True, broaden_provider_search=True)
+    )
+    assert call_params[0]["ingredients"] == "rice"
+    assert call_params[1]["search"] == "rice"

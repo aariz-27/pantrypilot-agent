@@ -238,7 +238,7 @@ class AgentOrchestrator:
         last = state.last_attempt()
         return last.strategy.model_copy(update={"page": last.strategy.page + 1})
 
-    def _require_anchors_grounded_in_pantry(self, state: AgentState, anchor_ingredients: list[str]) -> None:
+    def _require_anchors_grounded_in_pantry(self, state: AgentState, anchor_ingredients: list[str]) -> list[str]:
         """Deterministic enforcement (independent review finding,
         2026-09-07): SYSTEM_POLICY instructs a real model to choose
         anchors from the user's actual pantry, but a system-prompt
@@ -247,8 +247,16 @@ class AgentOrchestrator:
         was in _init_state and must resolve to a canonical ID the user
         actually has; an anchor that fails to resolve, or resolves to an
         ingredient outside pantry_canonical, is rejected outright, never
-        silently dropped or substituted for a different one."""
+        silently dropped or substituted for a different one.
 
+        Returns the resolved canonical ids, in the same order (PR #15
+        fourth correction pass, 2026-09-08, Blocker 2): the caller uses
+        these -- not the LLM's raw anchor text -- to build the provider
+        query, so canonical identity and provider-search wording stay
+        cleanly separated regardless of whether the LLM sent the exact
+        canonical id or an alias that resolves to it."""
+
+        canonical_ids: list[str] = []
         for anchor in anchor_ingredients:
             result = normalize_ingredient_name(anchor, CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
             if result.canonical_id is None or result.canonical_id not in state.pantry_canonical:
@@ -256,20 +264,27 @@ class AgentOrchestrator:
                     f"search anchor {anchor!r} is not present in the user's pantry; anchors must be "
                     "grounded in the user's actual canonical pantry, never invented"
                 )
+            canonical_ids.append(result.canonical_id)
+        return canonical_ids
 
     async def _handle_search(self, state: AgentState, args: SearchArgs, constraints: UserConstraints) -> None:
-        self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
+        anchor_canonical_ids = self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
 
         # Priority 5 (PR #15 correction pass, 2026-09-08): carry the
         # LLM's own primary-anchor choice into the observation loop.
         # Already validated above to resolve to a real pantry canonical
-        # id -- re-normalizing here (pure, deterministic) just recovers
-        # that same id rather than re-deriving trust. Same "first anchor
-        # is the primary one" convention RecipeAPIIOAdapter.
-        # enrich_with_free_text_search already uses, not a new one.
-        state.active_anchor_canonical = normalize_ingredient_name(
-            args.anchor_ingredients[0], CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
-        ).canonical_id
+        # id. Same "first anchor is the primary one" convention
+        # RecipeAPIIOAdapter.enrich_with_free_text_search already uses,
+        # not a new one.
+        new_anchor = anchor_canonical_ids[0]
+        if new_anchor != state.active_anchor_canonical:
+            # PR #15 fourth correction pass (2026-09-08, Blocker 4): a
+            # fresh anchor has never had broadening tried for it yet --
+            # reset so the observation doesn't wrongly claim otherwise.
+            state.active_anchor_broadening_used = False
+        state.active_anchor_canonical = new_anchor
+        if args.broaden_provider_search:
+            state.active_anchor_broadening_used = True
 
         route = args.route.value
         if route == "local_curated" and not is_approved_local_curated_intent(args.cuisine, state.cuisine_preference):
@@ -278,22 +293,34 @@ class AgentOrchestrator:
             )
 
         strategy = SearchStrategy(
-            query_ingredients=args.anchor_ingredients,
+            # PR #15 fourth correction pass (2026-09-08, Blocker 2): the
+            # RESOLVED canonical ids, not the LLM's raw anchor text --
+            # keeps canonical identity and provider-search wording
+            # cleanly separated regardless of whether the LLM sent an
+            # exact canonical id or an alias that resolves to one. Any
+            # broadening happens only inside the adapter, keyed off
+            # these exact ids (RecipeAPIIOAdapter.
+            # PROVIDER_SEARCH_TERM_OVERRIDES).
+            query_ingredients=anchor_canonical_ids,
             cuisine=args.cuisine,
             page=1,
             enrich_free_text=args.enrich_free_text,
+            broaden_provider_search=args.broaden_provider_search,
         )
-        # enrich_free_text is included (PR #15 correction pass,
-        # 2026-09-08): re-issuing the same anchors with enrichment now
-        # requested is a materially different provider request (an extra
-        # free-text query merged in), not a repeat -- excluding it here
-        # previously made that legitimate corrective action bounce as
-        # "identical", discovered via a live Test A run.
+        # enrich_free_text/broaden_provider_search are included (PR #15
+        # correction passes, 2026-09-08): re-issuing the same anchors
+        # with either flag newly requested is a materially different
+        # provider request (an extra free-text query merged in, or
+        # different query text), not a repeat -- excluding enrich_free_text
+        # here previously made that legitimate corrective action bounce
+        # as "identical", discovered via a live Test A run; the same
+        # reasoning applies to broaden_provider_search.
         signature = (
             route,
-            tuple(sorted(i.lower() for i in args.anchor_ingredients)),
+            tuple(sorted(anchor_canonical_ids)),
             (args.cuisine or "").lower(),
             args.enrich_free_text,
+            args.broaden_provider_search,
         )
         if signature in state.distinct_search_signatures:
             raise AgentUnsupportedActionError(
@@ -595,7 +622,28 @@ class AgentOrchestrator:
         # while anchor supply remains.
         ordered_pool = self._anchor_first_ordering(state)
         recommendations = list(ordered_pool[:MAX_FINAL_RECOMMENDATIONS])
-        additional_options = list(ordered_pool[MAX_FINAL_RECOMMENDATIONS:])
+        remainder = ordered_pool[MAX_FINAL_RECOMMENDATIONS:]
+        # PR #15 fourth correction pass (2026-09-08, Blocker 3):
+        # additional_options ("Show more options") must contain ONLY
+        # same-anchor candidates -- once the anchor-matching pool is
+        # exhausted, Show More has nothing left to show and the
+        # frontend hides it, rather than padding the reserve pool with
+        # unrelated non-anchor candidates. This is stricter than
+        # recommendations (top 3), which may still fall back to a
+        # non-anchor candidate for a remaining slot when anchor supply
+        # is genuinely insufficient -- that fallback stays clearly
+        # labeled via anchor_match_by_id/contains_active_anchor, and a
+        # human still sees SOMETHING rather than an artificially short
+        # top-3. A non-anchor candidate that doesn't make it into
+        # recommendations is simply not shown anywhere by this pass
+        # (never silently promoted into the reserve pool). No-op
+        # (nothing filtered) when no anchor was ever defined -- there is
+        # nothing to discriminate by.
+        additional_options = (
+            [c for c in remainder if candidate_contains_anchor(c, state.recipe_by_id, state.active_anchor_canonical)]
+            if state.active_anchor_canonical is not None
+            else list(remainder)
+        )
         anchor_match_by_id = {
             c.recipe_id: candidate_contains_anchor(c, state.recipe_by_id, state.active_anchor_canonical)
             for c in recommendations + additional_options

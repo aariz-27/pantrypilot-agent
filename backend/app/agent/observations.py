@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 
 from app.agent.state import MAX_FINAL_RECOMMENDATIONS, AgentState
 from app.domain.models import CandidateEvaluation, Recipe
+from app.recipe.provider import PROVIDER_SEARCH_TERM_OVERRIDES
 
 # Bound the number of individual candidates surfaced to the model --
 # the agent needs aggregate signals to decide, not a full listing
@@ -51,6 +52,15 @@ _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT = 1 / 3
 # "mostly generic overlap" condition described in the ticket, styled
 # the same way as _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT above.
 _MIN_ANCHOR_FRACTION_FOR_SUFFICIENT = 0.5
+
+# PR #15 fourth correction pass (2026-09-08, Blocker 4): descriptive
+# target for how many FEASIBLE same-anchor candidates should exist
+# beyond the top 3 (i.e. ~6 same-anchor feasible total: 3 shown + ~3
+# reserve) when the provider genuinely has that many available. Never a
+# hard requirement -- SYSTEM_POLICY treats reserve_depth_target_met as
+# one more piece of evidence for the agent's own stop/continue
+# judgment, same as every other observation field in this module.
+_RESERVE_DEPTH_TARGET = 3
 
 
 @dataclass(frozen=True)
@@ -244,6 +254,31 @@ def build_decision_payload(state: AgentState) -> dict:
             "best_coverage_among_anchor_candidates": anchor_stats.best_coverage_among_anchor_candidates,
             "best_coverage_among_non_anchor_candidates": anchor_stats.best_coverage_among_non_anchor_candidates,
             "mostly_generic_overlap": anchor_stats.mostly_generic_overlap,
+            # PR #15 fourth correction pass (2026-09-08, Blocker 2 & 4):
+            # whether a reviewed broader provider-search term exists for
+            # the current anchor at all (app.recipe.provider.
+            # PROVIDER_SEARCH_TERM_OVERRIDES -- e.g. true for
+            # basmati_rice, false for chicken_wings, which deliberately
+            # has no broader-parent entry), and whether it has already
+            # been tried this run. Lets the agent judge whether
+            # broadening is even an available lever before reaching for
+            # it, and avoid repeating an already-tried broadening.
+            "provider_broadening_available": (
+                anchor_stats.anchor_canonical_id is not None
+                and anchor_stats.anchor_canonical_id in PROVIDER_SEARCH_TERM_OVERRIDES
+            ),
+            "provider_broadening_already_used": state.active_anchor_broadening_used,
+            # Blocker 4: reserve-depth evidence -- how many FEASIBLE
+            # same-anchor candidates exist beyond what the top 3 already
+            # need. Target is descriptive (~3, i.e. ~6 same-anchor
+            # feasible total), never a hard requirement -- see
+            # SYSTEM_POLICY for how the agent may use it.
+            "same_anchor_reserve_count": max(
+                0, anchor_stats.feasible_anchor_candidate_count - MAX_FINAL_RECOMMENDATIONS
+            ),
+            "reserve_depth_target_met": (
+                anchor_stats.feasible_anchor_candidate_count - MAX_FINAL_RECOMMENDATIONS
+            ) >= _RESERVE_DEPTH_TARGET,
             # Priority-1 efficiency fix (PR #15 correction pass,
             # 2026-09-08): explicit, unmissable boolean mirroring
             # MAX_FINAL_RECOMMENDATIONS -- SYSTEM_POLICY already said

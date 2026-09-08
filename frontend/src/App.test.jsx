@@ -514,12 +514,35 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
 describe('additional_options anchor discipline end-to-end (PR #15 second correction pass)', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('shows the "Alternative pick" badge only on a non-anchor reserve card', async () => {
-    const anchorReserve = card({ recipe_id: 'reserve-anchor', name: 'Reserve Anchor Dish', contains_active_anchor: true })
-    const nonAnchorReserve = card({ recipe_id: 'reserve-non-anchor', name: 'Reserve Non Anchor Dish', contains_active_anchor: false })
+  it('shows the "Alternative pick" badge on a non-anchor RECOMMENDATION fallback card', async () => {
+    // A non-anchor card is still allowed to fill a recommendations
+    // slot when the anchor pool is insufficient -- it must be clearly
+    // labeled, unlike additional_options (Blocker 3, PR #15 fourth
+    // correction pass), which never receives non-anchor cards at all.
     const response = baseResponse({
-      recommendations: [card({ contains_active_anchor: true })],
-      additional_options: [anchorReserve, nonAnchorReserve],
+      recommendations: [
+        card({ recipe_id: 'anchor-1', contains_active_anchor: true }),
+        card({ recipe_id: 'fallback-1', name: 'Fallback Dish', contains_active_anchor: false }),
+      ],
+      additional_options: [],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Fallback Dish'))
+
+    expect(screen.getAllByText('Alternative pick')).toHaveLength(1)
+    const fallbackCardEl = screen.getByText('Fallback Dish').closest('button')
+    expect(fallbackCardEl).toContainElement(screen.getByText('Alternative pick'))
+  })
+
+  it('additional_options from a real response never contains a non-anchor card (Blocker 3)', async () => {
+    // The backend guarantees this, but this test locks in that the
+    // frontend simply displays what it is given -- an additional_option
+    // marked contains_active_anchor: true never shows the badge.
+    const response = baseResponse({
+      recommendations: [card({ recipe_id: 'anchor-1', contains_active_anchor: true })],
+      additional_options: [card({ recipe_id: 'anchor-2', name: 'Reserve Anchor Dish', contains_active_anchor: true })],
     })
     api.postRecommend.mockResolvedValue(response)
     render(<App />)
@@ -528,8 +551,20 @@ describe('additional_options anchor discipline end-to-end (PR #15 second correct
 
     await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
 
-    expect(screen.getAllByText('Alternative pick')).toHaveLength(1)
-    const nonAnchorCardEl = screen.getByText('Reserve Non Anchor Dish').closest('button')
-    expect(nonAnchorCardEl).toContainElement(screen.getByText('Alternative pick'))
+    expect(screen.getByText('Reserve Anchor Dish')).toBeInTheDocument()
+    expect(screen.queryByText('Alternative pick')).not.toBeInTheDocument()
+  })
+
+  it('hides "Show more options" once same-anchor reserve candidates are exhausted, without padding with unrelated recipes', async () => {
+    const response = baseResponse({
+      recommendations: [card({ recipe_id: 'anchor-1', contains_active_anchor: true })],
+      additional_options: [], // anchor pool already exhausted after top 3 -- nothing to reveal
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    expect(screen.queryByRole('button', { name: 'Show more options' })).not.toBeInTheDocument()
   })
 })

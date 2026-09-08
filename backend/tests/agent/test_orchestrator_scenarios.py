@@ -1676,12 +1676,15 @@ async def test_generic_chicken_ingredient_does_not_imply_chicken_wing_anchor_mat
 # (2026-09-08)
 
 
-async def test_additional_options_prefers_anchor_matching_over_higher_scored_non_anchor(price_db):
-    # Regression for the exact remaining gap: a non-anchor candidate
-    # with a strong cost/missing profile (and therefore a HIGHER
-    # deterministic_score) must still rank BELOW an anchor-matching
-    # candidate in additional_options, as long as anchor supply remains
-    # -- reordering happens after ranking, never by changing scores.
+async def test_additional_options_excludes_non_anchor_even_with_a_higher_score(price_db):
+    # Blocker 3 (PR #15 fourth correction pass, 2026-09-08): a non-anchor
+    # candidate with a strong cost/missing profile (and therefore a
+    # HIGHER deterministic_score) must never appear in additional_options
+    # at all while anchor supply remains -- not merely ranked behind the
+    # anchor-matching ones (the prior pass's behavior), but excluded
+    # from the reserve pool entirely. It is simply not shown anywhere in
+    # this scenario, since all 4 anchor-matching candidates already fit
+    # within recommendations (3) + additional_options (1).
     anchor_weak = make_recipe(
         id="recipeapi_io:1", provider_recipe_id="1", name="Anchor Weak",
         ingredients=[
@@ -1720,12 +1723,12 @@ async def test_additional_options_prefers_anchor_matching_over_higher_scored_non
 
     result = await orch.run(_base_request())
 
-    all_shown = result.recommendations + result.additional_options
-    non_anchor_position = next(i for i, c in enumerate(all_shown) if c.recipe_id == "recipeapi_io:2")
-    # All 4 anchor-matching candidates (1, 3, 4, 5) must occupy every
-    # slot before the non-anchor one -- "Non Anchor Strong" must be last.
-    assert non_anchor_position == 4
-    assert result.anchor_match_by_id["recipeapi_io:2"] is False
+    all_shown_ids = {c.recipe_id for c in result.recommendations + result.additional_options}
+    assert "recipeapi_io:2" not in all_shown_ids
+    # All 4 anchor-matching candidates (1, 3, 4, 5) are shown -- 3 in
+    # recommendations, 1 in additional_options.
+    assert all_shown_ids == {"recipeapi_io:1", "recipeapi_io:3", "recipeapi_io:4", "recipeapi_io:5"}
+    assert "recipeapi_io:2" not in result.anchor_match_by_id
     assert result.anchor_match_by_id["recipeapi_io:1"] is True
 
 
@@ -1800,3 +1803,186 @@ async def test_additional_options_anchor_discipline_is_generic_across_ingredient
     assert all_shown[0].recipe_id == "recipeapi_io:1"
     assert result.anchor_match_by_id["recipeapi_io:1"] is True
     assert result.anchor_match_by_id["recipeapi_io:2"] is False
+
+
+# --- Blocker 2 (orchestrator-level): broadening never changes canonical -------
+# match semantics (PR #15 fourth correction pass, 2026-09-08)
+
+
+async def test_broaden_provider_search_flows_from_action_into_search_strategy(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="200 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider(
+        [
+            AgentAction(
+                action_type=ActionType.SEARCH,
+                search=SearchArgs(route=SearchRoute.RECIPEAPI_IO, anchor_ingredients=["tomato"], broaden_provider_search=True),
+            ),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    assert provider.search_calls[0].broaden_provider_search is True
+
+
+async def test_broadened_search_result_still_uses_exact_canonical_matching(price_db):
+    # A recipe returned by a "rice"-broadened search that actually
+    # contains a DIFFERENT rice variety (jasmine, not the active
+    # basmati_rice anchor) must never be marked as an anchor match --
+    # broadening only ever affects retrieval, never matching.
+    jasmine_recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Jasmine Rice Bowl",
+        ingredients=[RecipeIngredient(raw_name="jasmine rice", raw_measure="200 g")],
+    )
+    basmati_recipe = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Basmati Pilaf",
+        ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="200 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": jasmine_recipe, "2": basmati_recipe},
+    )
+    llm = FakeLLMProvider(
+        [
+            AgentAction(
+                action_type=ActionType.SEARCH,
+                search=SearchArgs(route=SearchRoute.RECIPEAPI_IO, anchor_ingredients=["basmati_rice"], broaden_provider_search=True),
+            ),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["Basmati Rice"]))
+
+    assert result.anchor_match_by_id["recipeapi_io:2"] is True  # basmati -- real match
+    assert result.anchor_match_by_id.get("recipeapi_io:1") is not True  # jasmine -- never a false match
+
+
+# --- Blocker 4: reserve-depth observation fields (PR #15 fourth correction ----
+# pass, 2026-09-08)
+
+
+async def test_same_anchor_reserve_count_and_target_met_computed_correctly(price_db):
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in range(1, 7)  # 6 same-anchor feasible candidates
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result(*[str(i) for i in range(1, 7)]))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    # 6 feasible same-anchor total - 3 shown = 3 reserve -- meets the
+    # target of ~3.
+    assert state_summary["same_anchor_reserve_count"] == 3
+    assert state_summary["reserve_depth_target_met"] is True
+
+
+async def test_reserve_depth_target_not_met_with_few_same_anchor_candidates(price_db):
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i),
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["same_anchor_reserve_count"] == 0
+    assert state_summary["reserve_depth_target_met"] is False
+
+
+async def test_provider_broadening_available_reflects_the_reviewed_mapping(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["basmati rice"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(pantry_raw=["Basmati Rice"]))
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["provider_broadening_available"] is True
+    assert state_summary["provider_broadening_already_used"] is False
+
+
+async def test_provider_broadening_unavailable_for_an_anchor_with_no_reviewed_override(price_db):
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["provider_broadening_available"] is False
+
+
+async def test_provider_broadening_already_used_tracks_the_active_anchor(price_db):
+    recipe1 = make_recipe(id="recipeapi_io:1", provider_recipe_id="1", ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")])
+    recipe2 = make_recipe(id="recipeapi_io:2", provider_recipe_id="2", ingredients=[RecipeIngredient(raw_name="basmati rice", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1")), ScriptedSearch(result=_search_result("2"))],
+        details_by_id={"1": recipe1, "2": recipe2},
+    )
+    llm = FakeLLMProvider(
+        [
+            _search_action(["basmati rice"]),
+            AgentAction(
+                action_type=ActionType.SEARCH,
+                search=SearchArgs(route=SearchRoute.RECIPEAPI_IO, anchor_ingredients=["basmati rice"], broaden_provider_search=True),
+            ),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request(pantry_raw=["Basmati Rice"]))
+
+    assert llm.requests[1].observation["state_summary"]["provider_broadening_already_used"] is False
+    assert llm.requests[2].observation["state_summary"]["provider_broadening_already_used"] is True
+
+
+# --- Blocker 1: SYSTEM_POLICY carries meal-defining-anchor guidance -----------
+
+
+def test_policy_text_carries_meal_defining_anchor_guidance():
+    from app.agent.policy import SYSTEM_POLICY
+
+    assert "meal-defining" in SYSTEM_POLICY.lower()
+    assert "pasta" in SYSTEM_POLICY.lower()

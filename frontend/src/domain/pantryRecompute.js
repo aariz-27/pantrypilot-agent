@@ -41,12 +41,12 @@ const MAX_FINAL_RECOMMENDATIONS = 3 // mirrors backend/app/agent/state.py
 // AgentOrchestrator._anchor_first_ordering exactly -- a STABLE
 // partition applied AFTER scoring/ranking (never a re-score, the
 // frozen formula in ./ranking.js is untouched), so anchor-matching
-// cards keep filling recommendations/additional_options ahead of any
-// non-anchor card while anchor supply remains. `contains_active_anchor`
-// is `null` for every card when no anchor was ever tracked for this
-// response -- treated as "no information", grouped with the
-// anchor-matching side so nothing is demoted on a false negative; only
-// a card explicitly marked `false` is pushed to the back.
+// cards keep filling recommendations ahead of any non-anchor card while
+// anchor supply remains. `contains_active_anchor` is `null` for every
+// card when no anchor was ever tracked for this response -- treated as
+// "no information", grouped with the anchor-matching side so nothing is
+// demoted on a false negative; only a card explicitly marked `false` is
+// pushed to the back.
 function applyAnchorFirstOrdering(cards) {
   const anchorGroup = []
   const nonAnchorGroup = []
@@ -58,6 +58,20 @@ function applyAnchorFirstOrdering(cards) {
     }
   }
   return [...anchorGroup, ...nonAnchorGroup]
+}
+
+// Blocker 3 (PR #15 fourth correction pass, 2026-09-08): mirrors
+// AgentOrchestrator._finalize's additional_options filter -- the
+// reserve pool ("Show more options") must contain ONLY same-anchor
+// candidates, never a non-anchor fallback (that stays possible only for
+// the top-3 recommendations slots, via applyAnchorFirstOrdering above).
+// No-op when no card in the pool carries any anchor information at all
+// (nothing to discriminate by); otherwise strictly requires
+// contains_active_anchor === true.
+function filterToAnchorOnly(cards) {
+  const hasAnyAnchorInfo = cards.some((c) => c.contains_active_anchor === true || c.contains_active_anchor === false)
+  if (!hasAnyAnchorInfo) return cards
+  return cards.filter((c) => c.contains_active_anchor === true)
 }
 
 function round2(value) {
@@ -156,11 +170,17 @@ export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnr
   // establishes server-side.
   const rerankedPool = rerankCards([...recomputedRecommendations, ...recomputedAdditional], rankingConstraints)
   const orderedPool = applyAnchorFirstOrdering(rerankedPool)
+  const recommendations = orderedPool.slice(0, MAX_FINAL_RECOMMENDATIONS)
+  // Blocker 3: unlike recommendations, additional_options never falls
+  // back to a non-anchor candidate -- once the anchor-matching pool
+  // (already prioritized above) is exhausted, there is nothing left to
+  // reveal via "Show more options".
+  const additionalOptions = filterToAnchorOnly(orderedPool.slice(MAX_FINAL_RECOMMENDATIONS))
 
   return {
     ...response,
-    recommendations: orderedPool.slice(0, MAX_FINAL_RECOMMENDATIONS),
-    additional_options: orderedPool.slice(MAX_FINAL_RECOMMENDATIONS),
+    recommendations,
+    additional_options: additionalOptions,
     closest_alternatives: response.closest_alternatives.map((card) =>
       applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
     ),

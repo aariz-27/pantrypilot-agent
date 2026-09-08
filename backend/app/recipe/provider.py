@@ -28,6 +28,28 @@ from app.domain.models import Recipe
 # TECHNICAL_SPEC.md section 10 recommends as "normal" for any plan.
 MAX_PAGE_SIZE = 10
 
+# PR #15 fourth correction pass (2026-09-08, Blocker 2): a small,
+# reviewed, ONE-DIRECTIONAL mapping from canonical id to a broader
+# provider-search term. Lives here (the provider-NEUTRAL module), not
+# inside any one concrete adapter, so both provider implementations and
+# the agent/observation layer can reference the exact same reviewed set
+# without the agent layer ever depending on a specific concrete provider
+# (docs/API_INTEGRATION_STANDARDS.md: downstream code must not ask "was
+# this RecipeAPI.io?"). Consulted ONLY when a caller explicitly opts in
+# (SearchStrategy.broaden_provider_search); NEVER consulted by canonical
+# matching/normalization (app.domain.ingredient_normalizer), which stays
+# exact and completely independent of this. Deliberately does NOT
+# include specific animal cuts (chicken_wings, chicken_breast,
+# chicken_thigh, ...) -- broadening a specific cut into its generic
+# parent (e.g. "chicken") would pull in unrelated cuts/varieties, which
+# is exactly the over-broadening this mapping must never do.
+PROVIDER_SEARCH_TERM_OVERRIDES: dict[str, str] = {
+    "basmati_rice": "rice",
+    "jasmine_rice": "rice",
+    "white_rice": "rice",
+    "minced_beef": "ground beef",
+}
+
 
 class SearchStrategy(BaseModel):
     """Provider-neutral search request.
@@ -59,6 +81,18 @@ class SearchStrategy(BaseModel):
     # primary query under-represented the user's actual pantry. Default
     # False: a normal search never pays the extra request.
     enrich_free_text: bool = False
+    # PR #15 fourth correction pass (2026-09-08, Blocker 2): opt-in,
+    # agent-controlled request to use a REVIEWED broader provider-search
+    # term for the anchor when one exists (e.g. "basmati_rice" -> "rice")
+    # -- never invented, never automatic. This only ever changes what
+    # TEXT is sent to the provider; canonical matching (pantry match,
+    # anchor-presence, scoring) always continues to use the exact
+    # canonical id, completely unaffected by this flag. See
+    # RecipeAPIIOAdapter's PROVIDER_SEARCH_TERM_OVERRIDES for the
+    # reviewed mapping and why some ids (e.g. chicken_wings) are
+    # deliberately absent from it. Costs zero extra requests -- it
+    # changes the TEXT of the same primary query, not its count.
+    broaden_provider_search: bool = False
 
     @field_validator("query_ingredients")
     @classmethod
