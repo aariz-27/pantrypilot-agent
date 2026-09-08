@@ -191,36 +191,45 @@ Founder / Product Owner (gate completion still requires explicit Founder/Product
 
 ## G6 — Agentic Business Path Ready
 
-**Status:** NOT STARTED
+**Status:** EXIT CRITERIA TECHNICALLY SATISFIED — AWAITING FOUNDER REVIEW (not self-declared COMPLETE)
 
 ### Entry Criteria
-- deterministic core ready
-- recipe sources ready
+- deterministic core ready — met (G4 exit criteria technically satisfied; PP-001/PP-003)
+- recipe sources ready — met for the primary live path (G5 exit criteria technically satisfied for RecipeAPI.io; PP-002). The local curated route remains foundation-only pending DEC-012, and the orchestrator correctly treats it as a narrow, cuisine-gated route (`is_approved_local_curated_intent`) rather than a general fallback.
 
 ### Exit Criteria
 Agent can:
 
-- choose search strategy
-- inspect candidates
-- use deterministic tools
-- reformulate search
-- paginate when justified
-- stop early
-- stop on bounded exhaustion
-- return grounded recommendations
+- choose search strategy — met (`AgentOrchestrator._handle_search`, `backend/app/agent/orchestrator.py`; `FR-07`)
+- inspect candidates — met (`AgentOrchestrator._build_observation` surfaces top candidates and aggregate signals back to the LLM each decision step)
+- use deterministic tools — met (`app/agent/tools.py` composes the frozen Module A-C pipeline unchanged: normalization -> pantry matching -> pricing -> cost -> hard constraints -> ranking; the LLM never performs any of these calculations itself, per `DEC-006`)
+- reformulate search — met (`FR-15`; distinct-search-signature enforcement in `AgentOrchestrator._handle_search` prevents repeating an identical failed strategy)
+- paginate when justified — met (`REL-05`; `AgentOrchestrator._require_paginatable`/`_next_page_strategy`, only permitted after a prior successful `has_more` attempt)
+- stop early — met (LLM-issued `STOP` action, `AgentOrchestrator.run`)
+- stop on bounded exhaustion — met (`AR-11`, `REL-06`, `REL-07`; hard-coded `MAX_SEARCH_ATTEMPTS=3` / `MAX_EVALUATED_CANDIDATES=20` in `backend/app/agent/state.py`, enforced in Python independent of what the LLM requests)
+- return grounded recommendations — met (`FR-17`, `FR-19`, `FR-20`; the agent never fabricates recipe content — all candidates trace to `RecipeAPIIOAdapter`/`LocalCuratedRecipeProvider` output through the unchanged Module B mapping layer)
 
-Agentic proof tests must pass.
+**Not yet met / out of this gate's proven scope:**
+- the ~15s worst-case latency target (`REL-02`) is structurally bounded (attempt/candidate caps) but not measured or tested — see `docs/REQUIREMENTS_TRACEABILITY.md`
+- no `/api/recommend` HTTP endpoint exposes the orchestrator yet, so "agentic business path" is proven at the orchestrator/integration-test level, not via a live public API route
+- no frontend exists, so there is no end-user-facing demo of this path yet
+
+Agentic proof tests pass: 34 orchestrator scenario tests (`backend/tests/agent/test_orchestrator_scenarios.py`), plus `backend/tests/agent/test_actions.py`, `test_observations_and_state.py`, and `backend/tests/unit/test_llm_provider_anthropic.py` — all included in the 378 backend tests passing on `main` as of this update (2026-09-08).
 
 ### Decision Prerequisites
-- DEC-010 must be satisfied before production agent runtime is finalized
+- DEC-010 must be satisfied before production agent runtime is finalized — **satisfied**: DEC-010 is APPROVED/CLOSED (PR #13, merge commit `987c98d`); Claude Sonnet 5 / `AnthropicLLMProvider` is the frozen competition runtime path.
 
 ### Evidence
-- agent tests
-- integration tests
-- demo scenario
+- Implementation PRs: #11 `feature/module-d-agent-orchestration` (merge commit `5170c03`, implementation head `98497ad`, with two same-PR review-fix commits `c790b6f` and `bd13409`); #12 `test/module-a-d-integration-validation` (merge commit `cecaf2c`, implementation head `c1ec90b`)
+- Decision-closure PR: #13 `docs/dec-010-close-competition-llm` (merge commit `987c98d`)
+- Preceding unblocking work: #9 `feature/module-c-final-pricing-gap-resolution`, #10 `quality/pre-module-d-full-codebase-audit`
+- Agent tests: `backend/tests/agent/` (`test_orchestrator_scenarios.py`, `test_actions.py`, `test_observations_and_state.py`), `backend/tests/unit/test_llm_provider_anthropic.py`
+- Integration validation: PR #12 closed remaining orchestrator integration gaps against the existing frozen Module A-B-C integration tests (`backend/tests/integration/test_module_a_b_integration.py`, `test_module_a_b_c_integration.py`) that the orchestrator's tool layer composes unchanged
+- Demo scenario: `backend/scripts/live_smoke_full_pipeline.py` — a manual, Founder-authorized, one-off live run of the real connected pipeline (`AgentOrchestrator` -> real Anthropic API -> real RecipeAPI.io -> real packaged reference price DB). This is **not** part of the automated test suite or CI (it refuses to run under pytest); it is evidence of a real live run having been exercised, not a repeatable automated demo.
+- Full backend test count: 378 passed, 2 warnings (unrelated `httpx`/`anyio` deprecation warnings), verified against `main` on 2026-09-08
 
 ### Approver
-Founder / Product Owner
+Founder / Product Owner — this gate is reported here as exit-criteria-satisfied (for the orchestrator-level scope described above) but is **not self-declared COMPLETE**. Per this file's own Gate Rules ("no gate advances automatically because code exists" / "Founder / Product Owner remains final approval authority"), explicit Founder review and approval are still required to close G6, consistent with how G3 and G4 are handled above.
 
 ---
 

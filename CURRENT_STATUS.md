@@ -1,14 +1,14 @@
 # PantryPilot Current Status
 
 ## Current Phase
-Application foundation implementation (deterministic core, grounded recipe retrieval, and pricing/cost engine complete; agent, frontend, deployment not started)
+Application foundation implementation plus agent orchestration complete (deterministic core, grounded recipe retrieval, pricing/cost engine, and bounded LLM agent orchestrator all merged to `main`; frontend and deployment not started; `/api/recommend` end-to-end HTTP wiring not yet done)
 
 ## Module Status
 
 - **Module A** (Deterministic Core — PP-001): **COMPLETE**
 - **Module B** (Grounded Recipe Retrieval — PP-002): **COMPLETE**
-- **Module C** (Pricing / Cost Engine — PP-003): **COMPLETE** (merged; G4 exit criteria technically satisfied — see `APPROVAL_GATES.md`; gate itself not self-declared COMPLETE, pending separate explicit Founder gate approval)
-- **Module D** (Agent Orchestration): NOT STARTED
+- **Module C** (Pricing / Cost Engine — PP-003 + follow-on gap-resolution work): **COMPLETE** (merged; G4 exit criteria technically satisfied — see `APPROVAL_GATES.md`; gate itself not self-declared COMPLETE, pending separate explicit Founder gate approval)
+- **Module D** (Agent Orchestration — M03, merged PR #11/#12): **COMPLETE** (implemented, reviewed, and integration-validated; not yet wired to an `/api/recommend` HTTP endpoint or a frontend — see PR #11/#12 notes below; G6 gate itself not yet self-declared COMPLETE, pending explicit Founder gate approval)
 - **Module E** (Frontend): NOT STARTED
 - **Module F** (Deployment): NOT STARTED
 
@@ -19,19 +19,38 @@ Backend scaffold exists, backend boots, `/api/health` works, baseline backend te
 
 G4 (Core Deterministic Engine Ready): exit criteria are now technically satisfied by PP-003 (price repository + cost engine implemented, tested, and merged) — see `APPROVAL_GATES.md`; not self-declared COMPLETE, pending explicit Founder review/approval of the gate itself. G5 (Recipe Sources Ready) remains IN PROGRESS, blocked on DEC-012 (final curated dataset, still OPEN) — unaffected by PP-003.
 
+G6 (Agentic Business Path Ready): the M03 agent orchestrator is implemented and merged (PR #11), post-review-fixed (pantry-grounded search anchors, cross-provider dedupe identity, pantry context in the LLM payload), and integration-validated against Modules A-D together with a live full-pipeline smoke script (PR #12). DEC-010 (runtime LLM = Claude Sonnet 5) is APPROVED/CLOSED, satisfying G6's decision prerequisite. `APPROVAL_GATES.md` now reports G6 as EXIT CRITERIA TECHNICALLY SATISFIED — AWAITING FOUNDER REVIEW, mirroring how G4 is handled; not self-declared COMPLETE. Not yet done regardless of gate wording: no `/api/recommend` HTTP endpoint wiring, no frontend, so the agentic path is not reachable end-to-end from outside the backend test suite yet.
+
 ## Active Ticket
-None. PP-001, PP-002, and PP-003 have all been completed and merged (see "Completed Tickets" below). Awaiting Founder/Product Owner authorization of the next implementation ticket.
+None. PP-001, PP-002, PP-003, and the Module D agent orchestrator (plus several follow-on fix/audit/validation/docs PRs, #6-#13) have all been completed and merged (see "Completed Tickets" below). Awaiting Founder/Product Owner authorization of the next implementation ticket (e.g. `/api/recommend` wiring or the frontend scaffold).
 
 ## Open Blockers
 None currently recorded
 
 ## Open Decisions
 
-- DEC-010 — Competition LLM model
 - DEC-011 — Deployment platform
 - DEC-012 — Final local curated recipe dataset size/content (**not resolved by PP-002** — the local curated provider remains foundation-only, with zero production recipe data)
 
+DEC-010 (Competition Runtime LLM) is **no longer open** — APPROVED/CLOSED via PR #13 (`docs/dec-010-close-competition-llm`): Claude Sonnet 5 / `AnthropicLLMProvider` is the frozen competition runtime path. See `DECISION_REGISTER.md`.
+
 ## Completed Tickets
+
+### Module D — Agent Orchestrator (M03) and Post-Merge Hardening
+
+**Status:** Completed and merged across PRs #9-#13
+**Merged PRs:**
+- **#9** `feature/module-c-final-pricing-gap-resolution` — resolved 7 of 9 Module C incompatible-unit pricing gaps; added Founder-approved manual fallback entries for corn and mayonnaise.
+- **#10** `quality/pre-module-d-full-codebase-audit` — pre-Module-D codebase audit; 2 real bugs fixed (including duplicate-canonical costing that could previously undercost below the reliable known minimum) and coverage gaps closed.
+- **#11** `feature/module-d-agent-orchestration` — implemented the M03 bounded LLM agent orchestrator (`backend/app/agent/`: `orchestrator.py`, `actions.py`, `observations.py`, `policy.py`, `state.py`, `tools.py`, `errors.py`) plus the `AnthropicLLMProvider` (`backend/app/integrations/llm_provider.py`) and a live Anthropic smoke script. Two post-implementation review fixes included in the same PR: pantry context added to the LLM payload with a cross-provider dedupe identity fix, and deterministic enforcement of pantry-grounded search anchors (search terms cannot drift from the user's actual pantry).
+- **#12** `test/module-a-d-integration-validation` — closed remaining orchestrator integration gaps and added a live full-pipeline (Modules A-D) smoke script.
+- **#13** `docs/dec-010-close-competition-llm` — closed DEC-010, freezing Claude Sonnet 5 as the competition runtime LLM.
+
+**Final verification:** 378 backend tests passing on `main` as of this status correction (2026-09-08), 2 warnings (unrelated `httpx`/`anyio` deprecation warnings from test-client dependencies, not application code).
+**Requirements advanced:** FR-07, FR-15, FR-17, AR-01, AR-11, SEC-01, SEC-02, SEC-03, REL-05, REL-06, REL-07 (now `IMPLEMENTED` in `docs/REQUIREMENTS_TRACEABILITY.md`, reconciled against merged code and passing tests); AR-15 (`IN_IMPLEMENTATION` — agent side only; no frontend yet); REL-02 (left `DESIGNED` — the ~15s latency target is structurally bounded but not measured by any test).
+**Decision recorded:** DEC-010 — Competition Runtime LLM (APPROVED/CLOSED; see `DECISION_REGISTER.md`).
+**Architecture invariant preserved:** the orchestrator is a bounded LLM decision loop (search strategy, pagination/reformulation, stop conditions) calling into unchanged deterministic Module A/B/C logic through an allow-listed tool layer — the LLM does not perform ingredient normalization, matching, pricing, or ranking itself, consistent with `DEC-006` (Deterministic Business Logic) and the architecture rules in `CLAUDE.md`.
+**Known intentional limitations / deferred scope:** no `/api/recommend` HTTP endpoint wiring (the orchestrator exists and is tested but is not yet reachable via a live API route), no frontend, no deployment. No automated test measures the ~15s worst-case latency target (`REL-02`); only the structural attempt/candidate bounds are proven.
 
 ### PP-003 — Grocery Pricing Ingestion, Reference Price Repository, and Deterministic Cost Engine
 
@@ -91,7 +110,7 @@ None currently recorded
 ## Capability Maturity
 FOUNDATION_IMPLEMENTED
 
-Evidence: PP-001 delivered the technical scaffold and foundational deterministic infrastructure (FastAPI app, typed config, health endpoint, and the full normalization/matching/constraint/ranking core); PP-002 extended the foundation with grounded recipe retrieval (RecipeAPI.io adapter, LocalCuratedRecipeProvider foundation, provider-neutral mapping); PP-003 added a real grocery pricing ingestion pipeline, a read-only `PriceRepository`, and a deterministic `CostEngine` grounded in a real 2,699-product LuLu UAE export — all called for by the `FOUNDATION_IMPLEMENTED` definition in `docs/AI_DELIVERY_OPERATING_MODEL.md`. This is still not `BUSINESS_PATH_IMPLEMENTED`: no end-to-end recommendation path exists yet (no agent, no `/api/recommend` wiring, no frontend).
+Evidence: PP-001 delivered the technical scaffold and foundational deterministic infrastructure (FastAPI app, typed config, health endpoint, and the full normalization/matching/constraint/ranking core); PP-002 extended the foundation with grounded recipe retrieval (RecipeAPI.io adapter, LocalCuratedRecipeProvider foundation, provider-neutral mapping); PP-003 added a real grocery pricing ingestion pipeline, a read-only `PriceRepository`, and a deterministic `CostEngine` grounded in a real 2,699-product LuLu UAE export; the Module D agent orchestrator (M03, PR #11/#12) added a bounded LLM decision loop over the allow-listed tool layer, integration-validated end-to-end against Modules A-D via a live full-pipeline smoke script — all called for by the `FOUNDATION_IMPLEMENTED` definition in `docs/AI_DELIVERY_OPERATING_MODEL.md`. **This has not been re-assessed against `BUSINESS_PATH_IMPLEMENTED`'s exact criteria in this correction pass** (that determination was out of scope for this docs-only correction); at minimum, no `/api/recommend` HTTP route exposes the orchestrator and no frontend exists, so the recommendation path is not reachable end-to-end from outside the backend test suite yet.
 
 ## ## Authoritative Source Documents
 
@@ -114,4 +133,4 @@ Where documents conflict, approved governance rules and explicit approved decisi
 - Pricing is based on local reference data, not live supermarket pricing
 
 ## Next Authorized Work
-None yet. Founder/Product Owner to authorize the next bounded implementation ticket (e.g. toward G3 completion via the frontend scaffold, or toward Module D agent orchestration). This document does not itself authorize or propose starting that work.
+None yet. Founder/Product Owner to authorize the next bounded implementation ticket (e.g. `/api/recommend` HTTP endpoint wiring for the now-merged Module D agent orchestrator, toward G3 completion via the frontend scaffold, or grocery taxonomy gap-fill). This document does not itself authorize or propose starting that work.
