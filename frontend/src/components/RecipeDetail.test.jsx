@@ -12,6 +12,8 @@ function makeCard(overrides = {}) {
     cuisine: 'Asian',
     difficulty: 'easy',
     requested_servings: 4,
+    provider_original_servings: 4,
+    servings_scaling_applied: false,
     prep_time_minutes: 10,
     cook_time_minutes: 15,
     total_time_minutes: 25,
@@ -53,6 +55,26 @@ describe('RecipeDetail', () => {
     expect(screen.queryByRole('link', { name: 'View Original Recipe' })).not.toBeInTheDocument()
   })
 
+  describe('serving-scaling uncertainty', () => {
+    it('shows "Serves N" when scaling was reliably applied', () => {
+      render(<RecipeDetail card={makeCard({ requested_servings: 6, provider_original_servings: 2, servings_scaling_applied: true })} onClose={vi.fn()} />)
+      expect(screen.getByText('Serves 6')).toBeInTheDocument()
+      expect(screen.queryByText(/scaling unavailable/)).not.toBeInTheDocument()
+    })
+
+    it('shows "Serves N" for a known 1:1 serving count (requested equals provider original)', () => {
+      render(<RecipeDetail card={makeCard({ requested_servings: 4, provider_original_servings: 4, servings_scaling_applied: false })} onClose={vi.fn()} />)
+      expect(screen.getByText('Serves 4')).toBeInTheDocument()
+      expect(screen.queryByText(/scaling unavailable/)).not.toBeInTheDocument()
+    })
+
+    it('shows an explicit uncertainty state when the provider original servings count is unavailable', () => {
+      render(<RecipeDetail card={makeCard({ requested_servings: 4, provider_original_servings: null, servings_scaling_applied: false })} onClose={vi.fn()} />)
+      expect(screen.getByText('Requested: 4 servings · quantity scaling unavailable')).toBeInTheDocument()
+      expect(screen.queryByText('Serves 4')).not.toBeInTheDocument()
+    })
+  })
+
   it('calls onClose when Escape is pressed', async () => {
     const onClose = vi.fn()
     render(<RecipeDetail card={makeCard()} onClose={onClose} />)
@@ -70,6 +92,27 @@ describe('RecipeDetail', () => {
   it('moves focus to the close control on open (focus management)', () => {
     render(<RecipeDetail card={makeCard()} onClose={vi.fn()} />)
     expect(screen.getByRole('button', { name: 'Back to results' })).toHaveFocus()
+  })
+
+  it('gives the grounded recipe image meaningful alt text based on the recipe name', () => {
+    render(<RecipeDetail card={makeCard({ image_url: 'https://example.test/img.jpg', name: 'Chicken Fried Rice' })} onClose={vi.fn()} />)
+    expect(screen.getByRole('img', { name: 'Chicken Fried Rice' })).toHaveAttribute('src', 'https://example.test/img.jpg')
+  })
+
+  it('traps Tab focus within the dialog (does not escape to the page behind it)', async () => {
+    render(<RecipeDetail card={makeCard({ source_url: 'https://example.test/r/1' })} onClose={vi.fn()} />)
+    const backButton = screen.getByRole('button', { name: 'Back to results' })
+    const sourceLink = screen.getByRole('link', { name: 'View Original Recipe' })
+
+    expect(backButton).toHaveFocus()
+
+    // Shift+Tab from the first focusable element wraps to the last.
+    await userEvent.tab({ shift: true })
+    expect(sourceLink).toHaveFocus()
+
+    // Tab from the last focusable element wraps back to the first.
+    await userEvent.tab()
+    expect(backButton).toHaveFocus()
   })
 
   it('exposes an accessible dialog role', () => {

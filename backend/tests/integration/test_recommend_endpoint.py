@@ -252,6 +252,25 @@ def test_agent_malformed_action_error_maps_to_503():
 # --- request validation -------------------------------------------------------------
 
 
+def test_invalid_body_is_still_422_even_when_providers_are_unconfigured():
+    # Regression test for the CI failure found in independent review
+    # (2026-09-08): FastAPI resolves Depends() sub-dependencies before
+    # validating the request body. get_llm_provider/get_orchestrator
+    # used to construct AnthropicLLMProvider unconditionally, which
+    # raised LLMProviderConfigurationError whenever the LLM wasn't
+    # configured (exactly CI's state -- no credentials) -- masking a
+    # structurally invalid request's correct 422 with a 503 instead.
+    # This must return 422 regardless of provider configuration.
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+    try:
+        client = TestClient(app)
+        payload = {k: v for k, v in VALID_REQUEST.items() if k != "servings"}
+        response = client.post("/api/recommend", json=payload)
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_missing_servings_is_rejected():
     payload = {k: v for k, v in VALID_REQUEST.items() if k != "servings"}
     client = TestClient(app)

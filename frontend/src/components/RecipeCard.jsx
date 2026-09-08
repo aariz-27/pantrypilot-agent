@@ -20,7 +20,7 @@ export function RecipeCard({ card, onOpen }) {
     <button type="button" className="card recipe-card" onClick={() => onOpen(card)}>
       <div className="recipe-card__media">
         {imageUrl ? (
-          <img src={imageUrl} alt="" />
+          <img src={imageUrl} alt={card.name} />
         ) : (
           <div className="recipe-card__no-image">
             <span aria-hidden="true" style={{ fontSize: 28 }}>

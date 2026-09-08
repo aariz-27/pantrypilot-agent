@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends
 from app.agent.orchestrator import AgentOrchestrator, AgentRequest
 from app.api.recommend_mapping import build_recommend_response
 from app.config import Settings, get_settings
-from app.integrations.llm_provider import AnthropicLLMProvider
+from app.integrations.llm_provider import AnthropicLLMProvider, LLMProviderConfigurationError
 from app.integrations.local_curated import LocalCuratedRecipeProvider
 from app.integrations.recipeapi_io import RecipeAPIIOAdapter
 from app.recipe.provider import RecipeProvider
@@ -55,23 +55,45 @@ def get_price_repository(settings: Settings = Depends(get_settings)) -> PriceRep
     return PriceRepository(settings.price_db_path)
 
 
-def get_llm_provider(settings: Settings = Depends(get_settings)) -> AnthropicLLMProvider:
+def get_llm_provider(settings: Settings = Depends(get_settings)) -> AnthropicLLMProvider | None:
+    """Returns None rather than raising when unconfigured.
+
+    Bug fix (post-review, 2026-09-08): FastAPI resolves `Depends()`
+    sub-dependencies before it validates the request body against
+    `RecommendRequest`. This dependency used to construct
+    `AnthropicLLMProvider(settings)` unconditionally, which raises
+    `LLMProviderConfigurationError` when no LLM is configured --
+    turning EVERY request (including a structurally invalid one that
+    should get 422) into a 503, since the body was never given the
+    chance to be validated. Returning None here lets dependency
+    resolution finish cleanly so FastAPI proceeds to body validation;
+    the actual configuration error is now raised inside the route
+    handler itself, which only executes once the body has already
+    passed validation.
+    """
+    if not settings.llm_configured:
+        return None
     return AnthropicLLMProvider(settings)
 
 
 def get_orchestrator(
-    llm_provider: AnthropicLLMProvider = Depends(get_llm_provider),
+    llm_provider: AnthropicLLMProvider | None = Depends(get_llm_provider),
     recipe_providers: dict[str, RecipeProvider] = Depends(get_recipe_providers),
     price_repository: PriceRepository = Depends(get_price_repository),
-) -> AgentOrchestrator:
+) -> AgentOrchestrator | None:
+    if llm_provider is None:
+        return None
     return AgentOrchestrator(llm_provider, recipe_providers, price_repository)
 
 
 @router.post("/recommend", response_model=RecommendResponse)
 async def post_recommend(
     request: RecommendRequest,
-    orchestrator: AgentOrchestrator = Depends(get_orchestrator),
+    orchestrator: AgentOrchestrator | None = Depends(get_orchestrator),
 ) -> RecommendResponse:
+    if orchestrator is None:
+        raise LLMProviderConfigurationError("Anthropic LLM is not configured (missing API key or model)")
+
     request_id = f"req_{uuid.uuid4().hex}"
 
     agent_request = AgentRequest(

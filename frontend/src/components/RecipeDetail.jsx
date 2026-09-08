@@ -6,6 +6,13 @@ import './RecipeDetail.css'
 
 const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', unknown: 'Unknown' }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function getFocusableElements(container) {
+  return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR))
+}
+
 function Steps({ instructions }) {
   if (!instructions) return null
   // Rendering choice only -- the underlying grounded text is never
@@ -30,6 +37,7 @@ function Steps({ instructions }) {
 
 export function RecipeDetail({ card, onClose }) {
   const titleId = useId()
+  const dialogRef = useRef(null)
   const closeButtonRef = useRef(null)
   const previouslyFocused = useRef(null)
 
@@ -38,7 +46,25 @@ export function RecipeDetail({ card, onClose }) {
     closeButtonRef.current?.focus()
 
     function handleKeyDown(event) {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      // Focus trap: Tab/Shift+Tab must cycle only within the dialog,
+      // never escape to the page behind it (WAI-ARIA dialog pattern).
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusable = getFocusableElements(dialogRef.current)
+        if (focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => {
@@ -49,15 +75,29 @@ export function RecipeDetail({ card, onClose }) {
     }
   }, [onClose])
 
-  const subline = [DIFFICULTY_LABEL[card.difficulty], card.cuisine, `Serves ${card.requested_servings}`]
-    .filter(Boolean)
-    .join(' · ')
+  // Serving-scaling uncertainty (post-review fix, 2026-09-08):
+  // provider_original_servings is null/non-positive exactly when the
+  // backend could not determine a reliable original serving count to
+  // scale from (app.domain.serving_scaler.scale_recipe_servings only
+  // ever returns scaling_applied=False in that situation). In that
+  // case, the grounded ingredient quantities are NOT known to serve
+  // the requested count -- showing "Serves N" would imply a precision
+  // the data doesn't have, so this shows an explicit uncertainty state
+  // instead. When the original count IS known, quantities are either
+  // genuinely rescaled or already exactly correct -- both are reliable,
+  // so normal "Serves N" applies in either case.
+  const scalingUncertain = !(card.provider_original_servings > 0)
+  const servingsLabel = scalingUncertain
+    ? `Requested: ${card.requested_servings} servings · quantity scaling unavailable`
+    : `Serves ${card.requested_servings}`
+
+  const subline = [DIFFICULTY_LABEL[card.difficulty], card.cuisine].filter(Boolean).join(' · ')
   const imageUrl = safeHttpUrl(card.image_url)
   const sourceUrl = safeHttpUrl(card.source_url)
 
   return (
     <div className="recipe-detail__overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="recipe-detail" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div className="recipe-detail" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef}>
         <div className="recipe-detail__header">
           <button type="button" className="btn-icon" onClick={onClose} ref={closeButtonRef} aria-label="Back to results">
             <span aria-hidden="true">←</span>
@@ -67,7 +107,7 @@ export function RecipeDetail({ card, onClose }) {
 
         <div className="recipe-detail__media">
           {imageUrl ? (
-            <img src={imageUrl} alt="" />
+            <img src={imageUrl} alt={card.name} />
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-subtle)' }}>
               No image available
@@ -81,6 +121,12 @@ export function RecipeDetail({ card, onClose }) {
               {card.name}
             </h2>
             <p className="recipe-detail__subline">{subline}</p>
+            <p
+              className="recipe-detail__subline"
+              style={scalingUncertain ? { color: 'var(--color-warning)', fontWeight: 600 } : undefined}
+            >
+              {servingsLabel}
+            </p>
           </div>
 
           <div className="recipe-detail__time-group">

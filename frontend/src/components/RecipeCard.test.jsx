@@ -61,13 +61,13 @@ describe('RecipeCard', () => {
     expect(screen.getByText('No image available')).toBeInTheDocument()
   })
 
-  it('renders the real image when image_url is present', () => {
-    const { container } = render(<RecipeCard card={makeCard({ image_url: 'https://example.test/img.jpg' })} onOpen={vi.fn()} />)
+  it('renders the real image with meaningful alt text based on the recipe name', () => {
+    render(<RecipeCard card={makeCard({ image_url: 'https://example.test/img.jpg' })} onOpen={vi.fn()} />)
     expect(screen.queryByText('No image available')).not.toBeInTheDocument()
-    // Decorative image (name is already on the card as text) -- alt=""
-    // intentionally removes it from the accessibility tree's "img" role,
-    // so this asserts via a plain DOM query rather than getByRole.
-    expect(container.querySelector('img')).toHaveAttribute('src', 'https://example.test/img.jpg')
+    // Grounded recipe image is meaningful content, not decorative --
+    // alt text is the actual recipe name (post-review fix, 2026-09-08),
+    // so it's discoverable via its accessible "img" role/name.
+    expect(screen.getByRole('img', { name: 'Chicken Fried Rice' })).toHaveAttribute('src', 'https://example.test/img.jpg')
   })
 
   it('shows deviation reasons for a closest-alternative (non-exact) card', () => {
