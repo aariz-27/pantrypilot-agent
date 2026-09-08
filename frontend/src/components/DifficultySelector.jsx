@@ -1,25 +1,46 @@
 import { useId } from 'react'
+import './DifficultySelector.css'
 
-// Default filter is Easy+Medium (ticket section 10); the user may
-// explicitly opt into Hard. This maps 1:1 to UserConstraints.
-// allow_hard_difficulty server-side -- difficulty itself always comes
-// from the grounded provider field, never inferred here.
+// Checkbox-based per the frozen product decision (post-review fix,
+// 2026-09-08) -- replaces a prior dropdown implementation.
+//
+// Easy and Medium are always included and shown checked-but-disabled:
+// the backend (UserConstraints.allow_hard_difficulty, evaluated in
+// app.domain.constraint_evaluator) only ever gates Hard -- there is no
+// mechanism to exclude Easy/Medium, and none is added here (no
+// unnecessary backend business-rule change). The Hard checkbox is the
+// one real, interactive control and maps 1:1 onto allow_hard_difficulty.
+// Difficulty itself always comes from the grounded provider field
+// (app.domain.models.Difficulty.from_raw) -- this control only filters
+// already-grounded values, it never infers or assigns one.
 export function DifficultySelector({ allowHard, onChange }) {
-  const id = useId()
+  const groupId = useId()
+  const hardId = useId()
+
   return (
     <div>
-      <label className="field-label" htmlFor={id}>
+      <span className="field-label" id={groupId}>
         Difficulty
-      </label>
-      <select
-        id={id}
-        className="field-select"
-        value={allowHard ? 'all' : 'easy_medium'}
-        onChange={(event) => onChange(event.target.value === 'all')}
-      >
-        <option value="easy_medium">Easy, Medium</option>
-        <option value="all">Easy, Medium, Hard</option>
-      </select>
+      </span>
+      <div className="difficulty-selector" role="group" aria-labelledby={groupId}>
+        <label className="difficulty-selector__option difficulty-selector__option--locked">
+          <input type="checkbox" checked readOnly disabled aria-label="Easy (always included)" />
+          Easy
+        </label>
+        <label className="difficulty-selector__option difficulty-selector__option--locked">
+          <input type="checkbox" checked readOnly disabled aria-label="Medium (always included)" />
+          Medium
+        </label>
+        <label className="difficulty-selector__option">
+          <input
+            id={hardId}
+            type="checkbox"
+            checked={allowHard}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+          Hard
+        </label>
+      </div>
     </div>
   )
 }

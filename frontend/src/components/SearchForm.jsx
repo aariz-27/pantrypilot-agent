@@ -75,15 +75,18 @@ export function SearchForm({ formState, onChange, onSubmit, submitting }) {
             />
           </div>
 
-          <div className="search-form__checkbox-row">
-            <input
-              id={strictId}
-              type="checkbox"
-              checked={formState.cuisineStrict}
-              onChange={(event) => update({ cuisineStrict: event.target.checked })}
-              disabled={!formState.cuisine}
-            />
-            <label htmlFor={strictId}>Strict cuisine match</label>
+          <div>
+            <div className={`search-form__checkbox-row${!formState.cuisine ? ' search-form__checkbox-row--locked' : ''}`}>
+              <input
+                id={strictId}
+                type="checkbox"
+                checked={formState.cuisineStrict}
+                onChange={(event) => update({ cuisineStrict: event.target.checked })}
+                disabled={!formState.cuisine}
+              />
+              <label htmlFor={strictId}>Strict cuisine match</label>
+            </div>
+            {!formState.cuisine ? <p className="field-help">Choose a cuisine first</p> : null}
           </div>
 
           <IngredientAutocomplete

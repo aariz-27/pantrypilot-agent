@@ -16,10 +16,12 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
   const listboxId = useId()
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState([])
+  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(-1)
   const debouncedQuery = useDebouncedValue(query, 200)
   const containerRef = useRef(null)
+  const requestSeqRef = useRef(0)
 
   const existingCanonicalIds = useMemo(
     () => new Set(items.filter((item) => item.canonical_id).map((item) => item.canonical_id)),
@@ -30,16 +32,36 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
     const trimmed = debouncedQuery.trim()
     if (!trimmed) {
       setSuggestions([])
+      setLoading(false)
       return
     }
+    // Post-review fix (2026-09-08): a real-browser test found "No
+    // exact match found" flashing for a well-covered term ("rice")
+    // before its suggestions ever arrived. Root cause was that
+    // suggestions.length === 0 was treated as "confirmed no match"
+    // even while the debounced fetch was still pending -- under any
+    // real network latency this briefly (or, on a slow connection,
+    // not-so-briefly) showed the wrong empty state before the real
+    // results replaced it. `loading` now distinguishes "still
+    // resolving" from "resolved, genuinely nothing found," and a
+    // request-sequence guard ignores a stale response/abort so an
+    // in-flight newer request's loading state is never clobbered by an
+    // older superseded one settling later.
+    const seq = ++requestSeqRef.current
+    setLoading(true)
     const controller = new AbortController()
     fetchIngredientSuggestions(trimmed, { signal: controller.signal })
       .then((results) => {
+        if (requestSeqRef.current !== seq) return
         setSuggestions(results.filter((r) => !existingCanonicalIds.has(r.canonical_id)))
         setActiveIndex(-1)
       })
       .catch((err) => {
+        if (requestSeqRef.current !== seq) return
         if (err.name !== 'AbortError') setSuggestions([])
+      })
+      .finally(() => {
+        if (requestSeqRef.current === seq) setLoading(false)
       })
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,7 +113,7 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
       event.preventDefault()
       if (activeIndex >= 0 && suggestions[activeIndex]) {
         selectSuggestion(suggestions[activeIndex])
-      } else if (suggestions.length === 0 && query.trim()) {
+      } else if (!isPending && suggestions.length === 0 && query.trim()) {
         addUnresolved()
       }
     } else if (event.key === 'Escape') {
@@ -99,7 +121,11 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
     }
   }
 
-  const showEmptyState = open && query.trim().length > 0 && suggestions.length === 0
+  // True from the moment the user stops matching the last-fetched
+  // query (still inside the debounce window) through to the fetch
+  // actually resolving -- see the effect above for why this exists.
+  const isPending = query.trim() !== debouncedQuery.trim() || loading
+  const showEmptyState = open && query.trim().length > 0 && !isPending && suggestions.length === 0
   const activeOptionId = activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined
 
   return (
@@ -152,6 +178,12 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {open && isPending && query.trim().length > 0 && suggestions.length === 0 ? (
+        <div className="autocomplete__listbox autocomplete__empty" aria-live="polite">
+          <p className="autocomplete__empty-title">Searching…</p>
+        </div>
       ) : null}
 
       {showEmptyState ? (

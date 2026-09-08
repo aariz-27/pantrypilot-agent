@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SearchForm } from './SearchForm'
 
@@ -16,6 +17,11 @@ const BASE_STATE = {
   cuisine: null,
   cuisineStrict: false,
   budgetAed: null,
+}
+
+function StatefulSearchForm({ initial = BASE_STATE }) {
+  const [formState, setFormState] = useState(initial)
+  return <SearchForm formState={formState} onChange={setFormState} onSubmit={vi.fn()} submitting={false} />
 }
 
 describe('SearchForm', () => {
@@ -80,9 +86,11 @@ describe('SearchForm', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
-  it('defaults difficulty to Easy, Medium (Hard unchecked)', () => {
+  it('defaults difficulty to Easy, Medium checked and Hard unchecked', () => {
     render(<SearchForm formState={BASE_STATE} onChange={vi.fn()} onSubmit={vi.fn()} submitting={false} />)
-    expect(screen.getByRole('combobox', { name: 'Difficulty' })).toHaveValue('easy_medium')
+    expect(screen.getByRole('checkbox', { name: /Easy/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Medium/ })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Hard' })).not.toBeChecked()
   })
 
   it('reveals budget/exclusions/strict-cuisine only after "More options" is expanded', async () => {
@@ -102,5 +110,29 @@ describe('SearchForm', () => {
       />,
     )
     expect(screen.getByRole('button', { name: 'Finding meals…' })).toBeDisabled()
+  })
+
+  describe('strict cuisine UX', () => {
+    it('is disabled with helper text when no cuisine is selected', async () => {
+      render(<StatefulSearchForm />)
+      await userEvent.click(screen.getByRole('button', { name: /More options/ }))
+      expect(screen.getByRole('checkbox', { name: 'Strict cuisine match' })).toBeDisabled()
+      expect(screen.getByText('Choose a cuisine first')).toBeInTheDocument()
+    })
+
+    it('becomes enabled and toggleable once a cuisine is selected', async () => {
+      render(<StatefulSearchForm />)
+      await userEvent.click(screen.getByRole('button', { name: /More options/ }))
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Cuisine' }), 'Asian')
+
+      const strictCheckbox = screen.getByRole('checkbox', { name: 'Strict cuisine match' })
+      expect(strictCheckbox).toBeEnabled()
+      expect(screen.queryByText('Choose a cuisine first')).not.toBeInTheDocument()
+
+      await userEvent.click(strictCheckbox)
+      expect(strictCheckbox).toBeChecked()
+      await userEvent.click(strictCheckbox)
+      expect(strictCheckbox).not.toBeChecked()
+    })
   })
 })
