@@ -155,7 +155,11 @@ jobs:
       - name: Backend dependency audit (pip-audit)
         working-directory: backend
         run: |
-          python -m pip install --upgrade pip
+          # Upgrading setuptools/wheel too (not just pip) matters here:
+          # a fresh runner's bootstrap setuptools has had its own CVEs
+          # historically, and pip-audit scans the whole environment,
+          # not just this project's declared dependencies.
+          python -m pip install --upgrade pip setuptools wheel
           pip install '.[dev]'
           # PYSEC-2026-1845 (pytest, fixed in 9.0.3): predictable
           # /tmp/pytest-of-{user} path on shared multi-UNIX-user hosts.
