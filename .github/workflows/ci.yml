@@ -130,3 +130,53 @@ jobs:
       - name: Frontend not created yet
         if: steps.frontend_exists.outputs.exists == 'false'
         run: echo "Frontend scaffold not created yet. Skipping frontend checks."
+
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Secret-pattern scan
+        run: python scripts/scan_secrets.py
+
+      - name: Backend dependency audit (pip-audit)
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install '.[dev]'
+          # PYSEC-2026-1845 (pytest, fixed in 9.0.3): predictable
+          # /tmp/pytest-of-{user} path on shared multi-UNIX-user hosts.
+          # pytest is dev/CI-only and never ships in the running
+          # production process; GitHub-hosted runners are single-tenant
+          # ephemeral VMs, not shared multi-user hosts. The fix requires
+          # a major-version bump (pyproject pins pytest>=8,<9), so it is
+          # deliberately not force-upgraded here per Module F 4.10
+          # ("do not blindly upgrade major framework versions").
+          # Documented in docs/MODULE_F_SECURITY_REPORT.md and
+          # docs/MASTER_REMEDIATION_REGISTER.md, pending a Founder
+          # decision to either take the major bump or formally record
+          # BOUNDED ACCEPTED RISK -- Claude Code does not make that call.
+          pip-audit --ignore-vuln PYSEC-2026-1845
+
+      - name: Frontend dependency audit (npm audit)
+        working-directory: frontend
+        run: |
+          if [ -f "package.json" ]; then
+            npm install
+            npm audit --audit-level=high
+          else
+            echo "Frontend scaffold not created yet. Skipping npm audit."
+          fi
