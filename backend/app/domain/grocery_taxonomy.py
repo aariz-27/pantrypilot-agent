@@ -654,6 +654,14 @@ GROCERY_INGREDIENT_ALIASES: dict[str, str] = {
     # covers the ground-spice form), so "coriander leaves" is the exact
     # same identity, not a collapse of a real distinction.
     "coriander leaves": "coriander",
+    # REVIEW NEEDED expansion, Priority 1 (2026-09-09): "cayenne" (bare)
+    # is the exact raw text observed live for this spice; the canonical
+    # id itself is "cayenne_pepper" (a genuinely distinct spice from
+    # black_pepper/white_pepper/chili_powder, per data/raw/
+    # PantryPilot_Ingredients_Needing_Pricing.csv). Not the literal name
+    # of any PRODUCT_TYPE_KEYWORD_RULES family, so this carries no
+    # grocery-ingestion cross-contamination risk (unlike flour/sugar).
+    "cayenne": "cayenne_pepper",
 }
 
 # ---------------------------------------------------------------------------
@@ -722,6 +730,80 @@ MANUAL_ONLY_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
         "ginger",
         "salted_butter",
         "unsalted_butter",
+    }
+)
+
+# ---------------------------------------------------------------------------
+# 4b-3. REVIEW NEEDED expansion, Priority 1 (PR #15 yellow/Uncertain audit,
+# controlled canonical + pricing expansion pass, 2026-09-09). 27 items the
+# audit identified as high-value, high-confidence, genuinely distinct
+# purchasable products -- validated against
+# data/raw/PantryPilot_Ingredients_Needing_Pricing.csv (Founder-provided
+# pricing evidence, kept as-is at that path, never committed/moved/
+# renamed) before adding. Each is deliberately kept SEPARATE from any
+# similar-sounding existing canonical (tomato_paste != tomato,
+# garlic_powder != garlic, onion_powder != onion, the dried_* herbs !=
+# their fresh-herb canonicals, the *_broth/fish_stock ids != stock_powder/
+# bouillon, lemon_juice != lemon, smoked_paprika != paprika, white_pepper
+# != black_pepper, fresh_coconut != coconut/shredded_coconut) -- these are
+# materially different grocery products, not aliases.
+#
+# 19 of the 27 have real, usable CSV pricing evidence (package price +
+# a package amount app.domain.grocery_parsing.parse_package_content can
+# deterministically parse) and got a manual_price_entries.json row:
+# tomato_paste, celery, garlic_powder, onion_powder, green_chili,
+# buttermilk, smoked_paprika, cayenne_pepper, dried_oregano, dried_thyme,
+# dried_basil, dried_tarragon, barbecue_sauce, breadcrumbs, sour_cream,
+# white_pepper, marinara_sauce, fresh_coconut, cherry_tomato.
+#
+# 8 have an unambiguous identity but NO usable CSV pricing evidence (the
+# CSV's own Price column was "not in uae", or held a non-numeric note, or
+# the Amount used an unsupported unit) -- added here for identity only.
+# PriceRepository.get_price() correctly returns None for these (never a
+# fabricated AED 0) until a real, verified price is added:
+#   - beef_broth, chicken_broth, vegetable_broth, fish_stock, lamb_broth:
+#     CSV Price = "not in uae" (no numeric price at all).
+#   - lemon_juice: CSV Price column held a note ("should be from lemons
+#     I think"), not a verified price -- no Amount given either.
+#   - shallot: CSV Price = "not in uae".
+#   - chive/chives: CSV gives "5.95, 1 pkt" -- "pkt" is an explicitly
+#     unsupported unit (parse_package_content), and no per-unit weight is
+#     given, so a per-gram price cannot be derived without guessing a
+#     packet weight (DEC-013 forbids this). Identity ("chives") is
+#     unambiguous and added; pricing stays unavailable.
+# ---------------------------------------------------------------------------
+
+REVIEW_NEEDED_EXPANSION_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
+    {
+        # priced via manual_price_entries.json
+        "tomato_paste",
+        "celery",
+        "garlic_powder",
+        "onion_powder",
+        "green_chili",
+        "buttermilk",
+        "smoked_paprika",
+        "cayenne_pepper",
+        "dried_oregano",
+        "dried_thyme",
+        "dried_basil",
+        "dried_tarragon",
+        "barbecue_sauce",
+        "breadcrumbs",
+        "sour_cream",
+        "white_pepper",
+        "marinara_sauce",
+        "fresh_coconut",
+        "cherry_tomato",
+        # identity only -- no usable CSV pricing evidence (see above)
+        "beef_broth",
+        "chicken_broth",
+        "vegetable_broth",
+        "fish_stock",
+        "lamb_broth",
+        "lemon_juice",
+        "shallot",
+        "chives",
     }
 )
 
@@ -921,6 +1003,7 @@ CANONICAL_GROCERY_INGREDIENTS: frozenset[str] = frozenset(
     | set(GROCERY_INGREDIENT_ALIASES.values())
     | MANUAL_ONLY_CANONICAL_INGREDIENTS
     | OTHER_REQUIREMENT_IDS
+    | REVIEW_NEEDED_EXPANSION_CANONICAL_INGREDIENTS
 )
 
 # ---------------------------------------------------------------------------

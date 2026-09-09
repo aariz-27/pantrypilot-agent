@@ -162,7 +162,11 @@ def test_committed_manual_price_entries_json_loads_and_resolves_all_five_entries
     db_path = str(tmp_path / "manual_entries_test.db")
 
     loaded_count = load_manual_entries(MANUAL_ENTRIES_PATH, db_path)
-    assert loaded_count == 5
+    # 5 original Founder-approved entries + 19 added by the PR #15
+    # controlled canonical + pricing expansion pass (2026-09-09) -- see
+    # test_review_needed_expansion.py for the 19 new entries' own
+    # dedicated assertions.
+    assert loaded_count == 24
 
     repo = PriceRepository(db_path)
 

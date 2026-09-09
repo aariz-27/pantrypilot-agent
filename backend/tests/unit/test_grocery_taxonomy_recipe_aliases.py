@@ -148,10 +148,19 @@ def test_stale_dropped_aliases_were_deliberately_not_restored():
     # (dal can mean a specific pulse variety) -- must remain unresolved.
     assert normalize_ingredient_name("dal", CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES).canonical_id is None
     assert normalize_ingredient_name("daal", CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES).canonical_id is None
-    # "cooking oil"/"vegetable oil"/"curd"/"green chili" -> targets that
-    # no longer exist in the production taxonomy at all -- must remain
-    # unresolved (REVIEW NEEDED items, explicitly out of scope this pass).
-    for raw in ("cooking oil", "vegetable oil", "curd", "green chili", "tomato paste", "celery", "milk"):
+    # "cooking oil"/"vegetable oil"/"curd" -> targets that no longer
+    # exist in the production taxonomy at all -- must remain unresolved
+    # (REVIEW NEEDED items, out of scope for the original PR #15 audit-
+    # implementation pass). "milk" remains a deliberately untouched
+    # Priority-3 "ambiguous mapping" item per the later controlled
+    # canonical + pricing expansion pass (2026-09-09) -- still correctly
+    # unresolved. NOTE: "green chili", "tomato paste", and "celery" were
+    # ALSO asserted unresolved here originally, but that later pass
+    # deliberately added them as their own new, distinct, priced
+    # canonicals (green_chili, tomato_paste, celery) -- see
+    # test_review_needed_expansion.py for their current, correct
+    # resolution behavior.
+    for raw in ("cooking oil", "vegetable oil", "curd", "milk"):
         assert (
             normalize_ingredient_name(raw, CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES).canonical_id is None
         ), f"{raw!r} is a REVIEW NEEDED item and must not have been aliased in this pass"
