@@ -161,19 +161,12 @@ jobs:
           # not just this project's declared dependencies.
           python -m pip install --upgrade pip setuptools wheel
           pip install '.[dev]'
-          # PYSEC-2026-1845 (pytest, fixed in 9.0.3): predictable
-          # /tmp/pytest-of-{user} path on shared multi-UNIX-user hosts.
-          # pytest is dev/CI-only and never ships in the running
-          # production process; GitHub-hosted runners are single-tenant
-          # ephemeral VMs, not shared multi-user hosts. The fix requires
-          # a major-version bump (pyproject pins pytest>=8,<9), so it is
-          # deliberately not force-upgraded here per Module F 4.10
-          # ("do not blindly upgrade major framework versions").
-          # Documented in docs/MODULE_F_SECURITY_REPORT.md and
-          # docs/MASTER_REMEDIATION_REGISTER.md, pending a Founder
-          # decision to either take the major bump or formally record
-          # BOUNDED ACCEPTED RISK -- Claude Code does not make that call.
-          pip-audit --ignore-vuln PYSEC-2026-1845
+          # MR-001 (PYSEC-2026-1845 / GHSA-6w46-j5rx-g56g / CVE-2025-71176)
+          # is fixed -- pytest>=9.0.3 + pytest-asyncio>=1.4 (see
+          # backend/pyproject.toml). No ignore needed; a clean pip-audit
+          # is now expected. See docs/MASTER_REMEDIATION_REGISTER.md
+          # MR-001 (RE_VERIFIED).
+          pip-audit
 
       - name: Frontend dependency audit (npm audit)
         working-directory: frontend

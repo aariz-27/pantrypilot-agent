@@ -12,8 +12,18 @@ dependencies = [
     "pydantic==2.13.5",
     "pydantic-settings>=2.6,<3",
     "uvicorn[standard]>=0.30,<1",
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.24,<1",
+    # MR-001 fix: pytest>=9.0.3 resolves PYSEC-2026-1845 / GHSA-6w46-j5rx-g56g
+    # / CVE-2025-71176 (predictable /tmp/pytest-of-{user} temp-directory
+    # path; genuinely exercised by this suite via the widely-used
+    # tmp_path fixture). pytest-asyncio must move to the 1.x line
+    # together with it -- 0.26.0 hard-conflicts with pytest 9 (its
+    # declared range only supports pytest<8.4-ish); 1.x's own declared
+    # range (pytest<10,>=8.4) is what makes this pair resolvable.
+    # Verified: 650/650 tests pass against this exact pair with no
+    # other transitive dependency changes. See
+    # docs/MASTER_REMEDIATION_REGISTER.md MR-001 (RE_VERIFIED).
+    "pytest>=9.0.3,<10",
+    "pytest-asyncio>=1.4,<2",
     "httpx>=0.27,<1",
     # Module D (M03 Agent Orchestrator): the approved runtime LLMProvider
     # adapter (app.integrations.llm_provider.AnthropicLLMProvider) is

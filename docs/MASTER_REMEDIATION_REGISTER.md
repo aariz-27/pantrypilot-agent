@@ -86,38 +86,41 @@ Examples:
 
 # Current Findings
 
-## MR-001 — pytest dependency has an unresolved advisory (PYSEC-2026-1845)
+## MR-001 — pytest dependency vulnerable to predictable temp-directory path (PYSEC-2026-1845)
 
-**Date:** 2026-09-09
-**Severity:** LOW
+**Date:** 2026-09-09 (opened) / 2026-09-09 (remediated and re-verified, same day)
+**Severity:** MEDIUM (GitHub advisory rating: MODERATE; CVSS 3.1 `AV:L/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:L`)
 **Category:** SECURITY
-**Component:** `backend/pyproject.toml` (`pytest` dev/test dependency)
-**Status:** OPEN
+**Component:** `backend/pyproject.toml` (`pytest` / `pytest-asyncio` dev/test dependencies)
+**Status:** RE_VERIFIED
 
 ### Exact Finding
 
-`pip-audit` reports `pytest==8.4.2` is affected by PYSEC-2026-1845: "pytest through 9.0.2 on UNIX relies on directories with the `/tmp/pytest-of-{user}` name pattern, which allows local users to cause a denial of service or possibly gain privileges." The fix is `pytest>=9.0.3`, a major-version bump; `backend/pyproject.toml` currently pins `pytest>=8,<9`.
+`pip-audit` reported `pytest==8.4.2` affected by PYSEC-2026-1845 (aliases `GHSA-6w46-j5rx-g56g`, `CVE-2025-71176`, CWE-379): pytest's `tmp_path`/`tmpdir` fixture machinery creates its base temp directory at a predictable path, `/tmp/pytest-of-{username}`, with a predictable per-run subdirectory scheme. On a UNIX host shared with other local users, another unprivileged local user can pre-create/symlink that predictable path before the victim's pytest run, causing a denial of service or a symlink-based integrity issue. Fixed in `9.0.3`.
+
+**Correction to the original write-up:** this finding was first recorded stating the vulnerable code path was likely unused by PantryPilot's tests. That was wrong — a `grep` scoping error (run from inside `backend/`, so the pattern doubled the path prefix and silently matched nothing) produced a false negative. A corrected search from the repo root found `tmp_path` used across 11 test files and dozens of test functions (`backend/tests/agent/conftest.py`'s `price_db` fixture — used broadly across agent tests — plus `test_price_repository.py`, `test_cost_engine.py`, `test_db_connection.py`, `test_review_needed_expansion.py`, `test_module_a_b_c_integration.py`, `test_module_c_pricing_gap_resolution.py`, `test_health_endpoint.py`, `test_grocery_ingestion_pipeline.py`, `test_recommend_endpoint.py`, `test_butter_apple_carrot_data_quality_fix.py`). Confirmed empirically: running the full suite created `/tmp/pytest-of-{user}/pytest-0/` with 200+ per-test subdirectories holding throwaway SQLite fixture databases. The vulnerable functionality is genuinely exercised, on every test run, including every CI run.
 
 ### Source
 
-Module F Ticket 4.10 (backend dependency audit), run as part of security hardening work.
+Module F Ticket 4.10 (backend dependency audit). Initial finding and its correction both surfaced during Founder-requested review-only follow-up on this same ticket.
 
 ### Evidence
 
-`pip-audit` output (backend venv, 2026-09-09):
+`pip-audit` output (backend venv, before fix):
 ```
 Name   Version ID              Fix Versions
 ------ ------- --------------- ------------
 pytest 8.4.2   PYSEC-2026-1845 9.0.3
 ```
+`pip-audit` output (backend venv, after fix, no ignore flag): `No known vulnerabilities found`.
 
 ### Root Cause
 
-Upstream `pytest` advisory; not a PantryPilot code defect.
+Upstream `pytest` advisory; not a PantryPilot code defect. Compounded by `backend/pyproject.toml` pinning `pytest-asyncio>=0.24,<1`, which hard-conflicts with `pytest>=9` (pip's resolver refuses the pair) — the fix required a coordinated two-package major-version bump, not a single-line change.
 
 ### Impact
 
-`pytest` is a dev/CI-only dependency — it is never imported by, or bundled with, the deployed production process. The advisory itself requires local, unprivileged multi-user access to a shared UNIX host to exploit a predictable temp-directory path during test execution. GitHub Actions runners are single-tenant, ephemeral VMs, not shared multi-user hosts. **Actual exposure in PantryPilot's deployment model (single-tenant Oracle Cloud VM, CI on ephemeral runners) is assessed as minimal to none.**
+`pytest` is dev/CI-only — never imported by or bundled with the deployed production process. Exploiting the advisory requires a second, unprivileged local user account on the same host racing to pre-create the predictable path before the victim's pytest run. GitHub Actions runners are single-tenant ephemeral VMs (no second local user); a developer machine is single-user; the documented Oracle VM competition deployment is single-tenant by design, so no second local user exists there either, unless that design assumption is violated. Even in a successful exploit, the data at risk is disposable test-fixture SQLite databases, not real secrets or the production reference DB (gitignored, never touched by tests). **Net assessment: genuinely exercised by the test suite, but low realistic exploitability given the competition deployment topology — fixed anyway because the fix carries zero measured regression risk (see Verification Evidence).**
 
 ### Affected Requirement / Decision
 
@@ -129,23 +132,23 @@ None.
 
 ### Remediation Ticket
 
-Not yet created. Two options for the Founder to choose between:
-1. Take the major-version bump (`pytest>=9.0.3`) — requires re-verifying the full backend test suite against pytest 9's changes.
-2. Formally record `BOUNDED ACCEPTED RISK` per `docs/SECURITY_ACCEPTANCE_MATRIX.md` Section 4, given the minimal actual exposure above.
-
-Claude Code has not chosen between these — per `docs/SECURITY_ACCEPTANCE_MATRIX.md` Section 4, only the Founder may accept a security risk.
+`MODULE-F` (this ticket) — Founder approved "FIX NOW" for this specific remediation only, scoped to the dependency change alone (no application code, no other Module F functionality, no unrelated dependency upgrades).
 
 ### Pull Request
 
-Not created.
+#16 (`feature/module-f-security-persistence` → `main`, not merged)
 
 ### Verification Evidence
 
-CI's `security` job runs `pip-audit --ignore-vuln PYSEC-2026-1845` (see `.github/workflows/ci.yml`) so this single, documented, pending-decision finding does not perpetually fail every CI run while awaiting the Founder's decision above. This is a CI-configuration choice to keep the pipeline actionable, not a risk-acceptance decision.
+- `backend/pyproject.toml`: `pytest>=8,<9` → `pytest>=9.0.3,<10`; `pytest-asyncio>=0.24,<1` → `pytest-asyncio>=1.4,<2`. Resolves to `pytest==9.1.1`, `pytest-asyncio==1.4.0` in this environment (both satisfy the floor).
+- Full backend suite: **650/650 passed**, same 2 pre-existing unrelated deprecation warnings, no new failures or warnings — verified twice: once in an isolated scratch venv (pre-approval investigation) and once for real in the project's own venv (post-approval implementation).
+- `pip-audit` (no ignore, both the project venv and a genuinely fresh venv with `pip install --upgrade pip setuptools wheel && pip install '.[dev]'`): `No known vulnerabilities found`.
+- Transitive dependencies checked directly: `pluggy` (1.6.0), `iniconfig` (2.3.0), `packaging` (26.3) all unchanged — no churn beyond the two intended packages.
+- CI's `security` job `--ignore-vuln PYSEC-2026-1845` exception removed from `.github/workflows/ci.yml`; plain `pip-audit` now expected to pass clean.
 
 ### Residual Risk
 
-Open pending Founder decision (see Remediation Ticket above).
+None identified. The advisory's fixed version is installed and verified; no downgrade path exists in the declared range (`<10` still requires `>=9.0.3`).
 
 ---
 
