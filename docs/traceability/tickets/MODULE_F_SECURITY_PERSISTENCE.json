@@ -1,0 +1,142 @@
+{
+  "ticket_id": "MODULE-F",
+  "title": "Security, Persistence, and Production Hardening",
+  "status": "IN_IMPLEMENTATION",
+  "authorized": true,
+  "authorized_by": "Founder / Product Owner",
+  "branch_name": "feature/module-f-security-persistence",
+  "objective": "Harden PantryPilot for a real public competition deployment (security, local browser persistence, production UX/config) without changing the core recommendation behavior validated in Module E. Deployment itself is out of scope.",
+  "in_scope": [
+    "4.1 Input validation audit (confirmed already implemented in Module A/B/C schemas; no functional gap found)",
+    "4.2 Request body size limits on body-accepting endpoints",
+    "4.3 Rate limiting on /api/recommend and /api/ingredients/suggest",
+    "4.4 CORS audit (confirmed already env-driven and safe-by-default; residual test coverage only)",
+    "4.5 Secrets/environment audit (confirmed already clean; no functional change)",
+    "4.6 Error sanitization audit (confirmed already implemented via PantryPilotError envelope; no functional change)",
+    "4.7 Logging hygiene review and minimal structured logging (request ID, endpoint, latency, failure category)",
+    "4.8 Prompt/tool injection boundary regression test (one targeted end-to-end adversarial-content test)",
+    "4.9 URL safety audit (confirmed already implemented via frontend safeUrl.js and fixed provider base URL; no functional change)",
+    "4.10 Dependency security scan (backend pip-audit, frontend npm audit) wired into CI, findings documented",
+    "5.1 Pantry persistence (local, versioned storage)",
+    "5.2 Search-form preference persistence (servings, max time, difficulty, cuisine) — budget explicitly excluded per Founder decision",
+    "5.3 Recent-search history (bounded, rerun, clear)",
+    "5.4 Saved/favorite recipes (minimal provider-grounded fields only)",
+    "5.5 Clear/reset controls for all local state, no devtools required",
+    "6. Production UX hardening (failure-state message review/fixes)",
+    "7. Accessibility light pass (labels, keyboard, focus, aria-live, contrast)",
+    "8. Production configuration review (env-driven CORS/API origin; already largely satisfied)",
+    "9. Health/readiness endpoint review (confirmed already minimal and compliant)",
+    "11. Module F security report under docs/",
+    "Separate clearly-labeled commit correcting stale Module E status in CURRENT_STATUS.md"
+  ],
+  "out_of_scope": [
+    "Deployment to Oracle Cloud VM",
+    "Authentication / user accounts / OAuth",
+    "Cloud/server-side persistence",
+    "Payments, social sharing, meal plans, nutrition generation, grocery ordering, retailer integrations",
+    "Push notifications, mobile app",
+    "Major visual redesign",
+    "New AI capabilities",
+    "Any change to ranking weights (45/30/15/10), MAX_SEARCH_ATTEMPTS=3, MAX_EVALUATED_CANDIDATES=20, max 3 primary recommendations",
+    "Nginx/systemd/Docker/SSL/Oracle networking config"
+  ],
+  "requirements": [
+    "SEC-04",
+    "SEC-05",
+    "SEC-06",
+    "SEC-07",
+    "SEC-08",
+    "AR-10",
+    "AR-14",
+    "REL-04"
+  ],
+  "decisions": [
+    "DEC-006",
+    "DEC-007",
+    "DEC-009",
+    "DEC-010"
+  ],
+  "decision_triggers_checked": true,
+  "blocking_decisions": [],
+  "affected_modules": [
+    "API Layer",
+    "Agent Orchestrator (test-only addition, no logic change)",
+    "Frontend (persistence, UX copy, accessibility)",
+    "CI/CD (dependency + secret scanning)",
+    "Governance docs (SECURITY_ACCEPTANCE_MATRIX.md, REQUIREMENTS_TRACEABILITY.md, CURRENT_STATUS.md)"
+  ],
+  "allowed_paths": [
+    "backend/app/",
+    "backend/tests/",
+    "backend/pyproject.toml",
+    "frontend/src/",
+    "frontend/tests/ (or co-located *.test.jsx)",
+    ".github/workflows/",
+    "docs/",
+    "CURRENT_STATUS.md"
+  ],
+  "forbidden_paths": [
+    "backend/app/domain/ranking logic (weights/bounds)",
+    "backend/app/agent/state.py (bound constants)",
+    "Any deployment/infrastructure config (Nginx, systemd, Docker, SSL)"
+  ],
+  "acceptance_criteria": [
+    "Oversized request bodies return a controlled 413 before reaching Pydantic validation or any agent/provider call",
+    "Requests exceeding the rate limit on /api/recommend or /api/ingredients/suggest return 429 in the existing error-envelope shape, with no provider/LLM call made",
+    "No secret appears in any response body, log line, or frontend bundle",
+    "Reload restores pantry, search-form preferences (excluding budget), and recent-search history without duplicates",
+    "Recent-search history is capped, supports rerun and clear",
+    "Saved recipes store only provider-grounded minimal fields",
+    "A single control clears all local state without developer tools",
+    "All frozen behavior invariants unchanged: full existing backend pytest suite passes with no modification to ranking/bounds logic",
+    "Full quality gate green: backend pytest, frontend vitest, frontend lint, frontend production build, backend/frontend dependency audit, secret-pattern scan, governance validation, CI"
+  ],
+  "security_acceptance": [
+    "Request bounds enforced (size + rate) — new for Module F",
+    "Secrets absent from Git/frontend build — reconfirmed, no change needed",
+    "Prompt injection tests pass — reconfirmed via new targeted regression test",
+    "Dependency/security scans have no unresolved critical issue without Founder-accepted risk"
+  ],
+  "performance_reliability_acceptance": [
+    "Rate limiting must not measurably degrade normal interactive use (limits chosen to exceed realistic single-user usage)",
+    "In-memory rate limiter is documented as a competition-scope limitation (resets on restart, not multi-instance safe) per Founder-approved plan"
+  ],
+  "data_integrity_acceptance": [
+    "Local persistence uses versioned storage; a schema-version mismatch safely resets rather than corrupting app state",
+    "No generated recipe content is ever persisted; saved recipes remain provider-grounded"
+  ],
+  "required_tests": [
+    "Backend: oversized-request rejection test",
+    "Backend: rate-limit 429 test asserting no downstream provider/LLM call",
+    "Backend: adversarial-content end-to-end injection regression test",
+    "Frontend: versioned-storage migrate/reset-on-mismatch test",
+    "Frontend: pantry persistence round-trip (no duplicates)",
+    "Frontend: budget-not-persisted regression test",
+    "Frontend: history cap/clear tests",
+    "Frontend: local-state full reset test",
+    "Frontend: offline/backend-unavailable and 429-message rendering tests"
+  ],
+  "migration_impact": "NONE (no backend schema change; frontend introduces a versioned localStorage scheme with explicit migrate-or-reset-on-mismatch behavior)",
+  "configuration_impact": "New env vars for rate-limit thresholds and max request body size, with documented defaults",
+  "observability_impact": "Minimal structured logging added (request ID, endpoint, latency, high-level failure category); no secrets logged",
+  "known_dependencies": [
+    "slowapi (backend, runtime) — in-memory rate limiting",
+    "pip-audit (backend, dev-only)"
+  ],
+  "known_risks": [
+    "In-memory rate limiting resets on process restart and is not multi-instance safe — acceptable for single-VM competition deployment, documented in the Module F security report",
+    "Any backend dependency vulnerability without a safe non-major fix will be documented per package/CVE/exposure/mitigation rather than force-upgraded"
+  ],
+  "implementation_notes": "Claude must not expand scope beyond this ticket. Budget is never persisted (Founder decision). Saved/favorite recipes are in scope but minimal. CURRENT_STATUS.md correction ships as its own separate, clearly-labeled commit distinct from Module F functional commits.",
+  "review_required": {
+    "claude_self_review": true,
+    "chatgpt_independent_review": true,
+    "founder_merge": true
+  },
+  "completion_evidence": {
+    "pull_request": null,
+    "test_summary": null,
+    "review_result": null,
+    "merge_commit": null
+  }
+}

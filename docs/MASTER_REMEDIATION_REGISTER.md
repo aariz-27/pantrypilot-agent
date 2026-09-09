@@ -86,7 +86,66 @@ Examples:
 
 # Current Findings
 
-No findings recorded.
+## MR-001 — pytest dependency has an unresolved advisory (PYSEC-2026-1845)
+
+**Date:** 2026-09-09
+**Severity:** LOW
+**Category:** SECURITY
+**Component:** `backend/pyproject.toml` (`pytest` dev/test dependency)
+**Status:** OPEN
+
+### Exact Finding
+
+`pip-audit` reports `pytest==8.4.2` is affected by PYSEC-2026-1845: "pytest through 9.0.2 on UNIX relies on directories with the `/tmp/pytest-of-{user}` name pattern, which allows local users to cause a denial of service or possibly gain privileges." The fix is `pytest>=9.0.3`, a major-version bump; `backend/pyproject.toml` currently pins `pytest>=8,<9`.
+
+### Source
+
+Module F Ticket 4.10 (backend dependency audit), run as part of security hardening work.
+
+### Evidence
+
+`pip-audit` output (backend venv, 2026-09-09):
+```
+Name   Version ID              Fix Versions
+------ ------- --------------- ------------
+pytest 8.4.2   PYSEC-2026-1845 9.0.3
+```
+
+### Root Cause
+
+Upstream `pytest` advisory; not a PantryPilot code defect.
+
+### Impact
+
+`pytest` is a dev/CI-only dependency — it is never imported by, or bundled with, the deployed production process. The advisory itself requires local, unprivileged multi-user access to a shared UNIX host to exploit a predictable temp-directory path during test execution. GitHub Actions runners are single-tenant, ephemeral VMs, not shared multi-user hosts. **Actual exposure in PantryPilot's deployment model (single-tenant Oracle Cloud VM, CI on ephemeral runners) is assessed as minimal to none.**
+
+### Affected Requirement / Decision
+
+None (tooling dependency, not a product requirement).
+
+### Dependency
+
+None.
+
+### Remediation Ticket
+
+Not yet created. Two options for the Founder to choose between:
+1. Take the major-version bump (`pytest>=9.0.3`) — requires re-verifying the full backend test suite against pytest 9's changes.
+2. Formally record `BOUNDED ACCEPTED RISK` per `docs/SECURITY_ACCEPTANCE_MATRIX.md` Section 4, given the minimal actual exposure above.
+
+Claude Code has not chosen between these — per `docs/SECURITY_ACCEPTANCE_MATRIX.md` Section 4, only the Founder may accept a security risk.
+
+### Pull Request
+
+Not created.
+
+### Verification Evidence
+
+CI's `security` job runs `pip-audit --ignore-vuln PYSEC-2026-1845` (see `.github/workflows/ci.yml`) so this single, documented, pending-decision finding does not perpetually fail every CI run while awaiting the Founder's decision above. This is a CI-configuration choice to keep the pipeline actionable, not a risk-acceptance decision.
+
+### Residual Risk
+
+Open pending Founder decision (see Remediation Ticket above).
 
 ---
 
