@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.agent.orchestrator import AgentOrchestrator, AgentRequest
 from app.api.recommend_mapping import build_recommend_response
@@ -19,6 +19,7 @@ from app.config import Settings, get_settings
 from app.integrations.llm_provider import AnthropicLLMProvider, LLMProviderConfigurationError
 from app.integrations.local_curated import LocalCuratedRecipeProvider
 from app.integrations.recipeapi_io import RecipeAPIIOAdapter
+from app.rate_limit import limiter
 from app.recipe.provider import RecipeProvider
 from app.repositories.price_repository import PriceRepository
 from app.schemas.recommend import RecommendRequest, RecommendResponse
@@ -87,10 +88,17 @@ def get_orchestrator(
 
 
 @router.post("/recommend", response_model=RecommendResponse)
+@limiter.limit(lambda: get_settings().rate_limit_recommend)
 async def post_recommend(
-    request: RecommendRequest,
+    request: Request,
+    body: RecommendRequest,
     orchestrator: AgentOrchestrator | None = Depends(get_orchestrator),
 ) -> RecommendResponse:
+    # `request` (starlette.Request) is required, by name, for slowapi's
+    # @limiter.limit decorator to identify the client -- it is not
+    # otherwise used by this handler. The validated request body is
+    # `body` (module F rename; previously named `request`, which now
+    # refers to the raw ASGI request slowapi needs).
     if orchestrator is None:
         raise LLMProviderConfigurationError("Anthropic LLM is not configured (missing API key or model)")
 
@@ -98,20 +106,20 @@ async def post_recommend(
 
     agent_request = AgentRequest(
         request_id=request_id,
-        pantry_raw=request.ingredients,
-        budget_aed=request.budget_aed,
-        cuisine_preference=request.cuisine,
-        cuisine_strict=request.cuisine_strict,
-        servings=request.servings,
-        max_total_time_minutes=request.max_total_time_minutes,
-        excluded_raw=request.excluded_ingredients,
-        allow_hard_difficulty=request.allow_hard_difficulty,
+        pantry_raw=body.ingredients,
+        budget_aed=body.budget_aed,
+        cuisine_preference=body.cuisine,
+        cuisine_strict=body.cuisine_strict,
+        servings=body.servings,
+        max_total_time_minutes=body.max_total_time_minutes,
+        excluded_raw=body.excluded_ingredients,
+        allow_hard_difficulty=body.allow_hard_difficulty,
     )
 
     result = await orchestrator.run(agent_request)
 
     return build_recommend_response(
         result,
-        max_total_time_minutes=request.max_total_time_minutes,
-        budget_aed=request.budget_aed,
+        max_total_time_minutes=body.max_total_time_minutes,
+        budget_aed=body.budget_aed,
     )

@@ -22,6 +22,20 @@ dependencies = [
     # on the fake-client test path), so its absence never breaks unit
     # tests -- see app/integrations/llm_provider.py.
     "anthropic>=0.40,<1",
+    # Module F 4.3: in-memory rate limiting (app.rate_limit). Genuinely
+    # imported at runtime (app.main wires its exception handler), so it
+    # belongs in the main dependency list for the same reason noted
+    # above -- CI's plain `pip install .` must have it available.
+    "slowapi>=0.1.9,<1",
+]
+
+[project.optional-dependencies]
+# Dev/CI-only tooling, never imported by application code. Not
+# installed by CI's current `pip install .` step -- a Module F CI job
+# that runs pip-audit needs `pip install '.[dev]'` (or `pip install
+# pip-audit` directly) as a separate step.
+dev = [
+    "pip-audit>=2.7,<3",
 ]
 
 # NOTE: test tooling (pytest, httpx) is intentionally kept in the main

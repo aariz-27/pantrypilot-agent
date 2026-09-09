@@ -181,7 +181,7 @@ async def test_client_unexpected_exception_is_mapped_to_unavailable_error():
 
 
 async def test_api_key_never_appears_in_any_raised_exception_text():
-    secret = "sk-ant-super-secret-value"
+    secret = "sk-ant-super-secret-value"  # fake value, not a real key  # secret-scan: allow
 
     class AuthenticationError(Exception):
         pass
