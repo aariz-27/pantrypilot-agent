@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from app.agent.actions import ActionType, AgentAction, RationaleCategory, SearchArgs, SearchRoute, StopArgs, StopReason
-from app.agent.errors import AgentMalformedActionError, AgentUnsupportedActionError
+from app.agent.errors import AgentMalformedActionError
 from app.agent.orchestrator import AgentOrchestrator, AgentRequest
 from app.domain.models import RecipeIngredient
 from app.domain.provider_errors import (
@@ -286,11 +286,25 @@ async def test_local_curated_route_rejected_outside_approved_cuisine(price_db):
     # Anchor is a valid pantry item (default pantry) so this test
     # isolates the local-curated cuisine-gate rejection specifically,
     # rather than conflating it with the anchor-grounding check.
-    llm = FakeLLMProvider([_search_action(["tomato"], route=SearchRoute.LOCAL_CURATED, cuisine="French")])
+    #
+    # PR #15 HTTP-500 fix (2026-09-09): this AgentUnsupportedActionError
+    # must now recover via bounded corrective retry -- never propagate
+    # as an unhandled exception. The second scripted decision is the
+    # LLM's corrective response after seeing the rejection feedback.
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"], route=SearchRoute.LOCAL_CURATED, cuisine="French"),
+            _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE),
+        ]
+    )
     orch = AgentOrchestrator(llm, {"recipeapi_io": FakeRecipeProvider("recipeapi_io", [])}, PriceRepository(price_db))
 
-    with pytest.raises(AgentUnsupportedActionError):
-        await orch.run(_base_request(cuisine_preference="French"))
+    result = await orch.run(_base_request(cuisine_preference="French"))
+
+    assert result.status == "no_feasible_match"
+    assert llm.call_count == 2
+    assert "local_curated" in llm.requests[1].previous_action_error
+    assert "Allowed pantry canonical anchors" in llm.requests[1].previous_action_error
 
 
 async def test_local_curated_route_permitted_for_approved_desi_intent(price_db):
@@ -526,12 +540,28 @@ async def test_malicious_recipe_title_does_not_change_agent_policy_or_flow(price
 
 
 async def test_identical_search_strategy_cannot_be_repeated_without_transient_failure(price_db):
+    # PR #15 HTTP-500 fix (2026-09-09): the repeated-identical-strategy
+    # rejection is the same AgentUnsupportedActionError class as the
+    # anchor-grounding guard and must recover the same way -- corrective
+    # feedback, then a valid follow-up action, never an unhandled
+    # exception.
     provider = FakeRecipeProvider("recipeapi_io", searches=[ScriptedSearch(result=_search_result())])
-    llm = FakeLLMProvider([_search_action(["tomato"]), _search_action(["tomato"])])
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"]),
+            _search_action(["tomato"]),
+            _stop_action(StopReason.NO_MATERIALLY_DIFFERENT_STRATEGY_REMAINS),
+        ]
+    )
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
-    with pytest.raises(AgentUnsupportedActionError):
-        await orch.run(_base_request())
+    result = await orch.run(_base_request())
+
+    assert result.status == "no_feasible_match"
+    assert result.stop_reason == "no_materially_different_strategy_remains"
+    # Only the first (distinct) search ever reached the provider -- the
+    # repeated identical one was rejected before any provider call.
+    assert len(provider.search_calls) == 1
 
 
 # --- 21/22. deterministic ranker remains authoritative -------------------------
@@ -698,14 +728,109 @@ async def test_invented_non_pantry_anchor_is_rejected_before_any_provider_search
     reject this deterministically, before any provider call, rather
     than silently dropping/substituting the invalid anchor."""
 
-    provider = FakeRecipeProvider("recipeapi_io", searches=[])
-    llm = FakeLLMProvider([_search_action(["saffron"])])
+    # PR #15 HTTP-500 fix (2026-09-09): this rejection must recover via
+    # bounded corrective retry, never propagate as an unhandled
+    # exception (the exact live defect this fix addresses: proposing a
+    # broader/invented anchor like "lamb" or, here, "saffron", not
+    # present in the pantry). The corrective follow-up chooses a real
+    # grounded pantry anchor and succeeds.
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe}
+    )
+    llm = FakeLLMProvider(
+        [
+            _search_action(["saffron"]),
+            _search_action(["tomato"]),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
-    with pytest.raises(AgentUnsupportedActionError):
-        await orch.run(_base_request(pantry_raw=["tomato", "onion"]))
+    result = await orch.run(_base_request(pantry_raw=["tomato", "onion"]))
 
+    assert result.status == "completed"
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"
+    # The invalid anchor never reached the provider -- only the
+    # corrective, grounded "tomato" search did.
+    assert len(provider.search_calls) == 1
+    assert provider.search_calls[0].query_ingredients == ["tomato"]
+    feedback = llm.requests[1].previous_action_error
+    assert "saffron" in feedback
+    assert "not present in the user's pantry" in feedback
+    assert "onion" in feedback and "tomato" in feedback  # allowed pantry canonical anchors listed
+
+
+async def test_repeated_invalid_anchor_exhausts_correction_budget_and_stops_gracefully(price_db):
+    """Ticket-required regression: Claude repeating an invalid,
+    non-grounded anchor must gracefully stop once the bounded
+    corrective-action budget (MAX_UNSUPPORTED_ACTION_CORRECTIONS) is
+    exhausted -- never raise, and never loop forever. No valid search
+    ever executes, so the result is the normal no-candidates response."""
+
+    provider = FakeRecipeProvider("recipeapi_io", searches=[])
+    llm = FakeLLMProvider(
+        [_search_action(["saffron"]), _search_action(["saffron"]), _search_action(["saffron"])]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["tomato", "onion"]))
+
+    assert result.status == "no_feasible_match"
+    assert result.stop_reason == "unsupported_action_budget_exhausted"
+    assert result.recommendations == []
+    assert result.closest_alternatives == []
     assert provider.search_calls == []
+    assert llm.call_count == 3
+
+
+async def test_valid_candidates_survive_when_a_later_invalid_action_exhausts_budget(price_db):
+    """Ticket-required regression: already-collected valid candidates
+    must survive and be returned even when a LATER action in the same
+    run repeatedly fails grounding and exhausts the correction budget."""
+
+    recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe}
+    )
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"]),
+            _search_action(["saffron"]),
+            _search_action(["saffron"]),
+            _search_action(["saffron"]),
+        ]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["tomato", "onion"]))
+
+    assert result.status == "completed"
+    assert result.stop_reason == "unsupported_action_budget_exhausted"
+    assert [c.recipe_id for c in result.recommendations] == ["recipeapi_io:1"]
+
+
+async def test_true_internal_exception_still_propagates_and_is_not_swallowed(price_db):
+    """The new corrective-recovery path in AgentOrchestrator.run only
+    catches AgentUnsupportedActionError. A genuine internal defect (here,
+    a provider raising a raw, un-typed exception rather than a
+    RecipeProviderError) must still surface, never be silently absorbed
+    into a graceful stop."""
+
+    class BuggyProvider:
+        provider_name = "recipeapi_io"
+
+        async def search(self, strategy):
+            raise RuntimeError("unexpected internal bug, not a provider error")
+
+        async def get_details(self, provider_recipe_id):  # pragma: no cover
+            raise AssertionError("should not be called")
+
+    llm = FakeLLMProvider([_search_action(["tomato"])])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": BuggyProvider()}, PriceRepository(price_db))
+
+    with pytest.raises(RuntimeError, match="unexpected internal bug"):
+        await orch.run(_base_request())
 
 
 # --- independent review fix: cross-provider dedupe identity -------------------
@@ -1315,17 +1440,29 @@ async def test_same_anchors_with_enrich_free_text_toggled_is_not_treated_as_iden
 
 
 async def test_identical_anchors_and_enrich_free_text_is_still_rejected_as_identical(price_db):
+    # PR #15 HTTP-500 fix (2026-09-09): recovers via corrective retry
+    # rather than raising -- see
+    # test_identical_search_strategy_cannot_be_repeated_without_transient_failure
+    # for the dedicated graceful-recovery assertions.
     recipe = make_recipe(ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")])
     provider = FakeRecipeProvider(
         "recipeapi_io",
         searches=[ScriptedSearch(result=_search_result("1"))],
         details_by_id={"1": recipe},
     )
-    llm = FakeLLMProvider([_search_action(["tomato"]), _search_action(["tomato"])])
+    llm = FakeLLMProvider(
+        [
+            _search_action(["tomato"]),
+            _search_action(["tomato"]),
+            _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+        ]
+    )
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
-    with pytest.raises(AgentUnsupportedActionError):
-        await orch.run(_base_request())
+    result = await orch.run(_base_request())
+
+    assert result.status == "completed"
+    assert len(provider.search_calls) == 1
 
 
 # --- Priority-2: recipe_by_id / deterministic-pipeline agreement (PR #15 ------

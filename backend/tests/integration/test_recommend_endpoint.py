@@ -11,14 +11,18 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.agent.actions import ActionType, AgentAction, SearchArgs, SearchRoute, StopArgs, StopReason
 from app.agent.errors import AgentMalformedActionError
-from app.agent.orchestrator import AgentResult
+from app.agent.orchestrator import AgentOrchestrator, AgentResult
 from app.api.recommend import get_orchestrator
 from app.config import Settings, get_settings
 from app.domain.cost_engine import IngredientCostDetail, MissingIngredientBreakdown
-from app.domain.models import CandidateEvaluation, CostConfidence, Difficulty, Recipe, RejectionReason
+from app.domain.models import CandidateEvaluation, CostConfidence, Difficulty, Recipe, RejectionReason, RecipeIngredient
 from app.domain.serving_scaler import ScaledRecipe
 from app.main import app
+from app.repositories.price_repository import PriceRepository
+
+from tests.agent.conftest import FakeLLMProvider, FakeRecipeProvider, ScriptedSearch, make_recipe, price_db  # noqa: F401 -- fixture
 
 VALID_REQUEST = {
     "ingredients": ["chicken", "rice", "onion", "garlic"],
@@ -316,6 +320,99 @@ def test_agent_malformed_action_error_maps_to_503():
         response = client.post("/api/recommend", json=VALID_REQUEST)
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "AGENT_MALFORMED_ACTION"
+    finally:
+        _clear()
+
+
+def test_unsupported_action_error_still_gets_a_safe_structured_envelope_if_it_ever_leaked():
+    # Defense in depth only, NOT the ticket's normal-path fix: under the
+    # fixed orchestrator (see tests/agent/test_orchestrator_scenarios.py
+    # and test_invalid_grounded_anchor_rejection_recovers_and_returns_200_not_500
+    # below), AgentUnsupportedActionError is always caught and recovered
+    # from INSIDE AgentOrchestrator.run for every normal agent search
+    # path and never reaches this HTTP boundary. docs/API_INTEGRATION_
+    # STANDARDS.md section 11 reserves 500 for "unexpected internal
+    # failure" -- a leak here (the orchestration-level fix being bypassed
+    # or removed) is exactly that, so the mapping intentionally stays
+    # 500, unchanged by this ticket. What this test actually guards is
+    # that such a leak still returns PantryPilotError's SAFE structured
+    # envelope (typed code/message/retryable, no stack trace) rather
+    # than a raw unhandled crash -- confirming the existing global
+    # handler in app.main still applies to this error type.
+    from app.agent.errors import AgentUnsupportedActionError
+
+    _override(FakeOrchestrator(AgentUnsupportedActionError("search anchor 'lamb' is not present in the user's pantry")))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.status_code == 500
+        body = response.json()
+        assert body["error"]["code"] == "AGENT_UNSUPPORTED_ACTION"
+        assert "Traceback" not in response.text
+    finally:
+        _clear()
+
+
+def test_invalid_grounded_anchor_rejection_recovers_and_returns_200_not_500(price_db):
+    """End-to-end regression for the PR #15 live defect: Claude proposes
+    a search anchor broader than the user's actual pantry item (here,
+    "lamb" when the pantry only has "minced_lamb", mirroring the exact
+    live repro in the ticket). The deterministic grounding guard must
+    still reject it (never weakened), but the orchestrator must recover
+    via corrective retry and the API must return a normal 200 response
+    -- never the HTTP 500 this ticket fixes. Uses the REAL
+    AgentOrchestrator (not FakeOrchestrator) so the actual internal
+    recovery path in app.agent.orchestrator.run is exercised end to end
+    through the HTTP boundary."""
+
+    from app.recipe.provider import SearchResult, SearchResultItem
+
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Minced Lamb Kebabs",
+        prep_time_minutes=10, cook_time_minutes=20,
+        ingredients=[RecipeIngredient(raw_name="minced lamb", raw_measure="200 g")],
+    )
+    search_result = SearchResult(
+        items=[SearchResultItem(id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", name=recipe.name)],
+        page=1,
+        page_size=10,
+        has_more=False,
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=search_result)], details_by_id={"1": recipe}
+    )
+    llm = FakeLLMProvider(
+        [
+            AgentAction(
+                action_type=ActionType.SEARCH,
+                search=SearchArgs(route=SearchRoute.RECIPEAPI_IO, anchor_ingredients=["lamb"]),
+            ),
+            AgentAction(
+                action_type=ActionType.SEARCH,
+                search=SearchArgs(route=SearchRoute.RECIPEAPI_IO, anchor_ingredients=["minced lamb"]),
+            ),
+            AgentAction(
+                action_type=ActionType.STOP,
+                stop=StopArgs(reason=StopReason.SUFFICIENT_FEASIBLE_CANDIDATES),
+            ),
+        ]
+    )
+    orchestrator = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+    _override(orchestrator)
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/recommend",
+            json={"ingredients": ["minced lamb"], "servings": 4, "max_total_time_minutes": 45},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "completed"
+        assert body["recommendations"][0]["recipe_id"] == "recipeapi_io:1"
+        # The rejected "lamb" anchor never reached the provider -- only
+        # the corrective, grounded "minced lamb" search did.
+        assert len(provider.search_calls) == 1
+        assert provider.search_calls[0].query_ingredients == ["minced_lamb"]
     finally:
         _clear()
 

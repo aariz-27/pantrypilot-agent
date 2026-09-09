@@ -22,6 +22,19 @@ MAX_SEARCH_ATTEMPTS = 3
 MAX_EVALUATED_CANDIDATES = 20
 MAX_FINAL_RECOMMENDATIONS = 3
 MAX_CORRECTIVE_RETRIES_PER_STEP = 1
+# PR #15 HTTP-500 fix (2026-09-09): a structurally-valid action Python
+# rejects (AgentUnsupportedActionError -- e.g. a search anchor not
+# grounded in the user's pantry) never reaches _run_attempt, so it never
+# consumes a search attempt (MAX_SEARCH_ATTEMPTS) or an evaluated
+# candidate (MAX_EVALUATED_CANDIDATES). Without an independent bound the
+# agent could repeat invalid actions indefinitely. Distinct from
+# MAX_CORRECTIVE_RETRIES_PER_STEP, which only bounds a single decision
+# step's malformed/schema-invalid output -- this bounds the number of
+# structurally-valid-but-policy-rejected actions tolerated across the
+# WHOLE run before AgentOrchestrator.run gives up and finalizes
+# gracefully from whatever valid candidates already exist, rather than
+# ever propagating the rejection as an unhandled exception.
+MAX_UNSUPPORTED_ACTION_CORRECTIONS = 2
 
 
 @dataclass(frozen=True)
@@ -97,6 +110,12 @@ class AgentState:
     # already tried the broader term" instead of only "a broader term
     # exists", so it does not repeat the exact same broadening attempt.
     active_anchor_broadening_used: bool = False
+    # PR #15 HTTP-500 fix (2026-09-09): count of AgentUnsupportedActionError
+    # rejections recovered from so far this run (see AgentOrchestrator.run
+    # and MAX_UNSUPPORTED_ACTION_CORRECTIONS above). Monotonic, never
+    # decremented -- a bounded corrective-action budget, independent of
+    # search_attempts/evaluated_candidates.
+    unsupported_action_corrections: int = 0
 
     def record_progress(self, event: str) -> None:
         self.progress_events.append(event)

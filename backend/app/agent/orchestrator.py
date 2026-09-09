@@ -26,7 +26,13 @@ from app.agent.observations import (
     compute_anchor_stats,
 )
 from app.agent.policy import SYSTEM_POLICY
-from app.agent.state import MAX_CORRECTIVE_RETRIES_PER_STEP, MAX_FINAL_RECOMMENDATIONS, AgentState, SearchAttemptRecord
+from app.agent.state import (
+    MAX_CORRECTIVE_RETRIES_PER_STEP,
+    MAX_FINAL_RECOMMENDATIONS,
+    MAX_UNSUPPORTED_ACTION_CORRECTIONS,
+    AgentState,
+    SearchAttemptRecord,
+)
 from app.agent.tools import (
     TRANSIENT_ERROR_CATEGORIES,
     evaluate_and_rank,
@@ -128,6 +134,13 @@ class AgentOrchestrator:
             state.record_progress("stop: all pantry ingredients unresolved")
             return self._finalize(state, "input_makes_search_impossible")
 
+        # PR #15 HTTP-500 fix (2026-09-09): unsupported_action_feedback
+        # seeds the NEXT decision step with structured, deterministic
+        # corrective feedback whenever the immediately preceding action
+        # was rejected as AgentUnsupportedActionError below -- never a
+        # bare unhandled exception reaching the API layer. None on every
+        # other iteration.
+        unsupported_action_feedback: str | None = None
         while True:
             if state.attempts_exhausted():
                 state.record_progress("stop: search attempt limit reached")
@@ -136,21 +149,46 @@ class AgentOrchestrator:
                 state.record_progress("stop: evaluated-candidate cap reached")
                 return self._finalize(state, "candidate_cap_reached")
 
-            action = await self._decide_next_action(state)
+            action = await self._decide_next_action(state, unsupported_action_feedback)
+            unsupported_action_feedback = None
 
             if action.action_type == ActionType.STOP:
                 state.record_progress(f"stop: {action.stop.reason.value}")
                 return self._finalize(state, action.stop.reason.value)
 
-            if action.action_type == ActionType.SEARCH:
-                await self._handle_search(state, action.search, constraints)
-            elif action.action_type == ActionType.PAGINATE:
-                self._require_paginatable(state)
-                await self._run_attempt(state, state.last_attempt().route, self._next_page_strategy(state), constraints)
-            elif action.action_type == ActionType.RETRY:
-                self._require_retryable(state)
-                last = state.last_attempt()
-                await self._run_attempt(state, last.route, last.strategy, constraints)
+            try:
+                if action.action_type == ActionType.SEARCH:
+                    await self._handle_search(state, action.search, constraints)
+                elif action.action_type == ActionType.PAGINATE:
+                    self._require_paginatable(state)
+                    await self._run_attempt(
+                        state, state.last_attempt().route, self._next_page_strategy(state), constraints
+                    )
+                elif action.action_type == ActionType.RETRY:
+                    self._require_retryable(state)
+                    last = state.last_attempt()
+                    await self._run_attempt(state, last.route, last.strategy, constraints)
+            except AgentUnsupportedActionError as exc:
+                # The action was schema-valid (already past
+                # AgentAction.model_validate) but violates a bounded
+                # orchestration policy the schema alone cannot express --
+                # e.g. a search anchor not grounded in the user's actual
+                # pantry (never weakened here; _require_anchors_grounded_
+                # in_pantry is untouched and still rejects it exactly as
+                # before). This is an EXPECTED, bounded agent-action
+                # failure, not a fatal internal error -- it must recover,
+                # never propagate to the global HTTP handler as a 500.
+                state.unsupported_action_corrections += 1
+                state.record_progress(f"corrective: unsupported action rejected -- {exc.message}")
+                if state.unsupported_action_corrections > MAX_UNSUPPORTED_ACTION_CORRECTIONS:
+                    # Correction budget exhausted (or Claude keeps
+                    # repeating an invalid action) -- stop bounded
+                    # orchestration gracefully and finalize from whatever
+                    # valid candidates already exist, per the ticket's
+                    # required graceful-stop behavior.
+                    state.record_progress("stop: unsupported-action correction budget exhausted")
+                    return self._finalize(state, "unsupported_action_budget_exhausted")
+                unsupported_action_feedback = self._unsupported_action_feedback(state, exc)
 
     # -- setup -----------------------------------------------------------
 
@@ -183,13 +221,23 @@ class AgentOrchestrator:
 
     # -- decision step (LLM boundary) -------------------------------------
 
-    async def _decide_next_action(self, state: AgentState) -> AgentAction:
+    async def _decide_next_action(
+        self, state: AgentState, unsupported_action_feedback: str | None = None
+    ) -> AgentAction:
         request = LLMDecisionRequest(
             system_policy=SYSTEM_POLICY,
             action_schema=_ACTION_SCHEMA,
             observation=build_decision_payload(state),
         )
-        error_message: str | None = None
+        # Seeds the corrective feedback from a PRIOR step's rejected
+        # AgentUnsupportedActionError (ticket: HTTP-500 fix), if any --
+        # so the very first request of this decision step already tells
+        # Claude why its last action was rejected and what is actually
+        # allowed. Independent of, and composes with, the malformed-
+        # schema corrective retry loop below: if this same corrective
+        # response is itself malformed, that is still bounded by
+        # MAX_CORRECTIVE_RETRIES_PER_STEP as before.
+        error_message: str | None = unsupported_action_feedback
 
         for attempt in range(MAX_CORRECTIVE_RETRIES_PER_STEP + 1):
             step_request = request if error_message is None else LLMDecisionRequest(
@@ -266,6 +314,27 @@ class AgentOrchestrator:
                 )
             canonical_ids.append(result.canonical_id)
         return canonical_ids
+
+    def _unsupported_action_feedback(self, state: AgentState, exc: AgentUnsupportedActionError) -> str:
+        """Structured, deterministic corrective observation for a
+        rejected-but-structurally-valid action (ticket: HTTP-500 fix).
+        `exc.message` is always a pre-written, safe string (every
+        PantryPilotError subclass -- see app.domain.errors) that already
+        names the concrete proposed value and why it was rejected (e.g.
+        the invalid anchor and "not present in the user's pantry" for
+        the grounding guard). This always additionally names the full
+        set of grounded pantry canonical ids Claude may actually choose
+        from, so the next decision has everything it needs to
+        self-correct without ever inventing or broadening beyond the
+        user's real pantry -- this is feedback DATA, never an
+        instruction the model is trusted to enforce on its own; the
+        underlying guards remain the sole control."""
+
+        return (
+            f"{exc.message} Allowed pantry canonical anchors: {sorted(state.pantry_canonical)}. "
+            "Choose a new search using only these grounded anchors, or a valid "
+            "paginate/retry action for the immediately preceding attempt, or stop."
+        )
 
     async def _handle_search(self, state: AgentState, args: SearchArgs, constraints: UserConstraints) -> None:
         anchor_canonical_ids = self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
