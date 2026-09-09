@@ -1,28 +1,26 @@
 # PantryPilot Current Status
 
 ## Current Phase
-Application foundation implementation plus agent orchestration complete (deterministic core, grounded recipe retrieval, pricing/cost engine, and bounded LLM agent orchestrator all merged to `main`; frontend and deployment not started; `/api/recommend` end-to-end HTTP wiring not yet done)
+Application foundation, agent orchestration, and the user-facing API + frontend are all merged to `main` (deterministic core, grounded recipe retrieval, pricing/cost engine, bounded LLM agent orchestrator, `/api/recommend`/`/api/ingredients/suggest` HTTP wiring, and the React frontend). Module F (security, local persistence, and production hardening) is in progress on `feature/module-f-security-persistence`; deployment itself has not started.
 
 ## Module Status
 
 - **Module A** (Deterministic Core — PP-001): **COMPLETE**
 - **Module B** (Grounded Recipe Retrieval — PP-002): **COMPLETE**
 - **Module C** (Pricing / Cost Engine — PP-003 + follow-on gap-resolution work): **COMPLETE** (merged; G4 exit criteria technically satisfied — see `APPROVAL_GATES.md`; gate itself not self-declared COMPLETE, pending separate explicit Founder gate approval)
-- **Module D** (Agent Orchestration — M03, merged PR #11/#12): **COMPLETE** (implemented, reviewed, and integration-validated; not yet wired to an `/api/recommend` HTTP endpoint or a frontend — see PR #11/#12 notes below; G6 gate itself not yet self-declared COMPLETE, pending explicit Founder gate approval)
-- **Module E** (Frontend): NOT STARTED
-- **Module F** (Deployment): NOT STARTED
+- **Module D** (Agent Orchestration — M03, merged PR #11/#12): **COMPLETE** (implemented, reviewed, and integration-validated; wired to a live `/api/recommend` HTTP endpoint by Module E — see below; G6 gate itself not yet self-declared COMPLETE, pending explicit Founder gate approval)
+- **Module E** (User-facing API + React Frontend, merged PR #15): **COMPLETE** (this status correction was overdue — PR #15 merged 2026-09-09; see "Completed Tickets" below. This correction ships as part of Module F's preflight per Founder direction, since Module F's own preflight found the discrepancy)
+- **Module F** (Security, Persistence, Production Hardening): **IN PROGRESS** (branch `feature/module-f-security-persistence`, started from `main`@`52f840f`; deployment itself remains explicitly out of scope for this ticket)
 
 ## Current Gate
-G3 — Implementation Foundation Ready — IN PROGRESS (not COMPLETE)
-
-Backend scaffold exists, backend boots, `/api/health` works, baseline backend tests run, CI baseline passes. Remaining condition before G3 can be marked COMPLETE: the frontend does not yet exist (`frontend/` scaffold, frontend boot, frontend baseline checks per `APPROVAL_GATES.md` G3 exit criteria). G3 is left explicitly incomplete rather than forced complete.
+G3 — Implementation Foundation Ready — frontend scaffold, frontend boot, and frontend baseline checks now exist and pass (Module E, PR #15). The condition previously blocking G3 ("the frontend does not yet exist") no longer applies. G3 itself is not self-declared COMPLETE here — that determination is left to explicit Founder gate review, consistent with how G4/G6 are handled below — but the remaining blocking condition recorded against it is resolved.
 
 G4 (Core Deterministic Engine Ready): exit criteria are now technically satisfied by PP-003 (price repository + cost engine implemented, tested, and merged) — see `APPROVAL_GATES.md`; not self-declared COMPLETE, pending explicit Founder review/approval of the gate itself. G5 (Recipe Sources Ready) remains IN PROGRESS, blocked on DEC-012 (final curated dataset, still OPEN) — unaffected by PP-003.
 
-G6 (Agentic Business Path Ready): the M03 agent orchestrator is implemented and merged (PR #11), post-review-fixed (pantry-grounded search anchors, cross-provider dedupe identity, pantry context in the LLM payload), and integration-validated against Modules A-D together with a live full-pipeline smoke script (PR #12). DEC-010 (runtime LLM = Claude Sonnet 5) is APPROVED/CLOSED, satisfying G6's decision prerequisite. `APPROVAL_GATES.md` now reports G6 as EXIT CRITERIA TECHNICALLY SATISFIED — AWAITING FOUNDER REVIEW, mirroring how G4 is handled; not self-declared COMPLETE. Not yet done regardless of gate wording: no `/api/recommend` HTTP endpoint wiring, no frontend, so the agentic path is not reachable end-to-end from outside the backend test suite yet.
+G6 (Agentic Business Path Ready): the M03 agent orchestrator is implemented and merged (PR #11), post-review-fixed (pantry-grounded search anchors, cross-provider dedupe identity, pantry context in the LLM payload), and integration-validated against Modules A-D together with a live full-pipeline smoke script (PR #12). DEC-010 (runtime LLM = Claude Sonnet 5) is APPROVED/CLOSED, satisfying G6's decision prerequisite. Module E (PR #15) wired the orchestrator to a live `POST /api/recommend` endpoint and a real frontend, and live-verified it end-to-end against real Claude Sonnet 5 + real RecipeAPI.io + the real reference price DB. The condition previously left open ("no `/api/recommend` HTTP endpoint wiring, no frontend") no longer applies. G6 itself remains not self-declared COMPLETE, pending explicit Founder gate approval.
 
 ## Active Ticket
-None. PP-001, PP-002, PP-003, and the Module D agent orchestrator (plus several follow-on fix/audit/validation/docs PRs, #6-#13) have all been completed and merged (see "Completed Tickets" below). Awaiting Founder/Product Owner authorization of the next implementation ticket (e.g. `/api/recommend` wiring or the frontend scaffold).
+`MODULE-F` — Security, Persistence, and Production Hardening (branch `feature/module-f-security-persistence`, authorized by Founder, started from `main`@`52f840f`). See `docs/traceability/tickets/MODULE_F_SECURITY_PERSISTENCE.json`. PP-001, PP-002, PP-003, the Module D agent orchestrator, and Module E (user-facing API + frontend, PR #15) have all been completed and merged (see "Completed Tickets" below).
 
 ## Open Blockers
 None currently recorded
@@ -35,6 +33,18 @@ None currently recorded
 DEC-010 (Competition Runtime LLM) is **no longer open** — APPROVED/CLOSED via PR #13 (`docs/dec-010-close-competition-llm`): Claude Sonnet 5 / `AnthropicLLMProvider` is the frozen competition runtime path. See `DECISION_REGISTER.md`.
 
 ## Completed Tickets
+
+### Module E — User-Facing Recommendation API and React Frontend
+
+**Status:** Completed and merged
+**Merged PR:** #15 (`feat(module-e): user-facing recommendation API + React frontend`)
+**Final main merge commit:** `52f840f0851210e36c50834e437831c433e225c2`
+**Final verification:** 439 backend tests passed (61 new/changed), 59 frontend tests passed, governance validation PASS. Live end-to-end validation: one full run through the real `/api/recommend` endpoint against real Claude Sonnet 5 + real RecipeAPI.io + the real reference price DB, plus 2 earlier bounded live calls verifying RecipeAPI.io's `difficulty` field.
+**Backend additions:** `POST /api/recommend` and `GET /api/ingredients/suggest` (wiring the existing Module D orchestrator to a live HTTP contract per `TECHNICAL_SPEC.md` section 15); provider-grounded `Recipe.difficulty` typed enum (unrecognized/missing → `UNKNOWN`, never guessed); deterministic servings scaling (`app/domain/serving_scaler.py`, never fabricates an original serving count/quantity/unit conversion); deterministic ingredient-level cost breakdown; a new hard-difficulty constraint-evaluator rule (`allow_hard_difficulty`, default `False`, no LLM action-schema field can influence it); a global `PantryPilotError` → HTTP exception handler; a fixed `httpx.AsyncClient` resource leak in the RecipeAPI.io adapter.
+**Frontend (new):** React + Vite app — taxonomy-backed ingredient autocomplete with an explicit "use unrecognized term anyway" path, search form (required time/servings, optional budget/cuisine/exclusions), recipe cards + detail view, light/dark/system theming with `localStorage` persistence, responsive to 320px. A security finding (untrusted provider `image_url`/`source_url` reaching `<img src>`/`<a href>` without a scheme check) was found and fixed during the PR's own self-review (`safeHttpUrl`).
+**Requirements advanced:** builds on FR-07/FR-15/FR-17 (Module D) with live HTTP reachability; see `docs/REQUIREMENTS_TRACEABILITY.md` for the full requirement set touched (FR-01 through FR-05, FR-18 UI-layer requirements now have a real implementation surface for the first time).
+**Known intentional limitations / deferred scope (as merged):** no caching layer (M15); no public rate limiting (added later, in Module F); no browser screenshot verification at merge time (Playwright/Chromium sandbox limitation — verified instead via production build success, clean lint, 59 jsdom+Testing-Library tests, and a manual dev-server proxy check). Module F is the explicitly deferred next ticket for deployment hardening.
+**This entry was added retroactively** as part of Module F's preflight governance correction (2026-09-09) — `CURRENT_STATUS.md` had not been updated when PR #15 merged. See the Module F PR for the correction commit.
 
 ### Module D — Agent Orchestrator (M03) and Post-Merge Hardening
 
@@ -110,7 +120,9 @@ DEC-010 (Competition Runtime LLM) is **no longer open** — APPROVED/CLOSED via 
 ## Capability Maturity
 FOUNDATION_IMPLEMENTED
 
-Evidence: PP-001 delivered the technical scaffold and foundational deterministic infrastructure (FastAPI app, typed config, health endpoint, and the full normalization/matching/constraint/ranking core); PP-002 extended the foundation with grounded recipe retrieval (RecipeAPI.io adapter, LocalCuratedRecipeProvider foundation, provider-neutral mapping); PP-003 added a real grocery pricing ingestion pipeline, a read-only `PriceRepository`, and a deterministic `CostEngine` grounded in a real 2,699-product LuLu UAE export; the Module D agent orchestrator (M03, PR #11/#12) added a bounded LLM decision loop over the allow-listed tool layer, integration-validated end-to-end against Modules A-D via a live full-pipeline smoke script — all called for by the `FOUNDATION_IMPLEMENTED` definition in `docs/AI_DELIVERY_OPERATING_MODEL.md`. **This has not been re-assessed against `BUSINESS_PATH_IMPLEMENTED`'s exact criteria in this correction pass** (that determination was out of scope for this docs-only correction); at minimum, no `/api/recommend` HTTP route exposes the orchestrator and no frontend exists, so the recommendation path is not reachable end-to-end from outside the backend test suite yet.
+Evidence: PP-001 delivered the technical scaffold and foundational deterministic infrastructure (FastAPI app, typed config, health endpoint, and the full normalization/matching/constraint/ranking core); PP-002 extended the foundation with grounded recipe retrieval (RecipeAPI.io adapter, LocalCuratedRecipeProvider foundation, provider-neutral mapping); PP-003 added a real grocery pricing ingestion pipeline, a read-only `PriceRepository`, and a deterministic `CostEngine` grounded in a real 2,699-product LuLu UAE export; the Module D agent orchestrator (M03, PR #11/#12) added a bounded LLM decision loop over the allow-listed tool layer, integration-validated end-to-end against Modules A-D via a live full-pipeline smoke script; Module E (PR #15) then wired the orchestrator to a live `POST /api/recommend` HTTP endpoint and a real frontend, live-verified end-to-end against real Claude Sonnet 5 + RecipeAPI.io + the reference price DB — all called for by the `FOUNDATION_IMPLEMENTED` definition in `docs/AI_DELIVERY_OPERATING_MODEL.md`.
+
+**`BUSINESS_PATH_IMPLEMENTED` re-assessment is now overdue and unresolved.** The condition this document previously cited for staying at `FOUNDATION_IMPLEMENTED` ("no `/api/recommend` HTTP route exposes the orchestrator and no frontend exists") is no longer true as of Module E's merge — the recommendation path is now reachable end-to-end from a real browser. Whether this satisfies `BUSINESS_PATH_IMPLEMENTED`'s exact criteria in `docs/AI_DELIVERY_OPERATING_MODEL.md` has deliberately **not** been determined here: that document's full criteria were not re-read against the merged Module E code as part of this Module F preflight correction (doing so was out of scope for this docs-only correction pass, and Claude Code should not self-declare a capability-maturity promotion without that explicit check). Recommend the Founder or a dedicated docs-reconciliation ticket make this determination explicitly rather than defaulting either direction.
 
 ## ## Authoritative Source Documents
 
@@ -133,4 +145,4 @@ Where documents conflict, approved governance rules and explicit approved decisi
 - Pricing is based on local reference data, not live supermarket pricing
 
 ## Next Authorized Work
-None yet. Founder/Product Owner to authorize the next bounded implementation ticket (e.g. `/api/recommend` HTTP endpoint wiring for the now-merged Module D agent orchestrator, toward G3 completion via the frontend scaffold, or grocery taxonomy gap-fill). This document does not itself authorize or propose starting that work.
+`MODULE-F` (Security, Persistence, Production Hardening) is the currently authorized and in-progress ticket — see "Active Ticket" above. Deployment to Oracle Cloud remains explicitly out of scope for Module F and is not yet authorized. This document does not itself authorize or propose starting deployment work.

@@ -35,7 +35,7 @@ function Steps({ instructions }) {
   return <p className="recipe-detail__instructions">{instructions}</p>
 }
 
-export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved }) {
+export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved, saved, onToggleSaved }) {
   const titleId = useId()
   const dialogRef = useRef(null)
   const closeButtonRef = useRef(null)
@@ -172,11 +172,23 @@ export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved }
             <Steps instructions={card.instructions} />
           </div>
 
-          {sourceUrl ? (
-            <a href={sourceUrl} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>
-              View Original Recipe
-            </a>
-          ) : null}
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            {sourceUrl ? (
+              <a href={sourceUrl} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>
+                View Original Recipe
+              </a>
+            ) : null}
+            {onToggleSaved ? (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                aria-pressed={Boolean(saved)}
+                onClick={() => onToggleSaved(card)}
+              >
+                {saved ? '★ Saved' : '☆ Save recipe'}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

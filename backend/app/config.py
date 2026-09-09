@@ -36,14 +36,47 @@ class Settings(BaseSettings):
     # at runtime; never written by the live recommendation path.
     price_db_path: str = "data/pantrypilot.db"
 
+    # Module F 4.2: deterministic max request-body size, enforced
+    # before Pydantic validation or any agent/provider call (see
+    # app.middleware.request_size_limit). 16 KiB comfortably covers the
+    # largest structurally valid RecommendRequest (30 ingredients + 20
+    # exclusions at 80 chars each, plus the remaining scalar fields and
+    # JSON overhead is well under 8 KiB) while still bounding payload
+    # size against abuse.
+    max_request_body_bytes: int = 16384
+
+    # Module F 4.3: in-memory, per-client-IP rate limits (see
+    # app.rate_limit). Deliberately conservative but not so tight that
+    # normal interactive use (typing a search, retrying once) gets
+    # throttled. /recommend is stricter because each call can spend LLM
+    # + RecipeAPI.io quota; /ingredients/suggest is typed interactively
+    # so it gets a much higher ceiling.
+    rate_limit_recommend: str = "10/minute"
+    rate_limit_ingredients_suggest: str = "60/minute"
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _parse_allowed_origins(cls, value: object) -> list[str]:
         if value is None or value == "":
             return []
         if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value  # type: ignore[return-value]
+            parsed = [origin.strip() for origin in value.split(",") if origin.strip()]
+        else:
+            parsed = list(value)  # type: ignore[arg-type]
+        # Module F 4.4: reject a wildcard origin outright rather than
+        # silently accepting it. CORSMiddleware is configured with
+        # allow_credentials=True (app.main), and browsers already
+        # refuse "*" combined with credentialed requests -- so an
+        # ALLOWED_ORIGINS=* misconfiguration would silently break CORS
+        # for every real client rather than doing anything useful.
+        # Failing fast at startup is safer than a broken production CORS.
+        if "*" in parsed:
+            raise ValueError(
+                "ALLOWED_ORIGINS must not include '*' -- list explicit origins "
+                "(wildcard origins are never permitted, and are incompatible "
+                "with allow_credentials=True regardless)"
+            )
+        return parsed
 
     @property
     def llm_configured(self) -> bool:

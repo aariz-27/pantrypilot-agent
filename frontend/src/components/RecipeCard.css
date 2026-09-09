@@ -61,6 +61,18 @@
   border-radius: var(--radius-pill);
 }
 
+.recipe-card__saved-badge {
+  position: absolute;
+  bottom: var(--space-2);
+  right: var(--space-2);
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+}
+
 .recipe-card__body {
   padding: var(--space-4);
   display: flex;

@@ -10,7 +10,7 @@ export function CostLabel({ card }) {
   return <span className="recipe-card__cost">Est. additional cost: AED {card.estimated_additional_spend_aed.toFixed(2)}</span>
 }
 
-export function RecipeCard({ card, onOpen }) {
+export function RecipeCard({ card, onOpen, saved }) {
   const matchedCount = card.matched_ingredients.length
   const missingCount = card.missing_ingredients.length
   const matchPercent = Math.round(card.pantry_coverage * 100)
@@ -32,6 +32,14 @@ export function RecipeCard({ card, onOpen }) {
         <span className="badge badge-success recipe-card__match-badge">★ {matchPercent}% pantry match</span>
         {card.total_time_minutes !== null ? (
           <span className="recipe-card__time-badge">⏱ {card.total_time_minutes} min</span>
+        ) : null}
+        {/* Read-only indicator, not a control -- saving/unsaving only
+            happens from the detail view, so this never nests a second
+            interactive button inside the card's own button element. */}
+        {saved ? (
+          <span className="recipe-card__saved-badge" aria-label="Saved to your recipes">
+            ★ Saved
+          </span>
         ) : null}
       </div>
 

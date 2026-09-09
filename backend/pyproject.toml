@@ -12,8 +12,18 @@ dependencies = [
     "pydantic==2.13.5",
     "pydantic-settings>=2.6,<3",
     "uvicorn[standard]>=0.30,<1",
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.24,<1",
+    # MR-001 fix: pytest>=9.0.3 resolves PYSEC-2026-1845 / GHSA-6w46-j5rx-g56g
+    # / CVE-2025-71176 (predictable /tmp/pytest-of-{user} temp-directory
+    # path; genuinely exercised by this suite via the widely-used
+    # tmp_path fixture). pytest-asyncio must move to the 1.x line
+    # together with it -- 0.26.0 hard-conflicts with pytest 9 (its
+    # declared range only supports pytest<8.4-ish); 1.x's own declared
+    # range (pytest<10,>=8.4) is what makes this pair resolvable.
+    # Verified: 650/650 tests pass against this exact pair with no
+    # other transitive dependency changes. See
+    # docs/MASTER_REMEDIATION_REGISTER.md MR-001 (RE_VERIFIED).
+    "pytest>=9.0.3,<10",
+    "pytest-asyncio>=1.4,<2",
     "httpx>=0.27,<1",
     # Module D (M03 Agent Orchestrator): the approved runtime LLMProvider
     # adapter (app.integrations.llm_provider.AnthropicLLMProvider) is
@@ -22,6 +32,20 @@ dependencies = [
     # on the fake-client test path), so its absence never breaks unit
     # tests -- see app/integrations/llm_provider.py.
     "anthropic>=0.40,<1",
+    # Module F 4.3: in-memory rate limiting (app.rate_limit). Genuinely
+    # imported at runtime (app.main wires its exception handler), so it
+    # belongs in the main dependency list for the same reason noted
+    # above -- CI's plain `pip install .` must have it available.
+    "slowapi>=0.1.9,<1",
+]
+
+[project.optional-dependencies]
+# Dev/CI-only tooling, never imported by application code. Not
+# installed by CI's current `pip install .` step -- a Module F CI job
+# that runs pip-audit needs `pip install '.[dev]'` (or `pip install
+# pip-audit` directly) as a separate step.
+dev = [
+    "pip-audit>=2.7,<3",
 ]
 
 # NOTE: test tooling (pytest, httpx) is intentionally kept in the main

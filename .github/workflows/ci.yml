@@ -130,3 +130,50 @@ jobs:
       - name: Frontend not created yet
         if: steps.frontend_exists.outputs.exists == 'false'
         run: echo "Frontend scaffold not created yet. Skipping frontend checks."
+
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Secret-pattern scan
+        run: python scripts/scan_secrets.py
+
+      - name: Backend dependency audit (pip-audit)
+        working-directory: backend
+        run: |
+          # Upgrading setuptools/wheel too (not just pip) matters here:
+          # a fresh runner's bootstrap setuptools has had its own CVEs
+          # historically, and pip-audit scans the whole environment,
+          # not just this project's declared dependencies.
+          python -m pip install --upgrade pip setuptools wheel
+          pip install '.[dev]'
+          # MR-001 (PYSEC-2026-1845 / GHSA-6w46-j5rx-g56g / CVE-2025-71176)
+          # is fixed -- pytest>=9.0.3 + pytest-asyncio>=1.4 (see
+          # backend/pyproject.toml). No ignore needed; a clean pip-audit
+          # is now expected. See docs/MASTER_REMEDIATION_REGISTER.md
+          # MR-001 (RE_VERIFIED).
+          pip-audit
+
+      - name: Frontend dependency audit (npm audit)
+        working-directory: frontend
+        run: |
+          if [ -f "package.json" ]; then
+            npm install
+            npm audit --audit-level=high
+          else
+            echo "Frontend scaffold not created yet. Skipping npm audit."
+          fi
