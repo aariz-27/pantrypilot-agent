@@ -62,6 +62,29 @@ class SearchArgs(BaseModel):
     route: SearchRoute
     anchor_ingredients: list[str] = Field(min_length=1, max_length=4)
     cuisine: str | None = Field(default=None, max_length=50)
+    # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08):
+    # opt-in only. RecipeAPI.io's `ingredients` filter can silently miss
+    # relevant recipes for some well-represented pantry terms; setting
+    # this true adds one extra free-text-search request to merge in
+    # results the primary query may have missed. Only set this when the
+    # PREVIOUS observation for this same route showed weak deterministic
+    # evidence (poor_pantry_overlap or zero feasible candidates) -- never
+    # as a default/blanket choice, since it doubles this search's
+    # RecipeAPI.io request cost.
+    enrich_free_text: bool = False
+    # PR #15 fourth correction pass (2026-09-08, Blocker 2): opt-in
+    # request to use a REVIEWED broader provider-search term for the
+    # primary anchor when one exists (e.g. searching "rice" instead of
+    # "basmati_rice") -- costs no extra request, only changes the query
+    # TEXT. Has no effect at all for an anchor with no reviewed mapping
+    # (e.g. chicken_wings never broadens to chicken -- there is no such
+    # entry). Never changes canonical matching/scoring, which always
+    # uses the exact canonical id regardless of this flag. Set this only
+    # when the observation shows the current anchor already has few
+    # same-anchor candidates and a reviewed broader term is available
+    # (state_summary.provider_broadening_available) -- never as a
+    # default choice.
+    broaden_provider_search: bool = False
     rationale_category: RationaleCategory | None = None
 
     @field_validator("anchor_ingredients")

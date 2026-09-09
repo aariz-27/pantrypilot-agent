@@ -215,8 +215,36 @@ async def test_provider_specific_raw_fields_do_not_leak_into_recipe():
     adapter = make_adapter(json_response(200, payload))
     recipe = await adapter.get_details("1")
     dumped = recipe.model_dump()
-    for leaked_field in ("difficulty", "calories_per_serving", "protein", "dietary_tags"):
+    # difficulty is now an intentional, first-class, typed Recipe field
+    # (Module E) -- it is deliberately mapped, not leaked raw. Only the
+    # remaining genuinely provider-specific fields must never appear.
+    for leaked_field in ("calories_per_serving", "protein", "dietary_tags"):
         assert leaked_field not in dumped
+
+
+@pytest.mark.parametrize(
+    "raw_difficulty,expected",
+    [
+        ("easy", "easy"),
+        ("Medium", "medium"),
+        ("HARD", "hard"),
+        ("expert", "unknown"),  # unrecognized value never guessed
+        (None, "unknown"),
+        (42, "unknown"),  # wrong type never guessed
+    ],
+)
+async def test_difficulty_is_mapped_case_insensitively_with_unknown_fallback(raw_difficulty, expected):
+    payload = {"data": {"id": 1, "name": "Test", "instructions": "Do it.", "difficulty": raw_difficulty}}
+    adapter = make_adapter(json_response(200, payload))
+    recipe = await adapter.get_details("1")
+    assert recipe.difficulty.value == expected
+
+
+async def test_missing_difficulty_field_entirely_is_unknown():
+    payload = {"data": {"id": 1, "name": "Test", "instructions": "Do it."}}
+    adapter = make_adapter(json_response(200, payload))
+    recipe = await adapter.get_details("1")
+    assert recipe.difficulty.value == "unknown"
 
 
 # --- malformed responses ------------------------------------------------------------
@@ -351,7 +379,11 @@ async def test_timeout_then_retry_succeeds_returns_result():
     adapter = make_adapter(handler, max_retries=1)
     result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
     assert result.items == []
-    assert len(calls) == 2  # initial failed attempt + one successful retry
+    # initial failed attempt + one successful retry for the primary
+    # query. Free-text enrichment is opt-in (enrich_free_text=False by
+    # default, PR #15 correction pass, 2026-09-08) and was not
+    # requested here, so no third call is made.
+    assert len(calls) == 2
 
 
 async def test_server_error_then_retry_succeeds_returns_result():
@@ -366,6 +398,7 @@ async def test_server_error_then_retry_succeeds_returns_result():
     adapter = make_adapter(handler, max_retries=1)
     result = await adapter.search(SearchStrategy(query_ingredients=["rice"]))
     assert result.items == []
+    # See test_timeout_then_retry_succeeds_returns_result above.
     assert len(calls) == 2
 
 
@@ -476,6 +509,239 @@ async def test_search_lowercases_cuisine_for_provider_enum_compatibility():
     assert captured["cuisine"] == "italian"
 
 
+# --- free-text search enrichment (retrieval fix 2026-09-08; made opt-in ------------
+# in the PR #15 correction pass, same date)
+#
+# Live investigation (PR #15 browser review) found RecipeAPI.io's
+# `ingredients` filter can silently contribute zero relevance signal for
+# a real, well-represented ingredient term (confirmed for "chicken_wings":
+# `ingredients=chicken_wings,garlic` returned a result set byte-identical
+# to `ingredients=garlic` alone), while its `search` free-text field finds
+# directly relevant recipes for the same concept. The merge behavior
+# itself (interleave, dedupe, page_size cap, graceful degrade-on-failure)
+# is unchanged; it now only runs when the caller sets
+# SearchStrategy.enrich_free_text=True (Priority-1 efficiency fix: this
+# used to double every non-empty-ingredients search's RecipeAPI.io
+# request cost unconditionally).
+
+
+async def test_search_enrichment_does_not_run_by_default():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_params.append(dict(request.url.params))
+        return httpx.Response(
+            200,
+            json={"data": [{"id": 1, "name": "Primary Match"}], "meta": {"current_page": 1, "last_page": 1}},
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken_wings", "garlic"]))
+
+    assert len(call_params) == 1
+    assert [item.name for item in result.items] == ["Primary Match"]
+
+
+async def test_search_merges_free_text_enrichment_results_when_requested():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        call_params.append(params)
+        if "search" in params:
+            return httpx.Response(
+                200,
+                json={"data": [{"id": 9, "name": "Enriched Match"}], "meta": {"current_page": 1, "last_page": 1}},
+            )
+        return httpx.Response(
+            200,
+            json={"data": [{"id": 1, "name": "Primary Match"}], "meta": {"current_page": 1, "last_page": 1}},
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(
+        SearchStrategy(query_ingredients=["chicken_wings", "garlic"], enrich_free_text=True)
+    )
+
+    assert len(call_params) == 2
+    assert call_params[0]["ingredients"] == "chicken_wings,garlic"
+    assert "search" not in call_params[0]
+    assert call_params[1]["ingredients"] == "chicken_wings,garlic"  # kept, not replaced
+    assert call_params[1]["search"] == "chicken wings"  # primary anchor, humanized
+
+    names = {item.name for item in result.items}
+    assert names == {"Primary Match", "Enriched Match"}
+
+
+async def test_search_enrichment_never_runs_without_query_ingredients_even_if_requested():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_params.append(dict(request.url.params))
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(cuisine="Italian", enrich_free_text=True))
+
+    assert len(call_params) == 1
+
+
+async def test_search_enrichment_results_are_deduped_against_primary():
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Both the primary and enriched calls return the exact same
+        # recipe -- it must appear only once in the merged result.
+        return httpx.Response(
+            200, json={"data": [{"id": 1, "name": "Same Recipe"}], "meta": {"current_page": 1, "last_page": 1}}
+        )
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], enrich_free_text=True))
+
+    assert [item.provider_recipe_id for item in result.items] == ["1"]
+
+
+async def test_search_enrichment_survives_a_full_primary_page():
+    # Regression for a real bug found during implementation: naively
+    # concatenating primary-then-enriched before truncating to
+    # page_size silently discarded every enriched item whenever the
+    # primary query alone already filled a full page (the common case).
+    # Interleaving must guarantee enriched items still get a slot.
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "search" in dict(request.url.params):
+            data = [{"id": 999, "name": "Enriched Only Match"}]
+        else:
+            # Primary already returns a full page on its own.
+            data = [{"id": i, "name": f"Primary {i}"} for i in range(1, 11)]
+        return httpx.Response(200, json={"data": data, "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(
+        SearchStrategy(query_ingredients=["chicken_wings"], page_size=10, enrich_free_text=True)
+    )
+
+    names = {item.name for item in result.items}
+    assert "Enriched Only Match" in names
+    assert len(result.items) == 10
+
+
+async def test_search_enrichment_result_is_capped_at_page_size():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "search" in dict(request.url.params):
+            data = [{"id": i, "name": f"Enriched {i}"} for i in range(100, 110)]
+        else:
+            data = [{"id": i, "name": f"Primary {i}"} for i in range(1, 11)]
+        return httpx.Response(200, json={"data": data, "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], page_size=10, enrich_free_text=True))
+
+    assert len(result.items) == 10
+
+
+async def test_search_enrichment_failure_never_fails_a_successful_primary_search():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "search" in dict(request.url.params):
+            raise httpx.ConnectError("simulated enrichment failure", request=request)
+        return httpx.Response(
+            200, json={"data": [{"id": 1, "name": "Primary Match"}], "meta": {"current_page": 1, "last_page": 1}}
+        )
+
+    adapter = make_adapter(handler, max_retries=0)
+    result = await adapter.search(SearchStrategy(query_ingredients=["onion"], enrich_free_text=True))
+
+    assert [item.name for item in result.items] == ["Primary Match"]
+
+
+async def test_search_enrichment_uses_only_the_primary_anchor_not_all_anchors():
+    # Live-confirmed: joining every anchor into one `search` phrase
+    # reliably returns zero results (the field behaves like a short
+    # phrase match, not a bag-of-words match) -- only the first anchor
+    # is ever used for the enrichment pass.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        if "search" in params:
+            captured["search"] = params["search"]
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(
+        SearchStrategy(query_ingredients=["chicken_wings", "garlic", "ketchup"], enrich_free_text=True)
+    )
+
+    assert captured["search"] == "chicken wings"
+
+
+# --- full recipe from list response, no separate detail fetch needed (Priority-1) ---
+#
+# Live investigation (2026-09-08) found RecipeAPI.io's /recipes
+# (search/list) response items already carry the exact same
+# ingredients/instructions/difficulty/servings/timing fields as a
+# /recipes/{id} detail response, not a lightweight stub. When present,
+# app.agent.tools.fetch_recipe_details uses this directly and skips the
+# get_details() round trip for that candidate.
+
+_FULL_LIST_ITEM = {
+    "id": 42,
+    "name": "Chicken Biryani",
+    "cuisine": "Indian",
+    "meal_type": "main",
+    "difficulty": "medium",
+    "servings": 4,
+    "prep_time": 20,
+    "cook_time": 45,
+    "instructions": ["Marinate chicken.", "Cook rice."],
+    "ingredients": [
+        {"id": 1, "name": "chicken", "category": "meat", "quantity": 500, "unit": "g", "optional": False},
+    ],
+}
+
+
+async def test_search_item_carries_full_recipe_when_list_response_is_complete():
+    payload = {"data": [_FULL_LIST_ITEM], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    item = result.items[0]
+    assert item.full_recipe is not None
+    assert item.full_recipe.name == "Chicken Biryani"
+    assert item.full_recipe.ingredients[0].raw_name == "chicken"
+    assert item.full_recipe.instructions == "Marinate chicken.\nCook rice."
+
+
+async def test_search_item_full_recipe_is_none_when_ingredients_missing():
+    thin_item = {"id": 1, "name": "Thin Listing"}
+    payload = {"data": [thin_item], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    assert result.items[0].full_recipe is None
+
+
+async def test_search_item_full_recipe_is_none_when_instructions_missing():
+    item = {**_FULL_LIST_ITEM, "instructions": []}
+    payload = {"data": [item], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    assert result.items[0].full_recipe is None
+
+
+async def test_search_item_full_recipe_skips_malformed_ingredient_entries_without_crashing():
+    # A malformed nested ingredient entry (not a dict) must never crash
+    # the whole search -- app._map_ingredient already skips it, exactly
+    # as the existing get_details() path does; full_recipe is still
+    # populated from whatever ingredients validly mapped.
+    item = {**_FULL_LIST_ITEM, "ingredients": [_FULL_LIST_ITEM["ingredients"][0], "not-a-dict"]}
+    payload = {"data": [item], "meta": {"current_page": 1, "last_page": 1}}
+    adapter = make_adapter(json_response(200, payload))
+    result = await adapter.search(SearchStrategy(query_ingredients=["chicken"]))
+
+    assert result.items[0].full_recipe is not None
+    assert len(result.items[0].full_recipe.ingredients) == 1
+
+
 # --- secret non-leakage ---------------------------------------------------------------
 
 
@@ -525,3 +791,143 @@ async def test_aclose_does_not_close_an_injected_client():
     await adapter.aclose()
     assert injected_client.is_closed is False
     await injected_client.aclose()
+
+
+# --- Blocker 2 / product decision: canonical identity vs provider-search -----
+# wording (PR #15 fourth + fifth correction passes, 2026-09-08). The fifth
+# pass removed specific-ingredient-to-broader-category broadening
+# (basmati_rice/jasmine_rice/white_rice -> "rice") after live validation
+# found it actively counterproductive -- it inflated result COUNT while
+# destroying result RELEVANCE (the extra results were overwhelmingly a
+# different rice form/preparation, not basmati rice). Only a true
+# lexical/synonym rewording (minced_beef -> "ground beef", the SAME
+# ingredient under a different common name) remains.
+
+
+async def test_basmati_rice_provider_search_never_broadens_to_generic_rice():
+    # Product decision (fifth correction pass): a SPECIFIC rice variety
+    # must never broaden to the generic parent category "rice", even
+    # when broadening is explicitly requested -- basmati_rice has no
+    # entry in PROVIDER_SEARCH_TERM_OVERRIDES, so this is a no-op
+    # regardless of the flag.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["basmati_rice"], broaden_provider_search=True))
+    assert captured["ingredients"] == "basmati_rice"
+
+
+async def test_jasmine_rice_provider_search_never_broadens_to_generic_rice():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["jasmine_rice"], broaden_provider_search=True))
+    assert captured["ingredients"] == "jasmine_rice"
+
+
+async def test_white_rice_provider_search_never_broadens_to_generic_rice():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["white_rice"], broaden_provider_search=True))
+    assert captured["ingredients"] == "white_rice"
+
+
+async def test_lamb_cubes_provider_search_never_broadens_to_generic_lamb():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["lamb_cubes"], broaden_provider_search=True))
+    assert captured["ingredients"] == "lamb_cubes"
+
+
+async def test_chicken_wings_never_broadens_to_generic_chicken():
+    # Blocker 2 safety rule: a specific animal cut must never broaden to
+    # its generic parent, even when broadening is explicitly requested --
+    # chicken_wings has no entry in PROVIDER_SEARCH_TERM_OVERRIDES, so
+    # this is a no-op regardless of the flag.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["chicken_wings"], broaden_provider_search=True))
+    assert captured["ingredients"] == "chicken_wings"
+    assert "chicken" != captured["ingredients"]
+
+
+async def test_minced_beef_provider_search_broadens_to_ground_beef_lexical_synonym():
+    # The one retained mapping: a true lexical/synonym rewording of the
+    # exact same ingredient, not a category change.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["minced_beef"], broaden_provider_search=True))
+    assert captured["ingredients"] == "ground beef"
+
+
+async def test_minced_beef_provider_search_stays_exact_when_broadening_not_requested():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(SearchStrategy(query_ingredients=["minced_beef"], broaden_provider_search=False))
+    assert captured["ingredients"] == "minced_beef"
+
+
+async def test_provider_search_broadening_only_affects_ids_with_a_reviewed_lexical_override():
+    # A multi-anchor query broadens only the anchor with a reviewed
+    # LEXICAL entry -- a specific-category id (basmati_rice) passes
+    # through unchanged even when broadening is requested.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["ingredients"] = request.url.params.get("ingredients")
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(
+        SearchStrategy(query_ingredients=["basmati_rice", "minced_beef"], broaden_provider_search=True)
+    )
+    assert captured["ingredients"] == "basmati_rice,ground beef"
+
+
+async def test_provider_search_broadening_applies_to_free_text_enrichment_term_too():
+    call_params = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        call_params.append(params)
+        return httpx.Response(200, json={"data": [], "meta": {"current_page": 1, "last_page": 1}})
+
+    adapter = make_adapter(handler)
+    await adapter.search(
+        SearchStrategy(query_ingredients=["minced_beef"], enrich_free_text=True, broaden_provider_search=True)
+    )
+    assert call_params[0]["ingredients"] == "ground beef"
+    assert call_params[1]["search"] == "ground beef"

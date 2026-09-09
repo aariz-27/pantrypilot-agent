@@ -2,6 +2,7 @@ from app.domain.constraint_evaluator import evaluate_constraints
 from app.domain.models import (
     CostConfidence,
     CostEvaluation,
+    Difficulty,
     Recipe,
     RecipeIngredient,
     RejectionReason,
@@ -29,6 +30,27 @@ def test_passing_recipe_has_no_rejection_reasons():
     result = evaluate_constraints(make_recipe(), UserConstraints())
     assert result.hard_constraint_pass is True
     assert result.rejection_reasons == ()
+
+
+def test_hard_difficulty_excluded_by_default():
+    recipe = make_recipe(difficulty=Difficulty.HARD)
+    result = evaluate_constraints(recipe, UserConstraints())
+    assert result.hard_constraint_pass is False
+    assert RejectionReason.HARD_DIFFICULTY_EXCLUDED in result.rejection_reasons
+
+
+def test_hard_difficulty_allowed_when_opted_in():
+    recipe = make_recipe(difficulty=Difficulty.HARD)
+    result = evaluate_constraints(recipe, UserConstraints(allow_hard_difficulty=True))
+    assert result.hard_constraint_pass is True
+    assert RejectionReason.HARD_DIFFICULTY_EXCLUDED not in result.rejection_reasons
+
+
+def test_easy_and_medium_and_unknown_difficulty_never_excluded_by_default():
+    for difficulty in (Difficulty.EASY, Difficulty.MEDIUM, Difficulty.UNKNOWN):
+        recipe = make_recipe(difficulty=difficulty)
+        result = evaluate_constraints(recipe, UserConstraints())
+        assert RejectionReason.HARD_DIFFICULTY_EXCLUDED not in result.rejection_reasons
 
 
 def test_excluded_ingredient_present():

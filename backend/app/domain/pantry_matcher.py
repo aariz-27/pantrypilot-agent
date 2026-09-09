@@ -23,7 +23,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.canonical_ingredients import OTHER_REQUIREMENT_IDS
+# PR #15 non-food wiring fix (2026-09-09): imports from
+# app.domain.grocery_taxonomy, not app.domain.canonical_ingredients --
+# grocery_taxonomy is the vocabulary every real production normalization
+# call site actually uses (see its own OTHER_REQUIREMENT_IDS docstring),
+# so this default must reference the SAME ids a recipe ingredient can
+# actually resolve to, or "other requirement" exclusion here would filter
+# against ids that could never appear in practice.
+from app.domain.grocery_taxonomy import OTHER_REQUIREMENT_IDS
 from app.domain.models import RecipeIngredient
 
 

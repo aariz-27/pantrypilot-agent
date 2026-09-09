@@ -26,6 +26,14 @@ in this same ticket):
   quantity, unit, optional}). image_url/source_url are NOT documented
   as existing fields -- this adapter never fabricates them and only
   uses them if actually present in a response.
+- Module E live verification (2026-09-08, 2 bounded live calls -- 1
+  search, 1 detail): `difficulty` IS present with real lowercase string
+  values ("medium", "hard" observed; "easy" also a documented/expected
+  value) -- mapped via app.domain.models.Difficulty.from_raw(), which
+  falls back to UNKNOWN for anything unrecognized or absent, never
+  guessed. `image_url`/`source_url` were `null` on every real response
+  observed, confirming the frontend's "no image available"/omit-
+  source-link fallback paths are load-bearing, not theoretical.
 
 UNCONFIRMED pending the live smoke test in this ticket: the exact query
 parameter name for cuisine filtering (the provider's own "Query
@@ -49,15 +57,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from itertools import zip_longest
 
 import httpx
 
 from app.config import Settings
 from app.domain.errors import InvalidInputError
-from app.domain.models import NormalizationStatus, Recipe, RecipeIngredient
+from app.domain.models import Difficulty, NormalizationStatus, Recipe, RecipeIngredient
 from app.domain.provider_errors import (
     RecipeNotFoundError,
     RecipeProviderConfigurationError,
+    RecipeProviderError,
     RecipeProviderMalformedResponseError,
     RecipeProviderRateLimitedError,
     RecipeProviderTimeoutError,
@@ -66,6 +76,7 @@ from app.domain.provider_errors import (
 from app.recipe.mapping import build_recipe_id, require_usable_identity
 from app.recipe.provider import (
     MAX_PAGE_SIZE,
+    PROVIDER_SEARCH_TERM_OVERRIDES,
     SearchResult,
     SearchResultItem,
     SearchStrategy,
@@ -93,6 +104,7 @@ class RecipeAPIIOAdapter:
     # deterministic termination, or the approved timeout ceiling.
     MAX_TIMEOUT_SECONDS = 5.0
     ALLOWED_MAX_RETRIES = (0, 1)
+
 
     def __init__(
         self,
@@ -209,14 +221,28 @@ class RecipeAPIIOAdapter:
             f"RecipeAPI.io returned unexpected status {response.status_code} for {path}"
         )
 
-    async def search(self, strategy: SearchStrategy) -> SearchResult:
+    def _provider_search_term(self, canonical_id: str, *, broaden: bool) -> str:
+        """Resolves ONE anchor's canonical id to the text actually sent
+        to RecipeAPI.io. A no-op (returns canonical_id unchanged) unless
+        broadening was explicitly requested AND a reviewed override
+        exists for this exact id -- see PROVIDER_SEARCH_TERM_OVERRIDES."""
+
+        if broaden and canonical_id in PROVIDER_SEARCH_TERM_OVERRIDES:
+            return PROVIDER_SEARCH_TERM_OVERRIDES[canonical_id]
+        return canonical_id
+
+    def _build_search_params(self, strategy: SearchStrategy) -> dict[str, object]:
         params: dict[str, object] = {
             "page": strategy.page,
             "per_page": min(strategy.page_size, MAX_PAGE_SIZE),
             "lang": "en",
         }
         if strategy.query_ingredients:
-            params["ingredients"] = ",".join(strategy.query_ingredients)
+            terms = [
+                self._provider_search_term(cid, broaden=strategy.broaden_provider_search)
+                for cid in strategy.query_ingredients
+            ]
+            params["ingredients"] = ",".join(terms)
         if strategy.cuisine:
             # Live smoke test (2026-09-05) found the provider's cuisine
             # enum values are lowercase (observed "french", "american" in
@@ -227,9 +253,103 @@ class RecipeAPIIOAdapter:
             params["cuisine"] = strategy.cuisine.strip().lower()
         if strategy.max_prep_time_minutes is not None:
             params["max_prep_time"] = strategy.max_prep_time_minutes
+        return params
 
+    async def search(self, strategy: SearchStrategy) -> SearchResult:
+        params = self._build_search_params(strategy)
         payload = await self._request("GET", "/recipes", params=params)
-        return self._map_search_response(payload, strategy)
+        result = self._map_search_response(payload, strategy)
+
+        # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08):
+        # the free-text enrichment pass below used to run unconditionally
+        # whenever query_ingredients was non-empty, doubling RecipeAPI.io
+        # request volume on every search regardless of whether the
+        # primary query already worked. It is now strictly opt-in via
+        # strategy.enrich_free_text, set by the agent orchestrator only
+        # when a prior attempt's deterministic evidence indicated the
+        # `ingredients` filter under-represented the pantry (see
+        # app.agent.policy.SYSTEM_POLICY and AgentOrchestrator._run_attempt).
+        if not strategy.query_ingredients or not strategy.enrich_free_text:
+            return result
+        return await self.enrich_with_free_text_search(strategy, result)
+
+    async def enrich_with_free_text_search(
+        self, strategy: SearchStrategy, primary_result: SearchResult
+    ) -> SearchResult:
+        """Retrieval-quality fix (PR #15 browser review, 2026-09-08).
+
+        Live investigation (real RecipeAPI.io calls, not assumed) found
+        that the documented `ingredients` filter can silently contribute
+        ZERO relevance signal for a real, well-represented canonical
+        ingredient term -- confirmed for "chicken_wings": querying
+        `ingredients=chicken_wings,garlic` returns a result set BYTE-
+        IDENTICAL to `ingredients=garlic` alone, even though RecipeAPI.io's
+        own `search` (free-text) field finds many directly relevant
+        "Chicken Wings ..." recipes for the same pantry intent. This is
+        a provider-side `ingredients`-matching gap, not specific to any
+        one ingredient -- confirmed generally by combining `ingredients`
+        (unchanged) with `search` set to the primary (first) anchor,
+        which reliably surfaced the missing recipes without narrowing
+        other already-working queries to zero (joining ALL anchors into
+        one `search` phrase was also tried live and reliably returned
+        zero -- the field appears to require a short, phrase-like query,
+        not a bag of unrelated words -- so only the single primary
+        anchor is ever used here).
+
+        Public (not merged into `search()` unconditionally, PR #15
+        correction pass): the orchestrator calls this explicitly, only
+        when the agent requests it, exactly once per attempt. MERGES the
+        free-text results into the primary result set (deduped by
+        provider identity, primary result first) rather than replacing
+        it -- this can only ever add candidates the primary query
+        missed, never remove or bias away from what already worked.
+        Bounded exactly like the primary call (same page_size cap,
+        same per-request timeout/retry policy).
+        """
+
+        # PR #15 fourth correction pass (2026-09-08, Blocker 2): the
+        # free-text phrase uses the same broadened term as the primary
+        # `ingredients` filter when broadening was requested and a
+        # reviewed override exists (e.g. "rice" instead of "basmati
+        # rice") -- consistent broadening across both retrieval paths,
+        # still zero extra requests (this is still exactly one
+        # additional call, unchanged from before this pass).
+        primary_anchor = self._provider_search_term(
+            strategy.query_ingredients[0], broaden=strategy.broaden_provider_search
+        ).replace("_", " ").strip()
+        if not primary_anchor:
+            return primary_result
+
+        enriched_params = self._build_search_params(strategy)
+        enriched_params["search"] = primary_anchor
+        try:
+            enriched_payload = await self._request("GET", "/recipes", params=enriched_params)
+        except RecipeProviderError:
+            # The enrichment pass is a bonus signal, not the source of
+            # truth -- a failure here must never fail (or even taint)
+            # the already-successful primary search.
+            return primary_result
+        enriched_result = self._map_search_response(enriched_payload, strategy)
+
+        # Bug found during implementation (2026-09-08): concatenating
+        # primary-then-enriched before truncating to page_size silently
+        # discarded every enriched item whenever the primary query
+        # already filled a full page (the common case -- RecipeAPI.io
+        # typically returns exactly page_size items), completely
+        # defeating the fix it was meant to be. Interleaving instead
+        # guarantees both sources get a fair share of the page_size
+        # slots regardless of which one happens to be "full".
+        interleaved: list = []
+        for pair in zip_longest(primary_result.items, enriched_result.items):
+            interleaved.extend(item for item in pair if item is not None)
+        merged_items = dedupe_search_results(interleaved)
+
+        return SearchResult(
+            items=merged_items[: strategy.page_size],
+            page=strategy.page,
+            page_size=strategy.page_size,
+            has_more=primary_result.has_more or enriched_result.has_more,
+        )
 
     async def get_details(self, provider_recipe_id: str) -> Recipe:
         payload = await self._request("GET", f"/recipes/{provider_recipe_id}")
@@ -283,7 +403,42 @@ class RecipeAPIIOAdapter:
             name=name.strip(),
             image_url=raw.get("image_url") if isinstance(raw.get("image_url"), str) else None,
             cuisine=raw.get("cuisine") if isinstance(raw.get("cuisine"), str) else None,
+            full_recipe=self._try_map_full_recipe_from_list_item(raw),
         )
+
+    def _try_map_full_recipe_from_list_item(self, raw: dict) -> Recipe | None:
+        """Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08).
+
+        Live investigation (real RecipeAPI.io calls, not assumed) found
+        that /recipes (search/list) items are NOT lightweight stubs --
+        confirmed live to already carry the exact same ingredients/
+        instructions/difficulty/servings/timing fields as a /recipes/{id}
+        detail response. Reusing _map_recipe here (the same mapping
+        already proven for detail responses) means a candidate whose
+        list item already has real ingredients+instructions needs no
+        separate get_details() round trip at all.
+
+        Conservative by construction, never inferring unsupported data:
+        only attempted when the raw item actually has a non-empty
+        ingredients array AND non-empty instructions; any mapping
+        failure (or a genuinely thin list item, some other provider
+        version, a future RecipeAPI.io response shape) silently leaves
+        this None so app.agent.tools.fetch_recipe_details falls back to
+        the real get_details() call for that one candidate, unchanged.
+        """
+
+        raw_ingredients = raw.get("ingredients")
+        raw_instructions = raw.get("instructions")
+        has_ingredients = isinstance(raw_ingredients, list) and len(raw_ingredients) > 0
+        has_instructions = (isinstance(raw_instructions, list) and len(raw_instructions) > 0) or (
+            isinstance(raw_instructions, str) and bool(raw_instructions.strip())
+        )
+        if not (has_ingredients and has_instructions):
+            return None
+        try:
+            return self._map_recipe(raw)
+        except RecipeProviderError:
+            return None
 
     def _map_recipe(self, raw: dict) -> Recipe:
         recipe_recipe_id, name = require_usable_identity(
@@ -324,6 +479,7 @@ class RecipeAPIIOAdapter:
             prep_time_minutes=raw.get("prep_time") if isinstance(raw.get("prep_time"), int) else None,
             cook_time_minutes=raw.get("cook_time") if isinstance(raw.get("cook_time"), int) else None,
             fetched_at=datetime.now(timezone.utc),
+            difficulty=Difficulty.from_raw(raw.get("difficulty")),
         )
 
     def _map_ingredient(self, raw: object) -> RecipeIngredient | None:

@@ -28,6 +28,43 @@ from app.domain.models import Recipe
 # TECHNICAL_SPEC.md section 10 recommends as "normal" for any plan.
 MAX_PAGE_SIZE = 10
 
+# PR #15 fifth correction pass (2026-09-08, product decision): a small,
+# reviewed, ONE-DIRECTIONAL mapping from canonical id to an alternate
+# provider-search term. Lives here (the provider-NEUTRAL module), not
+# inside any one concrete adapter, so both provider implementations and
+# the agent/observation layer can reference the exact same reviewed set
+# without the agent layer ever depending on a specific concrete provider
+# (docs/API_INTEGRATION_STANDARDS.md: downstream code must not ask "was
+# this RecipeAPI.io?"). Consulted ONLY when a caller explicitly opts in
+# (SearchStrategy.broaden_provider_search); NEVER consulted by canonical
+# matching/normalization (app.domain.ingredient_normalizer), which stays
+# exact and completely independent of this.
+#
+# Product decision (2026-09-08, fifth correction pass): this dict holds
+# ONLY true lexical/synonym rewordings of the SAME ingredient -- never a
+# specific-ingredient-to-broader-parent-category rewrite. Broadening
+# specificity purely to manufacture a larger result set was found live
+# to be actively counterproductive (basmati_rice -> "rice" pulled in
+# ~1400 results, nearly all sticky rice / rice noodles / rice paper --
+# genuinely different foods that do not canonically match basmati rice
+# at all) and is a real product-truthfulness regression, not merely an
+# efficiency concern: PantryPilot must prefer fewer genuinely relevant
+# results over more weakly-related ones. minced_beef -> "ground beef" is
+# kept because it is the SAME specific ingredient under its other
+# common name (a UK/US wording difference, not a category change) --
+# see the entries REMOVED below for the ones that were category
+# changes, kept here as a record of what was reviewed and rejected:
+#   basmati_rice -> "rice"   (specific rice variety -> generic rice)
+#   jasmine_rice -> "rice"   (specific rice variety -> generic rice)
+#   white_rice   -> "rice"   (specific rice variety -> generic rice)
+# Specific animal cuts (chicken_wings, chicken_breast, chicken_thigh,
+# lamb_cubes, ...) were never in this dict and must never be added --
+# broadening a cut to its generic parent (e.g. "chicken", "lamb") is
+# exactly the specificity loss this mapping must never introduce.
+PROVIDER_SEARCH_TERM_OVERRIDES: dict[str, str] = {
+    "minced_beef": "ground beef",
+}
+
 
 class SearchStrategy(BaseModel):
     """Provider-neutral search request.
@@ -46,6 +83,31 @@ class SearchStrategy(BaseModel):
     max_prep_time_minutes: int | None = Field(default=None, gt=0)
     page: int = Field(default=1, ge=1, le=1000)
     page_size: int = Field(default=MAX_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
+    # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08): the
+    # RecipeAPI.io adapter's ingredients filter can silently contribute
+    # zero relevance for some well-represented pantry ingredient terms
+    # (see RecipeAPIIOAdapter.enrich_with_free_text_search's docstring).
+    # This used to run unconditionally on every search, doubling
+    # RecipeAPI.io request volume regardless of need. It is now an
+    # explicit, agent-controlled opt-in (app.agent.actions.SearchArgs)
+    # so the LLM -- which DEC-005 assigns search-strategy control to --
+    # requests it only when the deterministic observation evidence
+    # (poor_pantry_overlap / zero feasible candidates) indicates the
+    # primary query under-represented the user's actual pantry. Default
+    # False: a normal search never pays the extra request.
+    enrich_free_text: bool = False
+    # PR #15 fourth correction pass (2026-09-08, Blocker 2): opt-in,
+    # agent-controlled request to use a REVIEWED broader provider-search
+    # term for the anchor when one exists (e.g. "basmati_rice" -> "rice")
+    # -- never invented, never automatic. This only ever changes what
+    # TEXT is sent to the provider; canonical matching (pantry match,
+    # anchor-presence, scoring) always continues to use the exact
+    # canonical id, completely unaffected by this flag. See
+    # RecipeAPIIOAdapter's PROVIDER_SEARCH_TERM_OVERRIDES for the
+    # reviewed mapping and why some ids (e.g. chicken_wings) are
+    # deliberately absent from it. Costs zero extra requests -- it
+    # changes the TEXT of the same primary query, not its count.
+    broaden_provider_search: bool = False
 
     @field_validator("query_ingredients")
     @classmethod
@@ -71,6 +133,18 @@ class SearchResultItem(BaseModel):
     name: str
     image_url: str | None = None
     cuisine: str | None = None
+    # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08): set
+    # ONLY when the provider's search/list response for this item already
+    # contained a complete recipe object (ingredients + instructions),
+    # not merely display metadata -- confirmed live for RecipeAPI.io
+    # (2026-09-08: /recipes list items carry the exact same fields as
+    # /recipes/{id} detail items). When present, app.agent.tools skips
+    # the separate get_details() round trip entirely for this candidate.
+    # Never fabricated/guessed: a provider whose list response is
+    # genuinely lightweight (or an item missing ingredients/instructions)
+    # simply leaves this None, and the normal get_details() fallback
+    # runs unchanged.
+    full_recipe: Recipe | None = None
 
 
 class SearchResult(BaseModel):

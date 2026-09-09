@@ -573,6 +573,130 @@ GROCERY_INGREDIENT_ALIASES: dict[str, str] = {
     "bell pepper": "bell_pepper",
     "atta": "whole_wheat_flour",
     "whole wheat flour": "whole_wheat_flour",
+    # PR #15 second correction pass (2026-09-08): found live during
+    # multi-anchor validation -- RecipeAPI.io ingredient text and the
+    # ticket's own pantry example both use the US term "ground beef",
+    # which has no path to the existing "minced_beef" canonical id
+    # (only the UK term "Minced Beef" was an exact vocabulary match).
+    # Same US/UK synonym gap as coriander/cilantro above, not a new
+    # concept.
+    "ground beef": "minced_beef",
+    # PR #15 sixth correction pass (2026-09-08): found live during the
+    # lamb-family provider audit -- RecipeAPI.io's real ingredient text
+    # is "Ground lamb" (61 real recipes confirmed live), which has no
+    # path to the existing "minced_lamb" canonical id (only "Minced
+    # lamb" was an exact vocabulary match). Same US/UK synonym gap as
+    # ground beef/minced_beef above.
+    "ground lamb": "minced_lamb",
+    # PR #15 yellow/Uncertain audit, Part 1 (2026-09-09): bare cheese
+    # names genuinely identical to an existing PRODUCT_TYPE_KEYWORD_RULES
+    # "_cheese" canonical -- that table is ingestion-only (never
+    # consulted by normalize_ingredient_name), so a recipe that says
+    # "parmesan" rather than "parmesan cheese" previously had no path to
+    # the already-existing, already-priced canonical id. No specificity
+    # is lost: each of these is the SAME single canonical id a recipe
+    # saying the fuller name would already reach.
+    "parmesan": "parmesan_cheese",
+    "mozzarella": "mozzarella_cheese",
+    "ricotta": "ricotta_cheese",
+    # Pasta-shape descriptors: this taxonomy has exactly one generic
+    # "pasta" canonical id -- no shape-specific id exists anywhere for
+    # any pasta shape, so stripping a shape word loses no specificity
+    # the taxonomy actually tracks (unlike lamb/chicken/beef, where cut
+    # distinctions ARE preserved as separate canonical ids and must not
+    # be collapsed).
+    "fettuccine pasta": "pasta",
+    "small pasta": "pasta",
+    "ziti pasta": "pasta",
+    "penne pasta": "pasta",
+    "pasta shell": "pasta",
+    # Color/cut variant with no competing specific id: this taxonomy has
+    # one generic "bell_pepper" id regardless of color (capsicum/"bell
+    # pepper" already alias here identically).
+    "green bell pepper": "bell_pepper",
+    # Regression restoration (audit Part 2, 2026-09-09): approved,
+    # working aliases in the superseded app.domain.canonical_ingredients
+    # seed table that were never carried forward when this production
+    # taxonomy replaced it for M14. This taxonomy still has only one
+    # generic "onion" id (no red/yellow/brown-specific id exists), so
+    # restoring this loses no specificity relative to today's taxonomy.
+    "red onion": "onion",
+    # True US/UK regional synonym, not a new concept: "scallion" IS
+    # "spring onion" (an already-existing, distinct canonical id --
+    # unlike red onion above, this is not a fallback to the generic
+    # "onion" bucket).
+    "scallion": "spring_onion",
+    # Descriptive/whole-vs-ground spice-form words where this taxonomy
+    # has exactly one canonical id for the spice (no separate whole/
+    # ground split exists to lose specificity against) -- unlike
+    # coriander, which genuinely has two distinct ids (fresh "coriander"
+    # vs "coriander_powder") that must never be conflated.
+    "cinnamon stick": "cinnamon",
+    "cardamom pod": "cardamom",
+    "cumin seed": "cumin",
+    "black peppercorn": "black_pepper",
+    "turmeric powder": "turmeric",
+    # Regression restoration (audit Part 2, 2026-09-09): same "clove(s)
+    # of X" pattern already established for "garlic clove(s)" in the
+    # superseded seed table; only one generic "garlic" id exists here.
+    "garlic clove": "garlic",
+    "garlic cloves": "garlic",
+    "cloves garlic": "garlic",
+    # Regression restoration: same reasoning as "green bell pepper"
+    # above -- one generic "bell_pepper" id, no color split.
+    "green pepper": "bell_pepper",
+    # Regression restoration: only one "black_pepper" id exists (no
+    # separate ground/whole split), so the "ground" qualifier carries no
+    # distinguishing specificity to lose.
+    "ground black pepper": "black_pepper",
+    # Regression restoration: "coriander" already means the fresh-herb
+    # form specifically (the taxonomy's separate "coriander_powder" id
+    # covers the ground-spice form), so "coriander leaves" is the exact
+    # same identity, not a collapse of a real distinction.
+    "coriander leaves": "coriander",
+    # REVIEW NEEDED expansion, Priority 1 (2026-09-09): "cayenne" (bare)
+    # is the exact raw text observed live for this spice; the canonical
+    # id itself is "cayenne_pepper" (a genuinely distinct spice from
+    # black_pepper/white_pepper/chili_powder, per data/raw/
+    # PantryPilot_Ingredients_Needing_Pricing.csv). Not the literal name
+    # of any PRODUCT_TYPE_KEYWORD_RULES family, so this carries no
+    # grocery-ingestion cross-contamination risk (unlike flour/sugar).
+    "cayenne": "cayenne_pepper",
+}
+
+# ---------------------------------------------------------------------------
+# 4b-2. Deliberate PantryPilot recipe-normalization CONVENTIONS (audit
+# Part 1, 2026-09-09) -- NOT a universal semantic claim that "flour"
+# always/only means all-purpose flour, or "sugar" always/only means
+# white granulated sugar, in every possible context, and deliberately
+# NOT merged into GROCERY_INGREDIENT_ALIASES above. A bare, unqualified
+# ingredient word with no more specific term anywhere in the recipe text
+# is, by established convention already used identically for
+# "yogurt"/"yoghurt" -> plain_yoghurt above, resolved to the single most
+# common unqualified retail form this taxonomy prices. A recipe stating
+# a more specific variant (e.g. "whole wheat flour", "brown sugar") is
+# unaffected and continues to resolve to its own distinct,
+# already-existing canonical id.
+#
+# Kept OUT of GROCERY_INGREDIENT_ALIASES specifically because that dict
+# is ALSO consulted by grocery_parsing.resolve_canonical_id's ingestion-
+# time substring-fallback match against noisy real LuLu product titles
+# -- and unlike every alias above, "flour"/"sugar" are themselves the
+# literal family name of a PRODUCT_TYPE_KEYWORD_RULES entry ("Flour").
+# Confirmed live (test_grocery_parsing.py): merging them into the shared
+# dict silently defeated that family's own deliberate "no default -- an
+# unmatched title stays UNMAPPED" rule (DEC-013), since almost every
+# real "Flour" family product title contains the substring "flour".
+# RECIPE_INGREDIENT_ALIASES below is the dict actual recipe/pantry
+# normalization call sites (app.agent.tools, app.agent.orchestrator) use
+# instead of GROCERY_INGREDIENT_ALIASES directly, precisely so this
+# ingestion-time invariant is never at risk from a recipe-side
+# convention again.
+# ---------------------------------------------------------------------------
+
+RECIPE_NORMALIZATION_ONLY_ALIASES: dict[str, str] = {
+    "flour": "plain_flour",
+    "sugar": "white_sugar",
 }
 
 # ---------------------------------------------------------------------------
@@ -606,6 +730,80 @@ MANUAL_ONLY_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
         "ginger",
         "salted_butter",
         "unsalted_butter",
+    }
+)
+
+# ---------------------------------------------------------------------------
+# 4b-3. REVIEW NEEDED expansion, Priority 1 (PR #15 yellow/Uncertain audit,
+# controlled canonical + pricing expansion pass, 2026-09-09). 27 items the
+# audit identified as high-value, high-confidence, genuinely distinct
+# purchasable products -- validated against
+# data/raw/PantryPilot_Ingredients_Needing_Pricing.csv (Founder-provided
+# pricing evidence, kept as-is at that path, never committed/moved/
+# renamed) before adding. Each is deliberately kept SEPARATE from any
+# similar-sounding existing canonical (tomato_paste != tomato,
+# garlic_powder != garlic, onion_powder != onion, the dried_* herbs !=
+# their fresh-herb canonicals, the *_broth/fish_stock ids != stock_powder/
+# bouillon, lemon_juice != lemon, smoked_paprika != paprika, white_pepper
+# != black_pepper, fresh_coconut != coconut/shredded_coconut) -- these are
+# materially different grocery products, not aliases.
+#
+# 19 of the 27 have real, usable CSV pricing evidence (package price +
+# a package amount app.domain.grocery_parsing.parse_package_content can
+# deterministically parse) and got a manual_price_entries.json row:
+# tomato_paste, celery, garlic_powder, onion_powder, green_chili,
+# buttermilk, smoked_paprika, cayenne_pepper, dried_oregano, dried_thyme,
+# dried_basil, dried_tarragon, barbecue_sauce, breadcrumbs, sour_cream,
+# white_pepper, marinara_sauce, fresh_coconut, cherry_tomato.
+#
+# 8 have an unambiguous identity but NO usable CSV pricing evidence (the
+# CSV's own Price column was "not in uae", or held a non-numeric note, or
+# the Amount used an unsupported unit) -- added here for identity only.
+# PriceRepository.get_price() correctly returns None for these (never a
+# fabricated AED 0) until a real, verified price is added:
+#   - beef_broth, chicken_broth, vegetable_broth, fish_stock, lamb_broth:
+#     CSV Price = "not in uae" (no numeric price at all).
+#   - lemon_juice: CSV Price column held a note ("should be from lemons
+#     I think"), not a verified price -- no Amount given either.
+#   - shallot: CSV Price = "not in uae".
+#   - chive/chives: CSV gives "5.95, 1 pkt" -- "pkt" is an explicitly
+#     unsupported unit (parse_package_content), and no per-unit weight is
+#     given, so a per-gram price cannot be derived without guessing a
+#     packet weight (DEC-013 forbids this). Identity ("chives") is
+#     unambiguous and added; pricing stays unavailable.
+# ---------------------------------------------------------------------------
+
+REVIEW_NEEDED_EXPANSION_CANONICAL_INGREDIENTS: frozenset[str] = frozenset(
+    {
+        # priced via manual_price_entries.json
+        "tomato_paste",
+        "celery",
+        "garlic_powder",
+        "onion_powder",
+        "green_chili",
+        "buttermilk",
+        "smoked_paprika",
+        "cayenne_pepper",
+        "dried_oregano",
+        "dried_thyme",
+        "dried_basil",
+        "dried_tarragon",
+        "barbecue_sauce",
+        "breadcrumbs",
+        "sour_cream",
+        "white_pepper",
+        "marinara_sauce",
+        "fresh_coconut",
+        "cherry_tomato",
+        # identity only -- no usable CSV pricing evidence (see above)
+        "beef_broth",
+        "chicken_broth",
+        "vegetable_broth",
+        "fish_stock",
+        "lamb_broth",
+        "lemon_juice",
+        "shallot",
+        "chives",
     }
 )
 
@@ -733,8 +931,69 @@ REFERENCE_PRICE_EXCLUDED_UNITS: dict[str, frozenset[str]] = {
 RESIDUAL_INCOMPATIBLE_CANONICAL_IDS: frozenset[str] = frozenset({"corn", "mayonnaise"})
 
 # ---------------------------------------------------------------------------
-# 5. Full canonical vocabulary: every canonical_id referenced above, plus
-# app.domain.canonical_ingredients' set (shared namespace).
+# 4e. Non-food "other requirement" ids (audit finding, PR #15, 2026-09-09):
+# app.domain.canonical_ingredients.OTHER_REQUIREMENT_IDS (kitchen_twine,
+# toothpick, skewer, parchment_paper, aluminum_foil) already existed, but
+# every real production normalization call site in this app passes THIS
+# module's vocabulary (CANONICAL_GROCERY_INGREDIENTS/
+# GROCERY_INGREDIENT_ALIASES above), never that seed module's -- so a
+# recipe ingredient like "parchment paper" could never actually reach
+# canonical_id="parchment_paper" and therefore could never reach
+# app.domain.pantry_matcher's other-requirement exclusion either. It fell
+# through to UNKNOWN/Uncertain instead, exactly like a genuine taxonomy
+# gap, even though the non-food classification mechanism already existed
+# in the codebase.
+#
+# This is a narrow, purpose-built addition for exactly the non-food
+# classification -- it does NOT pull in
+# app.domain.canonical_ingredients.CANONICAL_INGREDIENTS/INGREDIENT_ALIASES
+# (the separate, still-disconnected FOOD vocabulary gap from the same
+# audit is intentionally not addressed here; see PR #15's audit report).
+#
+# "cedar_plank" is new here (not in the original OTHER_REQUIREMENT_IDS):
+# confirmed live during the audit (RecipeAPI.io "Cedar Plank Smoked
+# Salmon") as a real, recurring non-food recipe "ingredient".
+# ---------------------------------------------------------------------------
+
+OTHER_REQUIREMENT_IDS: frozenset[str] = frozenset(
+    {
+        "kitchen_twine",
+        "toothpick",
+        "skewer",
+        "parchment_paper",
+        "aluminum_foil",
+        "cedar_plank",
+    }
+)
+
+# Raw-text variants that don't already reach the ids above via an exact
+# snake_case match (e.g. "parchment paper" -> "parchment_paper" and
+# "cedar plank" -> "cedar_plank" already match exactly once the ids are
+# in CANONICAL_GROCERY_INGREDIENTS below, so they need no alias entry;
+# "toothpicks"/"skewers" already resolve via the existing plural-
+# stripping fallback in normalize_ingredient_name). Merged into
+# GROCERY_INGREDIENT_ALIASES below so every existing call site picks
+# these up with no call-site changes required.
+GROCERY_INGREDIENT_ALIASES.update(
+    {
+        "kitchen string": "kitchen_twine",
+        # normalize_ingredient_name's cleaning stage replaces punctuation
+        # (including an apostrophe) with a SPACE, not nothing -- "butcher's
+        # twine" cleans to "butcher s twine", not "butchers twine".
+        "butcher s twine": "kitchen_twine",
+        "aluminium foil": "aluminum_foil",  # UK spelling
+        "tin foil": "aluminum_foil",
+    }
+)
+
+# ---------------------------------------------------------------------------
+# 5. Full canonical vocabulary: every canonical_id referenced above,
+# including the non-food OTHER_REQUIREMENT_IDS just above. Deliberately
+# does NOT include app.domain.canonical_ingredients.CANONICAL_INGREDIENTS
+# (the separate Module-A seed food vocabulary) -- unifying the two food
+# taxonomies is an explicitly out-of-scope, separate decision (see PR
+# #15's yellow/Uncertain audit report); only the non-food ids above are
+# pulled in here, as a narrow, purpose-built exception.
 # ---------------------------------------------------------------------------
 
 CANONICAL_GROCERY_INGREDIENTS: frozenset[str] = frozenset(
@@ -743,4 +1002,24 @@ CANONICAL_GROCERY_INGREDIENTS: frozenset[str] = frozenset(
     | {cid for rules in PRODUCT_TYPE_FIXED_CANONICAL_OVERRIDES.values() for _, cid in rules}
     | set(GROCERY_INGREDIENT_ALIASES.values())
     | MANUAL_ONLY_CANONICAL_INGREDIENTS
+    | OTHER_REQUIREMENT_IDS
+    | REVIEW_NEEDED_EXPANSION_CANONICAL_INGREDIENTS
 )
+
+# ---------------------------------------------------------------------------
+# 6. Recipe/pantry-side normalization vocabulary: GROCERY_INGREDIENT_ALIASES
+# plus RECIPE_NORMALIZATION_ONLY_ALIASES (section 4b-2 above). Built here,
+# at the very end of the module, so it reflects every mutation made to
+# GROCERY_INGREDIENT_ALIASES above (including the non-food aliases merged
+# in via .update() in section 4e) -- never a stale partial copy.
+#
+# app.agent.tools.normalize_recipe_ingredients and every pantry/anchor
+# normalization call site in app.agent.orchestrator use THIS dict, not
+# GROCERY_INGREDIENT_ALIASES directly, so the recipe-only conventions
+# stay reachable for recipe/pantry text while remaining completely
+# invisible to grocery_parsing.resolve_canonical_id's ingestion-time
+# title matching (which continues to use GROCERY_INGREDIENT_ALIASES
+# unchanged, preserving DEC-013's "no default" ingestion guarantee).
+# ---------------------------------------------------------------------------
+
+RECIPE_INGREDIENT_ALIASES: dict[str, str] = {**GROCERY_INGREDIENT_ALIASES, **RECIPE_NORMALIZATION_ONLY_ALIASES}

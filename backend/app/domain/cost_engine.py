@@ -157,6 +157,64 @@ _CONFIDENCE_RANK = {
 }
 
 
+@dataclass(frozen=True)
+class MissingIngredientBreakdown:
+    """Module E: one row per missing canonical ingredient, for the
+    ingredient-level cost display (ticket section 23). Reuses the exact
+    same grouping/costing logic as estimate_purchase_cost() -- this is
+    additive plumbing, not a new pricing rule."""
+
+    raw_name: str
+    canonical_id: str | None
+    normalized_unit: str | None
+    scaled_required_quantity: float | None
+    detail: IngredientCostDetail
+
+
+def estimate_missing_ingredient_breakdown(
+    missing_ingredients: list[RecipeIngredient], price_repository: PriceRepository
+) -> list[MissingIngredientBreakdown]:
+    """Per-ingredient breakdown for the missing ingredients of one
+    recipe candidate, grouped by canonical ID exactly as
+    estimate_purchase_cost() groups them (same combined-requirement
+    rule), but returning one row per group instead of only the
+    aggregate. `raw_name` is the first-seen raw ingredient text in the
+    group, for display only -- never used for pricing identity."""
+
+    groups: dict[str | None, list[RecipeIngredient]] = {}
+    group_order: list[str | None] = []
+    for ing in missing_ingredients:
+        if ing.canonical_id not in groups:
+            groups[ing.canonical_id] = []
+            group_order.append(ing.canonical_id)
+        groups[ing.canonical_id].append(ing)
+
+    rows: list[MissingIngredientBreakdown] = []
+    for key in group_order:
+        group = groups[key]
+        detail = _estimate_canonical_group_cost(group, price_repository)
+        parsed_lines = [parse_package_content(ing.raw_measure) for ing in group]
+        reliable = [
+            p.normalized_total_quantity
+            for p in parsed_lines
+            if p.normalized_unit is not None and p.normalized_total_quantity is not None
+        ]
+        unit = next((p.normalized_unit for p in parsed_lines if p.normalized_unit is not None), None)
+        total_reliable = round(sum(reliable), 4) if reliable else None
+
+        rows.append(
+            MissingIngredientBreakdown(
+                raw_name=group[0].raw_name,
+                canonical_id=key,
+                normalized_unit=unit,
+                scaled_required_quantity=total_reliable,
+                detail=detail,
+            )
+        )
+
+    return rows
+
+
 def estimate_purchase_cost(
     missing_ingredients: list[RecipeIngredient], price_repository: PriceRepository
 ) -> CostEvaluation:
