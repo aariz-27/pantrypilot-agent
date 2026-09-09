@@ -37,6 +37,41 @@ import { rerankCards } from './ranking'
 
 const MAX_FINAL_RECOMMENDATIONS = 3 // mirrors backend/app/agent/state.py
 
+// Bug fix (PR #15, 2026-09-09): matches EXACTLY the wording
+// app/api/recommend_mapping.py's _deviation_reasons produces for its
+// budget branch ("Est. AED {over:.2f} over budget"). Used to find and
+// replace ONLY the budget-specific entry in a card's deviation_reasons
+// -- confirmed root cause of the "stale over-budget label" bug: this
+// module already recomputed estimated_additional_spend_aed/price_complete
+// after an "I have this" confirmation, but previously carried the
+// ORIGINAL deviation_reasons array forward unchanged via the `...card`
+// spread below, so a card whose cost dropped (or became unavailable)
+// kept showing its old, now-wrong "over budget" amount -- the exact
+// "metadata not updated atomically with the new result set" defect.
+// A non-budget deviation reason (e.g. a time-limit line, which "I have
+// this" never affects) is left untouched.
+const BUDGET_DEVIATION_PATTERN = /^Est\. AED \d+\.\d{2} over budget$/
+
+// Recomputes the budget-only portion of deviation_reasons for a card
+// whose price just changed, using the SAME rule as the backend's
+// _deviation_reasons budget branch: only a complete, known cost can ever
+// be compared against the budget; an incomplete/unknown cost must never
+// be silently treated as "safely within budget" (nor, symmetrically, be
+// left claiming a stale "over budget" amount that no longer corresponds
+// to any real number). budgetAed following the SearchForm/backend
+// contract: null means the user has not set a budget at all.
+function recomputeBudgetDeviation(existingReasons, priceComplete, estimatedSpendAed, budgetAed) {
+  const withoutStaleBudgetReason = (existingReasons ?? []).filter((reason) => !BUDGET_DEVIATION_PATTERN.test(reason))
+  if (budgetAed == null || !priceComplete || estimatedSpendAed == null) {
+    return withoutStaleBudgetReason
+  }
+  const over = estimatedSpendAed - budgetAed
+  if (over > 0) {
+    return [...withoutStaleBudgetReason, `Est. AED ${over.toFixed(2)} over budget`]
+  }
+  return withoutStaleBudgetReason
+}
+
 // PR #15 fifth correction pass (2026-09-08, product decision): mirrors
 // AgentOrchestrator._finalize's partition exactly -- recommendations
 // and additional_options are built EXCLUSIVELY from anchor-matching
@@ -69,7 +104,7 @@ function round2(value) {
 // the SAME object (referential equality preserved) when nothing on
 // this card is affected, so callers can cheaply skip re-rendering
 // unaffected cards.
-export function applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys) {
+export function applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys, budgetAed = null) {
   const hasCanonical = extraCanonicalIds && extraCanonicalIds.size > 0
   const hasUnresolved = extraUnresolvedIdentityKeys && extraUnresolvedIdentityKeys.size > 0
   if (!card || (!hasCanonical && !hasUnresolved)) return card
@@ -117,7 +152,7 @@ export function applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedI
     ? round2(stillMissing.reduce((sum, row) => sum + (row.estimated_cost_aed ?? 0), 0))
     : null
 
-  return {
+  const result = {
     ...card,
     matched_ingredients,
     missing_ingredients: stillMissing,
@@ -126,6 +161,22 @@ export function applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedI
     price_complete: allRemainingComplete,
     estimated_additional_spend_aed,
   }
+  // Bug fix (PR #15, 2026-09-09): deviation_reasons carried the ORIGINAL
+  // card's text forward unchanged via the `...card` spread above -- a
+  // "closest alternative" whose cost just dropped (or became unknown)
+  // above kept showing its old, now-stale "over budget" amount. Only
+  // touch it when the card actually has the field (production always
+  // does; some older/minimal test fixtures don't, and must stay
+  // unaffected).
+  if (Array.isArray(card.deviation_reasons)) {
+    result.deviation_reasons = recomputeBudgetDeviation(
+      card.deviation_reasons,
+      allRemainingComplete,
+      estimated_additional_spend_aed,
+      budgetAed,
+    )
+  }
+  return result
 }
 
 // Applies the same confirmed-owned sets across every card in a full
@@ -138,11 +189,18 @@ export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnr
   const hasUnresolved = extraUnresolvedIdentityKeys && extraUnresolvedIdentityKeys.size > 0
   if (!response || (!hasCanonical && !hasUnresolved)) return response
 
+  // Bug fix (PR #15, 2026-09-09): the SAME current-search budget
+  // rankingConstraints already carries for rerankCards below -- never a
+  // separate, potentially-stale value. Passed through so each card's
+  // deviation_reasons stays consistent with its own just-recomputed
+  // cost, not left describing the cost the card had before this
+  // confirmation.
+  const { budgetAed = null } = rankingConstraints
   const recomputedRecommendations = response.recommendations.map((card) =>
-    applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
+    applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys, budgetAed),
   )
   const recomputedAdditional = (response.additional_options ?? []).map((card) =>
-    applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
+    applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys, budgetAed),
   )
 
   // Priority 4: rerank the COMBINED pool (never mixing in
@@ -164,7 +222,7 @@ export function applyExtraPantryToResponse(response, extraCanonicalIds, extraUnr
     recommendations,
     additional_options: additionalOptions,
     closest_alternatives: response.closest_alternatives.map((card) =>
-      applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys),
+      applyExtraPantryToCard(card, extraCanonicalIds, extraUnresolvedIdentityKeys, budgetAed),
     ),
   }
 }

@@ -115,6 +115,90 @@ describe('applyExtraPantryToCard', () => {
   })
 })
 
+// --- Confirmed bug fix (PR #15, 2026-09-09): stale "over budget" label --
+//
+// Root cause: applyExtraPantryToCard already recomputed
+// estimated_additional_spend_aed/price_complete after an "I have this"
+// confirmation, but carried the ORIGINAL card's deviation_reasons array
+// forward unchanged via the `...card` spread -- so a "closest
+// alternative" whose additional cost dropped (or became unknown) kept
+// showing its old, now-inaccurate "Est. AED X.XX over budget" text.
+// Confirmed live: a real recipe whose cost dropped from AED 71.50 to
+// "unavailable" after checking off two missing ingredients kept showing
+// "Est. AED 21.50 over budget" verbatim.
+describe('applyExtraPantryToCard -- budget deviation label stays consistent with recomputed cost', () => {
+  function overBudgetCard(overrides = {}) {
+    return makeCard({
+      unresolved_ingredients: [],
+      missing_ingredients: [
+        { raw_name: 'barbecue sauce', canonical_id: 'barbecue_sauce', display_name: 'Barbecue Sauce', estimated_cost_aed: 15.95, price_complete: true },
+        { raw_name: 'mozzarella cheese', canonical_id: 'mozzarella_cheese', display_name: 'Mozzarella Cheese', estimated_cost_aed: 27.75, price_complete: true },
+        { raw_name: 'coriander', canonical_id: 'coriander', display_name: 'Coriander', estimated_cost_aed: 4.35, price_complete: true },
+      ],
+      price_complete: true,
+      estimated_additional_spend_aed: 48.05,
+      deviation_reasons: ['Est. AED 21.50 over budget'], // e.g. computed by the backend against a lower budget
+      ...overrides,
+    })
+  }
+
+  it('Case A/B equivalent: recomputes the over-budget amount to match the NEW cost, never the stale one', () => {
+    // Checking off Barbecue Sauce leaves Mozzarella Cheese (27.75) +
+    // Coriander (4.35) = 32.10 remaining, still over a 30 AED budget --
+    // but by a DIFFERENT amount (2.10) than the stale label (21.50).
+    const card = overBudgetCard()
+    const result = applyExtraPantryToCard(card, new Set(['barbecue_sauce']), new Set(), 30)
+
+    expect(result.estimated_additional_spend_aed).toBeCloseTo(32.1)
+    expect(result.deviation_reasons).toEqual(['Est. AED 2.10 over budget'])
+  })
+
+  it('removes the over-budget label entirely once the recomputed cost is within the current budget', () => {
+    // Checking off Barbecue Sauce + Mozzarella Cheese leaves only
+    // Coriander (4.35) -- well under a 50 AED budget.
+    const card = overBudgetCard()
+    const result = applyExtraPantryToCard(card, new Set(['barbecue_sauce', 'mozzarella_cheese']), new Set(), 50)
+
+    expect(result.estimated_additional_spend_aed).toBeCloseTo(4.35)
+    expect(result.price_complete).toBe(true)
+    expect(result.deviation_reasons).toEqual([])
+  })
+
+  it('Case D: never shows a stale (or fabricated) budget claim when the recomputed cost becomes incomplete', () => {
+    // An unresolved ingredient remains after the confirmations, so the
+    // NEW cost is genuinely unknown -- must not keep the OLD "over
+    // budget" number, and must not imply the recipe is now safely
+    // affordable either.
+    const card = overBudgetCard({ unresolved_ingredients: [unresolvedRow('Pizza dough')] })
+    const result = applyExtraPantryToCard(card, new Set(['barbecue_sauce', 'mozzarella_cheese']), new Set(), 50)
+
+    expect(result.price_complete).toBe(false)
+    expect(result.estimated_additional_spend_aed).toBeNull()
+    expect(result.deviation_reasons).toEqual([])
+  })
+
+  it('Case C: never shows a budget deviation when no budget is set, regardless of cost', () => {
+    const card = overBudgetCard()
+    const result = applyExtraPantryToCard(card, new Set(['barbecue_sauce']), new Set(), null)
+
+    expect(result.estimated_additional_spend_aed).toBeCloseTo(32.1)
+    expect(result.deviation_reasons).toEqual([])
+  })
+
+  it('preserves a non-budget deviation reason untouched', () => {
+    const card = overBudgetCard({ deviation_reasons: ['15 min over your target', 'Est. AED 21.50 over budget'] })
+    const result = applyExtraPantryToCard(card, new Set(['barbecue_sauce', 'mozzarella_cheese']), new Set(), 50)
+
+    expect(result.deviation_reasons).toEqual(['15 min over your target'])
+  })
+
+  it('leaves deviation_reasons untouched when the card has none (older/minimal fixtures)', () => {
+    const card = makeCard({ unresolved_ingredients: [] }) // no deviation_reasons field at all
+    const result = applyExtraPantryToCard(card, new Set(['onion']), new Set(), 1)
+    expect(result.deviation_reasons).toBeUndefined()
+  })
+})
+
 describe('applyExtraPantryToCard -- unresolved ingredient "I have this" (Priority 3, PR #15 correction pass)', () => {
   it('moves a confirmed-unresolved row into matched_ingredients and out of unresolved_ingredients', () => {
     const card = makeCard()
@@ -197,6 +281,29 @@ describe('applyExtraPantryToResponse', () => {
   it('returns the same response reference when both extra pantry sets are empty', () => {
     const response = { recommendations: [makeCard()], closest_alternatives: [] }
     expect(applyExtraPantryToResponse(response, new Set(), new Set())).toBe(response)
+  })
+
+  it('threads the CURRENT search budget from rankingConstraints into closest_alternatives\' deviation label (bug fix, PR #15 2026-09-09)', () => {
+    const staleOverBudgetCard = makeCard({
+      recipe_id: 'c',
+      unresolved_ingredients: [],
+      missing_ingredients: [
+        { raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true },
+        { raw_name: 'garlic', canonical_id: 'garlic', display_name: 'Garlic', estimated_cost_aed: 1.5, price_complete: true },
+      ],
+      price_complete: true,
+      estimated_additional_spend_aed: 4.0,
+      deviation_reasons: ['Est. AED 61.50 over budget'], // stale, from a much lower prior budget
+    })
+    const response = { recommendations: [], additional_options: [], closest_alternatives: [staleOverBudgetCard] }
+
+    // The current search's budget (50) easily covers the recomputed 1.5
+    // AED remaining once "onion" is checked off -- the stale 61.50
+    // figure must not survive.
+    const result = applyExtraPantryToResponse(response, new Set(['onion']), new Set(), { budgetAed: 50 })
+
+    expect(result.closest_alternatives[0].estimated_additional_spend_aed).toBe(1.5)
+    expect(result.closest_alternatives[0].deviation_reasons).toEqual([])
   })
 
   it('updates the same unresolved ingredient across multiple cards by identity_key (ticket: safe identity matching)', () => {
