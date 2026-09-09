@@ -586,3 +586,143 @@ describe('additional_options anchor discipline end-to-end (PR #15 second correct
     expect(screen.queryByRole('button', { name: 'Show more options' })).not.toBeInTheDocument()
   })
 })
+
+describe('Module F: local persistence (pantry, preferences, history, saved recipes)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.localStorage.clear()
+  })
+
+  it('restores a recognized pantry ingredient after a reload, without duplicating it', async () => {
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [card()] }))
+    const { unmount } = render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    unmount()
+
+    render(<App />)
+    expect(screen.getAllByText('Rice')).toHaveLength(1)
+  })
+
+  it('restores servings and cuisine preferences after a reload, but never budget', async () => {
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [card()] }))
+    const { unmount } = render(<App />)
+    await userEvent.click(screen.getByRole('button', { name: 'Increase servings' }))
+    await userEvent.selectOptions(screen.getByLabelText('Cuisine'), 'Italian')
+    await userEvent.click(screen.getByRole('button', { name: 'More options ▼' }))
+    await userEvent.type(screen.getByLabelText('Additional grocery budget (AED)'), '150')
+    await addRecognizedIngredientAndSubmit()
+    unmount()
+
+    const { container } = render(<App />)
+    expect(container.querySelector('.servings-stepper__value')).toHaveTextContent('5')
+    expect(screen.getByLabelText('Cuisine')).toHaveValue('Italian')
+    await userEvent.click(screen.getByRole('button', { name: 'More options ▼' }))
+    expect(screen.getByLabelText('Additional grocery budget (AED)')).toHaveValue(null)
+  })
+
+  it('lists a completed search under "Your data" and reruns it on demand', async () => {
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [card()] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Your data/ }))
+    expect(
+      screen.getByText((content, el) => el?.className === 'local-data-panel__row-title' && content === 'Rice'),
+    ).toBeInTheDocument()
+
+    api.postRecommend.mockClear()
+    api.postRecommend.mockResolvedValueOnce(baseResponse({ recommendations: [card()] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Search again' }))
+
+    await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(1))
+    expect(api.postRecommend.mock.calls[0][0].ingredients).toEqual(['Rice'])
+  })
+
+  it('clears search history from "Your data"', async () => {
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [card()] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Your data/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear history' }))
+
+    expect(screen.getByText('No recent searches yet.')).toBeInTheDocument()
+  })
+
+  it('saves a recipe from the detail view, shows it as saved on the card and in "Your data", and can remove it', async () => {
+    api.postRecommend.mockResolvedValue(
+      baseResponse({ recommendations: [card({ source_url: 'https://example.test/recipe/1' })] }),
+    )
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
+    await userEvent.click(screen.getByRole('button', { name: '☆ Save recipe' }))
+    expect(screen.getByRole('button', { name: '★ Saved' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+    expect(screen.getByLabelText('Saved to your recipes')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Your data/ }))
+    expect(
+      screen.getByText((content, el) => el?.className === 'local-data-panel__row-title' && content === 'Chicken Fried Rice'),
+    ).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(screen.getByText('No saved recipes yet.')).toBeInTheDocument()
+  })
+
+  it('"Clear all local data" resets the pantry and closes out persisted state', async () => {
+    api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [card()] }))
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+
+    await userEvent.click(screen.getByRole('button', { name: /Your data/ }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Clear all local data' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.queryByText('Rice')).not.toBeInTheDocument()
+  })
+})
+
+describe('Module F: production UX -- offline and rate-limit states', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('shows a friendly, retryable message when the backend is unreachable', async () => {
+    const { ApiError } = api
+    api.postRecommend.mockRejectedValue(
+      new ApiError("Can't reach PantryPilot right now. Check your connection and try again.", {
+        code: 'NETWORK_ERROR',
+        retryable: true,
+      }),
+    )
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+
+    await waitFor(() =>
+      expect(screen.getByText("Can't reach PantryPilot right now. Check your connection and try again.")).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  it('shows a friendly, non-technical message on a rate-limit response, never the word "rate limit" exposed as an internal code', async () => {
+    const { ApiError } = api
+    api.postRecommend.mockRejectedValue(
+      new ApiError("You're searching a bit fast. Please wait a moment and try again.", {
+        code: 'RATE_LIMITED',
+        retryable: true,
+      }),
+    )
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+
+    await waitFor(() =>
+      expect(screen.getByText("You're searching a bit fast. Please wait a moment and try again.")).toBeInTheDocument(),
+    )
+  })
+})

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Header } from './components/Header'
 import { SearchForm } from './components/SearchForm'
 import { LoadingState } from './components/LoadingState'
@@ -7,8 +7,18 @@ import { ClosestMatchNotice } from './components/ClosestMatchNotice'
 import { RecipeDetail } from './components/RecipeDetail'
 import { EmptyState } from './components/EmptyState'
 import { ErrorState } from './components/ErrorState'
+import { LocalDataPanel } from './components/LocalDataPanel'
 import { postRecommend } from './services/api'
 import { applyExtraPantryToResponse } from './domain/pantryRecompute'
+import { dedupePantryItems } from './domain/pantryItems'
+import { readVersioned, writeVersioned, clearVersioned } from './utils/storage'
+import { useRecentSearches } from './hooks/useRecentSearches'
+import { useSavedRecipes } from './hooks/useSavedRecipes'
+
+const PANTRY_STORAGE_KEY = 'pantry'
+const PANTRY_STORAGE_VERSION = 1
+const PREFS_STORAGE_KEY = 'form-prefs'
+const PREFS_STORAGE_VERSION = 1
 
 const DEFAULT_FORM_STATE = {
   pantryItems: [],
@@ -19,6 +29,23 @@ const DEFAULT_FORM_STATE = {
   cuisine: null,
   cuisineStrict: false,
   budgetAed: null,
+}
+
+// Ticket section 5.2 + explicit Founder decision: budget is never
+// restored from local storage, so it always starts empty/unset on
+// reload regardless of what was searched last session -- only
+// servings/time/difficulty/cuisine persist.
+function loadInitialFormState() {
+  const persistedPantry = dedupePantryItems(readVersioned(PANTRY_STORAGE_KEY, PANTRY_STORAGE_VERSION, []))
+  const prefs = readVersioned(PREFS_STORAGE_KEY, PREFS_STORAGE_VERSION, {})
+  return {
+    ...DEFAULT_FORM_STATE,
+    pantryItems: persistedPantry,
+    servings: typeof prefs.servings === 'number' ? prefs.servings : DEFAULT_FORM_STATE.servings,
+    totalTimeMinutes: typeof prefs.totalTimeMinutes === 'number' ? prefs.totalTimeMinutes : DEFAULT_FORM_STATE.totalTimeMinutes,
+    allowHardDifficulty: typeof prefs.allowHardDifficulty === 'boolean' ? prefs.allowHardDifficulty : DEFAULT_FORM_STATE.allowHardDifficulty,
+    cuisine: typeof prefs.cuisine === 'string' ? prefs.cuisine : DEFAULT_FORM_STATE.cuisine,
+  }
 }
 
 function buildPayload(formState) {
@@ -35,11 +62,27 @@ function buildPayload(formState) {
 }
 
 export default function App() {
-  const [formState, setFormState] = useState(DEFAULT_FORM_STATE)
+  const [formState, setFormState] = useState(loadInitialFormState)
   const [view, setView] = useState('search') // 'search' | 'loading' | 'results' | 'error'
   const [response, setResponse] = useState(null)
   const [error, setError] = useState(null)
   const [selectedCardId, setSelectedCardId] = useState(null)
+  const [localDataOpen, setLocalDataOpen] = useState(false)
+  const { history, recordSearch, clearHistory } = useRecentSearches()
+  const { saved, isSaved, toggleSaved, removeSaved, clearSaved } = useSavedRecipes()
+
+  useEffect(() => {
+    writeVersioned(PANTRY_STORAGE_KEY, PANTRY_STORAGE_VERSION, formState.pantryItems)
+  }, [formState.pantryItems])
+
+  useEffect(() => {
+    writeVersioned(PREFS_STORAGE_KEY, PREFS_STORAGE_VERSION, {
+      servings: formState.servings,
+      totalTimeMinutes: formState.totalTimeMinutes,
+      allowHardDifficulty: formState.allowHardDifficulty,
+      cuisine: formState.cuisine,
+    })
+  }, [formState.servings, formState.totalTimeMinutes, formState.allowHardDifficulty, formState.cuisine])
   // "I have this" (ticket section 2): canonical_id -> display_name, for
   // ingredients the user confirms they have after seeing results.
   // Frontend-only, deterministic state -- never sent anywhere until the
@@ -61,6 +104,9 @@ export default function App() {
   const runSearch = useCallback(async (currentFormState) => {
     setView('loading')
     setError(null)
+    // Recorded regardless of outcome -- history is for reconstructing
+    // what was searched, not for whether it succeeded (ticket 5.3).
+    recordSearch(currentFormState)
     try {
       const result = await postRecommend(buildPayload(currentFormState))
       setResponse(result)
@@ -72,7 +118,7 @@ export default function App() {
       setError(err)
       setView('error')
     }
-  }, [])
+  }, [recordSearch])
 
   const extraCanonicalIds = useMemo(() => new Set(extraPantry.keys()), [extraPantry])
   const extraUnresolvedIdentityKeys = useMemo(() => new Set(extraUnresolvedPantry.keys()), [extraUnresolvedPantry])
@@ -178,6 +224,44 @@ export default function App() {
     runSearch(updatedFormState)
   }
 
+  function handleClearPantry() {
+    setFormState((prev) => ({ ...prev, pantryItems: [] }))
+  }
+
+  // Clears every local-storage key Module F introduced and resets the
+  // live form back to defaults in one action (ticket section 5.5) --
+  // "no accounts" means this browser's storage is the only place any
+  // of this state lives, so there's nothing else to reset server-side.
+  function handleClearAllLocalData() {
+    setFormState(DEFAULT_FORM_STATE)
+    clearVersioned(PANTRY_STORAGE_KEY)
+    clearVersioned(PREFS_STORAGE_KEY)
+    clearHistory()
+    clearSaved()
+  }
+
+  // Re-running a specific past search deliberately reproduces it
+  // exactly, budget included -- unlike the live form's default (which
+  // never restores a stale budget on reload), this is an explicit,
+  // user-initiated action naming exactly which search to repeat.
+  function handleRerunSearch(entry) {
+    const nextFormState = {
+      ...formState,
+      pantryItems: entry.pantryItems,
+      excludedItems: entry.excludedItems,
+      servings: entry.servings,
+      totalTimeMinutes: entry.totalTimeMinutes,
+      allowHardDifficulty: entry.allowHardDifficulty,
+      cuisine: entry.cuisine,
+      cuisineStrict: entry.cuisineStrict,
+      budgetAed: entry.budgetAed,
+    }
+    setFormState(nextFormState)
+    setSelectedCardId(null)
+    setLocalDataOpen(false)
+    runSearch(nextFormState)
+  }
+
   function handleShowLongerRecipes() {
     // Must explicitly change the user's time constraint (never a
     // silent relaxation) and rerun the normal search (ticket section 3).
@@ -189,7 +273,7 @@ export default function App() {
 
   return (
     <>
-      <Header onBrandClick={handleNewSearch} />
+      <Header onBrandClick={handleNewSearch} onOpenLocalData={() => setLocalDataOpen(true)} />
       <main className="container" style={{ paddingTop: 'var(--space-6)', paddingBottom: 'var(--space-7)' }}>
         {view === 'search' ? (
           <>
@@ -222,6 +306,7 @@ export default function App() {
             currentTotalTimeMinutes={formState.totalTimeMinutes}
             visibleAdditionalCount={visibleAdditionalCount}
             onShowMoreOptions={handleShowMoreOptions}
+            isSaved={isSaved}
           />
         ) : null}
       </main>
@@ -232,6 +317,22 @@ export default function App() {
           onClose={() => setSelectedCardId(null)}
           onMarkHave={handleMarkHave}
           onMarkHaveUnresolved={handleMarkHaveUnresolved}
+          saved={isSaved(selectedCard.recipe_id)}
+          onToggleSaved={toggleSaved}
+        />
+      ) : null}
+
+      {localDataOpen ? (
+        <LocalDataPanel
+          onClose={() => setLocalDataOpen(false)}
+          history={history}
+          onRerunSearch={handleRerunSearch}
+          onClearHistory={clearHistory}
+          saved={saved}
+          onRemoveSaved={removeSaved}
+          onClearSaved={clearSaved}
+          onClearPantry={handleClearPantry}
+          onClearAll={handleClearAllLocalData}
         />
       ) : null}
     </>
@@ -248,6 +349,7 @@ function ResultsView({
   currentTotalTimeMinutes,
   visibleAdditionalCount,
   onShowMoreOptions,
+  isSaved,
 }) {
   const hasExact = response.recommendations.length > 0
   const additionalOptions = response.additional_options ?? []
@@ -307,7 +409,7 @@ function ResultsView({
 
       {!hasExact ? <ClosestMatchNotice hasExactMatches={false} /> : null}
 
-      <RecipeGrid cards={cardsToShow} onOpen={onOpen} />
+      <RecipeGrid cards={cardsToShow} onOpen={onOpen} isSaved={isSaved} />
 
       {hasMoreToShow ? (
         <button
@@ -328,7 +430,7 @@ function ResultsView({
               These use a different main ingredient than what you searched for.
             </p>
           </div>
-          <RecipeGrid cards={closestAlternatives} onOpen={onOpen} />
+          <RecipeGrid cards={closestAlternatives} onOpen={onOpen} isSaved={isSaved} />
         </div>
       ) : null}
     </div>
