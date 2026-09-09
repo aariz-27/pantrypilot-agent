@@ -19,7 +19,11 @@ from dataclasses import dataclass
 
 from app.domain.candidate_evaluation import evaluate_candidate
 from app.domain.cost_engine import estimate_purchase_cost
-from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
+from app.domain.grocery_taxonomy import (
+    CANONICAL_GROCERY_INGREDIENTS,
+    OTHER_REQUIREMENT_IDS,
+    RECIPE_INGREDIENT_ALIASES,
+)
 from app.domain.ingredient_normalizer import normalize_ingredient_name
 from app.domain.models import CandidateEvaluation, Recipe, UserConstraints
 from app.domain.provider_errors import (
@@ -121,7 +125,7 @@ def normalize_recipe_ingredients(recipe: Recipe) -> Recipe:
     normalized = []
     for ing in recipe.ingredients:
         result = normalize_ingredient_name(
-            ing.raw_name, canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=GROCERY_INGREDIENT_ALIASES
+            ing.raw_name, canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=RECIPE_INGREDIENT_ALIASES
         )
         normalized.append(
             ing.model_copy(update={"canonical_id": result.canonical_id, "normalization_status": result.status})
@@ -138,10 +142,24 @@ def evaluate_recipe(
     """M08 -> M09 -> M10 -> M11 -> M12 for one grounded recipe."""
 
     normalized = normalize_recipe_ingredients(recipe)
+    # PR #15 non-food wiring fix (2026-09-09): a non-food "other
+    # requirement" (e.g. parchment_paper, cedar_plank) must never enter
+    # cost estimation -- app.domain.pantry_matcher.match_pantry already
+    # excludes these from ITS OWN missing_ingredients/coverage
+    # computation, but this function computes missing_canonical
+    # independently (for cost purposes only) and previously had no
+    # matching exclusion, so an other-requirement ingredient would
+    # silently be treated as an unpriced FOOD ingredient here -- costed
+    # as "missing", contaminating price_complete/cost_confidence for the
+    # whole candidate. estimate_purchase_cost's own docstring already
+    # says callers must filter via pantry_matcher; this now actually
+    # does so, using the exact same OTHER_REQUIREMENT_IDS set.
     missing_canonical = {
         ing.canonical_id
         for ing in normalized.ingredients
-        if ing.canonical_id is not None and ing.canonical_id not in pantry_canonical
+        if ing.canonical_id is not None
+        and ing.canonical_id not in pantry_canonical
+        and ing.canonical_id not in OTHER_REQUIREMENT_IDS
     }
     missing_ingredients = [ing for ing in normalized.ingredients if ing.canonical_id in missing_canonical]
     cost = estimate_purchase_cost(missing_ingredients, price_repository)

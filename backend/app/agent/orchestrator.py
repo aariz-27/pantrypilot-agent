@@ -42,7 +42,7 @@ from app.agent.tools import (
     normalize_recipe_ingredients,
 )
 from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
-from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
+from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES
 from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry
 from app.domain.models import CandidateEvaluation, Recipe, RejectionReason, UserConstraints
 from app.domain.ranker import rank_candidates
@@ -193,8 +193,8 @@ class AgentOrchestrator:
     # -- setup -----------------------------------------------------------
 
     def _init_state(self, request: AgentRequest) -> AgentState:
-        pantry = normalize_pantry(request.pantry_raw, CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
-        excluded = normalize_pantry(request.excluded_raw, CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
+        pantry = normalize_pantry(request.pantry_raw, CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES)
+        excluded = normalize_pantry(request.excluded_raw, CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES)
         return AgentState(
             request_id=request.request_id,
             pantry_raw=list(request.pantry_raw),
@@ -306,7 +306,7 @@ class AgentOrchestrator:
 
         canonical_ids: list[str] = []
         for anchor in anchor_ingredients:
-            result = normalize_ingredient_name(anchor, CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
+            result = normalize_ingredient_name(anchor, CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES)
             if result.canonical_id is None or result.canonical_id not in state.pantry_canonical:
                 raise AgentUnsupportedActionError(
                     f"search anchor {anchor!r} is not present in the user's pantry; anchors must be "

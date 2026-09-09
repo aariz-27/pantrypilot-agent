@@ -148,3 +148,19 @@ def test_non_food_other_requirement_excluded_from_coverage():
     assert result.pantry_coverage == 1.0
     assert result.other_requirements == ("kitchen_twine",)
     assert "kitchen_twine" not in result.missing_ingredients
+
+
+def test_default_other_requirement_ids_now_sources_from_grocery_taxonomy():
+    """PR #15 non-food wiring fix (2026-09-09): match_pantry's default
+    other_requirement_ids must be the set actually reachable from real
+    recipe-ingredient normalization (app.domain.grocery_taxonomy), not
+    the disconnected app.domain.canonical_ingredients seed set -- and
+    must include "cedar_plank", confirmed live during the audit and
+    added specifically because of it."""
+
+    pantry = frozenset()
+    recipe_ingredients = [ingredient("cedar plank", "cedar_plank")]
+    result = match_pantry(pantry, recipe_ingredients)
+    assert result.other_requirements == ("cedar_plank",)
+    assert "cedar_plank" not in result.missing_ingredients
+    assert result.pantry_coverage == 1.0  # no real food ingredient required at all
