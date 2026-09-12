@@ -322,7 +322,9 @@ export default function App() {
         {view === 'loading' ? <LoadingState /> : null}
 
         {view === 'error' ? (
-          <ErrorState message={error?.message} retryable={error?.retryable} onRetry={() => runSearch(formState)} />
+          <div className="state-view">
+            <ErrorState message={error?.message} retryable={error?.retryable} onRetry={() => runSearch(formState)} />
+          </div>
         ) : null}
 
         {view === 'results' && displayResponse ? (
@@ -401,7 +403,11 @@ function ResultsView({
   const hasSeparateClosestAlternatives = hasExact && closestAlternatives.length > 0
 
   if (!hasExact && cardsToShow.length === 0) {
-    return <EmptyState onNewSearch={onNewSearch} />
+    return (
+      <div className="state-view">
+        <EmptyState onNewSearch={onNewSearch} />
+      </div>
+    )
   }
 
   return (

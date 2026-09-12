@@ -2,6 +2,13 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--space-5);
+  /* Cards vary a lot in natural height (a real provider image adds a
+     tall media block; a no-image card doesn't) -- the CSS Grid default
+     of stretching every row to match its tallest card left visible
+     dead space inside the shorter ones. Each card keeps its own
+     height instead ("do not force equal heights if it damages
+     readability"). */
+  align-items: start;
 }
 
 @media (min-width: 640px) {
