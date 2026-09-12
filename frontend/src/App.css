@@ -1,0 +1,141 @@
+/* App shell: a restrained decorative backdrop built entirely from CSS
+   gradients (no external imagery, no fabricated recipe photography --
+   ticket constraint). A soft gold glow top-right and a deeper sapphire
+   pool bottom-left suggest warmth/atmosphere behind the surfaces
+   without competing with recipe content. */
+.app-shell {
+  min-height: 100%;
+  background-color: var(--color-bg);
+  background-image: radial-gradient(720px 420px at 88% -8%, var(--color-gold-soft), transparent 60%),
+    radial-gradient(640px 480px at -10% 18%, var(--color-primary-soft), transparent 55%);
+  background-repeat: no-repeat;
+}
+
+.app-main {
+  padding-top: var(--space-7);
+  padding-bottom: var(--space-8);
+}
+
+/* ---- Hero ---- */
+
+.hero {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto var(--space-7);
+}
+
+.hero__eyebrow {
+  justify-content: center;
+  margin-bottom: var(--space-4);
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  font-size: clamp(28px, 5vw, 44px);
+  line-height: 1.12;
+  margin: 0 0 var(--space-4);
+  color: var(--color-text);
+}
+
+.hero__subtitle {
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: 520px;
+}
+
+/* ---- Results header ---- */
+
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.results-header__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 0 var(--space-2);
+}
+
+.results-header__back:hover {
+  color: var(--color-primary-hover);
+}
+
+.results-header__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(21px, 3vw, 27px);
+  letter-spacing: -0.01em;
+}
+
+.results-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ---- Small notice/info surfaces reused across results states ---- */
+
+.notice-card {
+  padding: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.notice-card p {
+  margin: 0;
+}
+
+.notice-text--warning {
+  font-size: 13px;
+  color: var(--color-warning);
+  margin: 0;
+}
+
+.other-options-panel {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.other-options-panel__intro h3 {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 19px;
+}
+
+.other-options-panel__intro p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.show-more-row {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .hero {
+    margin-bottom: var(--space-5);
+  }
+}

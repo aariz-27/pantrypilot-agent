@@ -14,6 +14,7 @@ import { dedupePantryItems } from './domain/pantryItems'
 import { readVersioned, writeVersioned, clearVersioned } from './utils/storage'
 import { useRecentSearches } from './hooks/useRecentSearches'
 import { useSavedRecipes } from './hooks/useSavedRecipes'
+import './App.css'
 
 const PANTRY_STORAGE_KEY = 'pantry'
 const PANTRY_STORAGE_VERSION = 1
@@ -272,16 +273,15 @@ export default function App() {
   }
 
   return (
-    <>
+    <div className="app-shell">
       <Header onBrandClick={handleNewSearch} onOpenLocalData={() => setLocalDataOpen(true)} />
-      <main className="container" style={{ paddingTop: 'var(--space-6)', paddingBottom: 'var(--space-7)' }}>
+      <main className="container app-main">
         {view === 'search' ? (
           <>
-            <div style={{ textAlign: 'center', maxWidth: 560, margin: '0 auto var(--space-6)' }}>
-              <h1 style={{ fontSize: 30, margin: '0 0 var(--space-2)' }}>
-                Cook smarter with what you already have.
-              </h1>
-              <p style={{ color: 'var(--color-text-muted)', margin: 0 }}>
+            <div className="hero">
+              <span className="eyebrow hero__eyebrow">Pantry-First Recipes</span>
+              <h1 className="hero__title">Cook smarter with what you already have.</h1>
+              <p className="hero__subtitle">
                 PantryPilot searches real recipes based on ingredients you already have -- it never invents recipes.
               </p>
             </div>
@@ -335,7 +335,7 @@ export default function App() {
           onClearAll={handleClearAllLocalData}
         />
       ) : null}
-    </>
+    </div>
   )
 }
 
@@ -375,13 +375,13 @@ function ResultsView({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+    <div className="results-view">
+      <div className="results-header">
         <div>
-          <button type="button" onClick={onNewSearch} className="search-form__more-toggle" style={{ padding: 0, marginBottom: 4 }}>
+          <button type="button" onClick={onNewSearch} className="results-header__back">
             ← New search
           </button>
-          <h2 style={{ margin: 0 }}>{hasExact ? 'Best matches for you' : 'Closest options for you'}</h2>
+          <h2 className="results-header__title">{hasExact ? 'Best matches for you' : 'Closest options for you'}</h2>
         </div>
         {pendingHaveCount > 0 ? (
           <button type="button" className="btn btn-secondary" onClick={onRefreshRecommendations}>
@@ -391,16 +391,14 @@ function ResultsView({
       </div>
 
       {response.pantry_unresolved.length > 0 ? (
-        <p style={{ fontSize: 13, color: 'var(--color-warning)', margin: 0 }}>
+        <p className="notice-text--warning">
           Not recognized and not used in this search: {response.pantry_unresolved.join(', ')}
         </p>
       ) : null}
 
       {response.higher_match_time_excluded ? (
-        <div className="card" style={{ padding: 'var(--space-4)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text)' }}>
-            Some better pantry matches were excluded because they exceeded your {currentTotalTimeMinutes}-minute limit.
-          </p>
+        <div className="card notice-card">
+          <p>Some better pantry matches were excluded because they exceeded your {currentTotalTimeMinutes}-minute limit.</p>
           <button type="button" className="btn btn-secondary" onClick={onShowLongerRecipes}>
             Show longer recipes
           </button>
@@ -412,23 +410,18 @@ function ResultsView({
       <RecipeGrid cards={cardsToShow} onOpen={onOpen} isSaved={isSaved} />
 
       {hasMoreToShow ? (
-        <button
-          type="button"
-          className="btn btn-secondary"
-          style={{ alignSelf: 'center' }}
-          onClick={onShowMoreOptions}
-        >
-          Show more options
-        </button>
+        <div className="show-more-row">
+          <button type="button" className="btn btn-secondary" onClick={onShowMoreOptions}>
+            Show more options
+          </button>
+        </div>
       ) : null}
 
       {hasSeparateClosestAlternatives ? (
-        <div className="card" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <div>
-            <h3 style={{ margin: '0 0 4px' }}>Other options</h3>
-            <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: 13 }}>
-              These use a different main ingredient than what you searched for.
-            </p>
+        <div className="card other-options-panel">
+          <div className="other-options-panel__intro">
+            <h3>Other options</h3>
+            <p>These use a different main ingredient than what you searched for.</p>
           </div>
           <RecipeGrid cards={closestAlternatives} onOpen={onOpen} isSaved={isSaved} />
         </div>

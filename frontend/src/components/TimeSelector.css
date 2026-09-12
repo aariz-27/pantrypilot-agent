@@ -6,7 +6,7 @@
 
 .time-selector__option {
   min-height: 40px;
-  padding: 0 14px;
+  padding: 0 16px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
@@ -14,7 +14,8 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease;
+  transition: background-color 140ms var(--ease-premium), border-color 140ms var(--ease-premium),
+    color 140ms var(--ease-premium), transform 100ms var(--ease-premium);
 }
 
 .time-selector__option:hover:not([aria-pressed='true']) {
@@ -36,9 +37,19 @@
   background: var(--color-primary);
   border-color: var(--color-primary);
   color: var(--color-primary-contrast);
+  box-shadow: var(--shadow-sm);
 }
 
 .time-selector__custom {
   margin-top: var(--space-2);
   max-width: 160px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .time-selector__option {
+    transition: none;
+  }
+  .time-selector__option:active {
+    transform: none;
+  }
 }

@@ -88,7 +88,7 @@ export function LocalDataPanel({
     <div className="local-data-panel__overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="local-data-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef}>
         <div className="local-data-panel__header">
-          <h2 id={titleId} style={{ margin: 0, fontSize: 18 }}>
+          <h2 id={titleId} className="local-data-panel__title">
             Your data
           </h2>
           <button type="button" className="btn-icon" onClick={onClose} ref={closeButtonRef} aria-label="Close">
@@ -97,13 +97,13 @@ export function LocalDataPanel({
         </div>
 
         <div className="local-data-panel__body">
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-muted)' }}>
+          <p className="local-data-panel__intro">
             Everything here is stored only in this browser. Nothing is sent anywhere until you run a search.
           </p>
 
           <section>
             <div className="local-data-panel__section-header">
-              <h3 style={{ margin: 0, fontSize: 15 }}>Recent searches</h3>
+              <h3 className="local-data-panel__section-title">Recent searches</h3>
               {history.length > 0 ? (
                 <button type="button" className="local-data-panel__link-btn" onClick={onClearHistory}>
                   Clear history
@@ -111,7 +111,7 @@ export function LocalDataPanel({
               ) : null}
             </div>
             {history.length === 0 ? (
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-subtle)' }}>No recent searches yet.</p>
+              <p className="local-data-panel__empty">No recent searches yet.</p>
             ) : (
               <ul className="local-data-panel__list">
                 {history.map((entry, index) => (
@@ -134,7 +134,7 @@ export function LocalDataPanel({
 
           <section>
             <div className="local-data-panel__section-header">
-              <h3 style={{ margin: 0, fontSize: 15 }}>Saved recipes</h3>
+              <h3 className="local-data-panel__section-title">Saved recipes</h3>
               {saved.length > 0 ? (
                 <button type="button" className="local-data-panel__link-btn" onClick={onClearSaved}>
                   Clear saved recipes
@@ -142,7 +142,7 @@ export function LocalDataPanel({
               ) : null}
             </div>
             {saved.length === 0 ? (
-              <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-subtle)' }}>No saved recipes yet.</p>
+              <p className="local-data-panel__empty">No saved recipes yet.</p>
             ) : (
               <ul className="local-data-panel__list">
                 {saved.map((recipe) => {
@@ -168,8 +168,8 @@ export function LocalDataPanel({
           </section>
 
           <section>
-            <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 15 }}>Reset</h3>
-            <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <h3 className="local-data-panel__section-title local-data-panel__section-title--standalone">Reset</h3>
+            <div className="local-data-panel__reset-row">
               <button type="button" className="btn btn-secondary" onClick={onClearPantry}>
                 Clear current pantry
               </button>

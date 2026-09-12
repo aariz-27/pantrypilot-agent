@@ -16,6 +16,11 @@
   font-size: 13px;
   font-weight: 600;
   border: 1px solid transparent;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.chip:hover {
+  border-color: currentColor;
 }
 
 .chip--unresolved {
@@ -36,8 +41,19 @@
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
+  transition: background-color 120ms ease;
 }
 
 .chip__remove:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme='dark'] .chip__remove:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .chip__remove:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
 }

@@ -1,27 +1,47 @@
+/* PantryPilot — Luxury design tokens.
+   --color-primary keeps its original meaning (the app's blue,
+   used across nearly every existing component for focus rings,
+   selected pills, checkboxes, and links) so most component
+   stylesheets need no changes. --color-gold is new and additive:
+   the flagship luxury accent, used sparingly and only where this
+   redesign explicitly calls for it (primary CTA, save/star states,
+   header brand mark, hero emphasis) -- never the default interactive
+   color everywhere, per the "gold sparingly" brief. */
+
 :root {
-  --color-bg: #f6f8fb;
-  --color-surface: #ffffff;
+  /* ---- Light theme: warm ivory, still premium ---- */
+  --color-bg: #f7f3ea;
+  --color-bg-elevated: #fbf8f1;
+  --color-surface: #fffdf9;
   --color-surface-raised: #ffffff;
-  --color-border: #e2e8f0;
-  --color-text: #0f172a;
-  --color-text-muted: #64748b;
-  --color-text-subtle: #94a3b8;
+  --color-surface-glass: rgba(255, 253, 249, 0.72);
+  --color-border: #e7dcc4;
+  --color-border-strong: #d8c79c;
+  --color-text: #1a2133;
+  --color-text-muted: #56607a;
+  --color-text-subtle: #8992a8;
 
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
+  --color-primary: #2557d6;
+  --color-primary-hover: #1c46b3;
   --color-primary-contrast: #ffffff;
-  --color-primary-soft: #eaf1ff;
+  --color-primary-soft: #e8eefc;
 
-  --color-success: #16a34a;
-  --color-success-soft: #e8f7ee;
-  --color-danger: #dc2626;
-  --color-danger-soft: #fdecec;
-  --color-warning: #b45309;
-  --color-warning-soft: #fef3e0;
+  --color-gold: #96691d;
+  --color-gold-hover: #7c5417;
+  --color-gold-contrast: #fffaf0;
+  --color-gold-soft: rgba(150, 105, 29, 0.12);
+
+  --color-success: #1f7a52;
+  --color-success-soft: #e5f3ec;
+  --color-danger: #b23b2e;
+  --color-danger-soft: #fbe9e6;
+  --color-warning: #93650f;
+  --color-warning-soft: #f6ecd8;
 
   --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
   --radius-pill: 999px;
 
   --space-1: 4px;
@@ -31,71 +51,93 @@
   --space-5: 24px;
   --space-6: 32px;
   --space-7: 48px;
+  --space-8: 64px;
 
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14);
+  --shadow-sm: 0 1px 3px rgba(41, 30, 10, 0.08);
+  --shadow-md: 0 8px 24px rgba(41, 30, 10, 0.1);
+  --shadow-lg: 0 24px 64px rgba(41, 30, 10, 0.16);
+  --shadow-gold: 0 10px 26px rgba(150, 105, 29, 0.26);
 
+  --font-display: 'Fraunces', Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
   --focus-ring: 0 0 0 3px var(--color-primary-soft), 0 0 0 1px var(--color-primary);
+  --ease-premium: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --color-bg: #0b1120;
-    --color-surface: #131c2e;
-    --color-surface-raised: #182338;
-    --color-border: #253248;
-    --color-text: #e6ecf5;
-    --color-text-muted: #a2b0c4;
-    --color-text-subtle: #6b7994;
+    --color-bg: #090d18;
+    --color-bg-elevated: #0d1322;
+    --color-surface: #111a2c;
+    --color-surface-raised: #162136;
+    --color-surface-glass: rgba(17, 26, 44, 0.62);
+    --color-border: rgba(201, 164, 99, 0.14);
+    --color-border-strong: rgba(201, 164, 99, 0.3);
+    --color-text: #f4efe2;
+    --color-text-muted: #aab4cb;
+    --color-text-subtle: #717d99;
 
     --color-primary: #5b9bff;
     --color-primary-hover: #7cadff;
     --color-primary-contrast: #071021;
-    --color-primary-soft: #17253f;
+    --color-primary-soft: rgba(91, 155, 255, 0.14);
 
-    --color-success: #34d17d;
-    --color-success-soft: #113522;
-    --color-danger: #f16464;
-    --color-danger-soft: #3a1a1a;
-    --color-warning: #f2b455;
-    --color-warning-soft: #3a2a10;
+    --color-gold: #c9a463;
+    --color-gold-hover: #ddbb7d;
+    --color-gold-contrast: #14192a;
+    --color-gold-soft: rgba(201, 164, 99, 0.14);
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
-    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.45);
+    --color-success: #4fb286;
+    --color-success-soft: rgba(79, 178, 134, 0.14);
+    --color-danger: #dd7c6f;
+    --color-danger-soft: rgba(221, 124, 111, 0.14);
+    --color-warning: #e0a75e;
+    --color-warning-soft: rgba(224, 167, 94, 0.14);
+
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
+    --shadow-gold: 0 12px 30px rgba(201, 164, 99, 0.2);
 
     --focus-ring: 0 0 0 3px var(--color-primary-soft), 0 0 0 1px var(--color-primary);
   }
 }
 
 :root[data-theme='dark'] {
-  --color-bg: #0b1120;
-  --color-surface: #131c2e;
-  --color-surface-raised: #182338;
-  --color-border: #253248;
-  --color-text: #e6ecf5;
-  --color-text-muted: #a2b0c4;
-  --color-text-subtle: #6b7994;
+  --color-bg: #090d18;
+  --color-bg-elevated: #0d1322;
+  --color-surface: #111a2c;
+  --color-surface-raised: #162136;
+  --color-surface-glass: rgba(17, 26, 44, 0.62);
+  --color-border: rgba(201, 164, 99, 0.14);
+  --color-border-strong: rgba(201, 164, 99, 0.3);
+  --color-text: #f4efe2;
+  --color-text-muted: #aab4cb;
+  --color-text-subtle: #717d99;
 
   --color-primary: #5b9bff;
   --color-primary-hover: #7cadff;
   --color-primary-contrast: #071021;
-  --color-primary-soft: #17253f;
+  --color-primary-soft: rgba(91, 155, 255, 0.14);
 
-  --color-success: #34d17d;
-  --color-success-soft: #113522;
-  --color-danger: #f16464;
-  --color-danger-soft: #3a1a1a;
-  --color-warning: #f2b455;
-  --color-warning-soft: #3a2a10;
+  --color-gold: #c9a463;
+  --color-gold-hover: #ddbb7d;
+  --color-gold-contrast: #14192a;
+  --color-gold-soft: rgba(201, 164, 99, 0.14);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.45);
+  --color-success: #4fb286;
+  --color-success-soft: rgba(79, 178, 134, 0.14);
+  --color-danger: #dd7c6f;
+  --color-danger-soft: rgba(221, 124, 111, 0.14);
+  --color-warning: #e0a75e;
+  --color-warning-soft: rgba(224, 167, 94, 0.14);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.55);
+  --shadow-gold: 0 12px 30px rgba(201, 164, 99, 0.2);
 
   --focus-ring: 0 0 0 3px var(--color-primary-soft), 0 0 0 1px var(--color-primary);
 }

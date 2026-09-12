@@ -42,6 +42,23 @@ export function LoadingState() {
           )
         })}
       </ul>
+
+      {/* Purely decorative shape of what's coming, aria-hidden so
+          screen-reader users rely on the status text/steps above
+          instead of three empty-looking cards. */}
+      <div className="loading-state__skeleton-grid" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="skeleton-card">
+            <div className="skeleton-card__media" />
+            <div className="skeleton-card__body">
+              <div className="skeleton-line skeleton-line--tag" />
+              <div className="skeleton-line skeleton-line--title" />
+              <div className="skeleton-line skeleton-line--wide" />
+              <div className="skeleton-line skeleton-line--narrow" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
