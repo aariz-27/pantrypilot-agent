@@ -3,7 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <!-- Frontend polish patch: dark navy/gold is now the app's only
+         theme, so this is pinned to dark -- otherwise a light-OS user
+         would see light-styled native form controls/scrollbars behind
+         our dark UI on first paint. -->
+    <meta name="color-scheme" content="dark" />
     <title>PantryPilot</title>
     <meta name="description" content="Cook smarter with what you already have." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

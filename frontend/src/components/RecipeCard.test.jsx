@@ -56,9 +56,14 @@ describe('RecipeCard', () => {
     expect(screen.queryByText(/AED 0/)).not.toBeInTheDocument()
   })
 
-  it('renders a "No image available" placeholder when image_url is missing', () => {
-    render(<RecipeCard card={makeCard({ image_url: null })} onOpen={vi.fn()} />)
-    expect(screen.getByText('No image available')).toBeInTheDocument()
+  it('renders no image block at all when image_url is missing (no placeholder, no empty frame)', () => {
+    const { container } = render(<RecipeCard card={makeCard({ image_url: null })} onOpen={vi.fn()} />)
+    expect(container.querySelector('img')).not.toBeInTheDocument()
+    expect(container.querySelector('.recipe-card__media')).not.toBeInTheDocument()
+    expect(screen.queryByText('No image available')).not.toBeInTheDocument()
+    // The information that would otherwise overlay the image is not
+    // lost -- it still renders as a plain badge row.
+    expect(screen.getByText(/★ 75% pantry match/)).toBeInTheDocument()
   })
 
   it('renders the real image with meaningful alt text based on the recipe name', () => {
@@ -78,7 +83,9 @@ describe('RecipeCard', () => {
   it('never renders a javascript: image_url as an actual img src', () => {
     const { container } = render(<RecipeCard card={makeCard({ image_url: 'javascript:alert(1)' })} onOpen={vi.fn()} />)
     expect(container.querySelector('img')).not.toBeInTheDocument()
-    expect(screen.getByText('No image available')).toBeInTheDocument()
+    // Rejected by safeHttpUrl, so it's treated the same as a missing
+    // image_url -- no image block at all.
+    expect(container.querySelector('.recipe-card__media')).not.toBeInTheDocument()
   })
 
   it('shows an "Alternative pick" badge when contains_active_anchor is explicitly false', () => {

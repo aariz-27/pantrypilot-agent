@@ -1,5 +1,4 @@
 import { safeHttpUrl } from '../utils/safeUrl'
-import { cuisineGlyph } from '../utils/cuisineGlyph'
 import './RecipeCard.css'
 
 const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', unknown: 'Unknown' }
@@ -17,32 +16,37 @@ export function RecipeCard({ card, onOpen, saved }) {
   const matchPercent = Math.round(card.pantry_coverage * 100)
   const imageUrl = safeHttpUrl(card.image_url)
 
+  const matchBadge = <span className="badge badge-success recipe-card__match-badge">★ {matchPercent}% pantry match</span>
+  const timeBadge =
+    card.total_time_minutes !== null ? <span className="recipe-card__time-badge">⏱ {card.total_time_minutes} min</span> : null
+  // Read-only indicator, not a control -- saving/unsaving only happens
+  // from the detail view, so this never nests a second interactive
+  // button inside the card's own button element.
+  const savedBadge = saved ? (
+    <span className="recipe-card__saved-badge" aria-label="Saved to your recipes">
+      ★ Saved
+    </span>
+  ) : null
+
   return (
     <button type="button" className="card recipe-card" onClick={() => onOpen(card)}>
-      <div className="recipe-card__media">
-        {imageUrl ? (
+      {imageUrl ? (
+        <div className="recipe-card__media">
           <img src={imageUrl} alt={card.name} />
-        ) : (
-          <div className="recipe-card__no-image">
-            <span className="recipe-card__no-image-glyph" aria-hidden="true">
-              {cuisineGlyph(card.cuisine)}
-            </span>
-            <span className="recipe-card__no-image-label">No image available</span>
-          </div>
-        )}
-        <span className="badge badge-success recipe-card__match-badge">★ {matchPercent}% pantry match</span>
-        {card.total_time_minutes !== null ? (
-          <span className="recipe-card__time-badge">⏱ {card.total_time_minutes} min</span>
-        ) : null}
-        {/* Read-only indicator, not a control -- saving/unsaving only
-            happens from the detail view, so this never nests a second
-            interactive button inside the card's own button element. */}
-        {saved ? (
-          <span className="recipe-card__saved-badge" aria-label="Saved to your recipes">
-            ★ Saved
-          </span>
-        ) : null}
-      </div>
+          {matchBadge}
+          {timeBadge}
+          {savedBadge}
+        </div>
+      ) : (
+        // No provider image_url -- render no image block/frame/placeholder
+        // at all (never a fabricated photo), just the same match/time/
+        // saved information as a plain badge row so nothing is lost.
+        <div className="recipe-card__badges-row">
+          {matchBadge}
+          {timeBadge}
+          {savedBadge}
+        </div>
+      )}
 
       <div className="recipe-card__body">
         <div className="recipe-card__tags">
