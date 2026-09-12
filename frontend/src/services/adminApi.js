@@ -58,10 +58,17 @@ async function safeFetch(url, options) {
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'DELETE', 'PUT'])
 
-async function adminFetch(path, { method = 'GET', body } = {}) {
+async function adminFetch(path, { method = 'GET', body, requireCsrf = true } = {}) {
   const headers = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
-  if (MUTATING_METHODS.has(method)) {
+  // requireCsrf defaults to true for every mutating call -- login is
+  // the one narrow, explicit exception (there is no session yet to
+  // hold a CSRF token before authentication succeeds), never a broad
+  // "unauthenticated POSTs skip CSRF" rule. The backend's own
+  // require_csrf dependency independently enforces this regardless of
+  // what the frontend sends, so this can never weaken real CSRF
+  // protection -- it only fixes which requests the frontend attempts.
+  if (MUTATING_METHODS.has(method) && requireCsrf) {
     if (!csrfToken) {
       throw new ApiError('Your admin session expired. Please sign in again.', { code: 'ADMIN_UNAUTHORIZED', status: 401 })
     }
@@ -84,7 +91,17 @@ async function adminFetch(path, { method = 'GET', body } = {}) {
 // -- auth --------------------------------------------------------------
 
 export async function login(username, password) {
-  const session = await adminFetch('/admin/auth/login', { method: 'POST', body: { username, password } })
+  // No session/CSRF token can exist before login succeeds -- this is
+  // the one explicit, named exception to the default CSRF requirement
+  // (see adminFetch). The backend's own login route has no CSRF
+  // dependency either (app.admin.deps.require_csrf only applies to
+  // routes that already require an authenticated session), so this
+  // doesn't weaken anything the backend enforces.
+  const session = await adminFetch('/admin/auth/login', {
+    method: 'POST',
+    body: { username, password },
+    requireCsrf: false,
+  })
   csrfToken = session.csrf_token
   return session
 }
