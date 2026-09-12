@@ -123,7 +123,7 @@ describe('SearchForm', () => {
     it('becomes enabled and toggleable once a cuisine is selected', async () => {
       render(<StatefulSearchForm />)
       await userEvent.click(screen.getByRole('button', { name: /More options/ }))
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Cuisine' }), 'Asian')
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Cuisine' }), 'Italian')
 
       const strictCheckbox = screen.getByRole('checkbox', { name: 'Strict cuisine match' })
       expect(strictCheckbox).toBeEnabled()

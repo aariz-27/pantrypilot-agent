@@ -1,16 +1,26 @@
 import { useId } from 'react'
 
+// 2026-09-13 cuisine-alignment fix: exactly RecipeAPI.io's documented
+// strict-cuisine filter enum (11 values), plus the "Any cuisine"
+// sentinel. Must match backend/app/recipe/provider.py's
+// SUPPORTED_STRICT_CUISINES exactly -- see that module's docstring for
+// why non-strict cuisines (e.g. Indian/Pakistani, routed to the
+// separate local-curated provider) are a different, untouched concern.
+// A strict search for a cuisine outside this list previously reached
+// RecipeAPI.io anyway and silently returned zero results every time.
 const CUISINES = [
   'Any cuisine',
-  'Asian',
-  'Italian',
-  'Indian',
-  'Pakistani',
-  'Mexican',
-  'Mediterranean',
   'American',
   'Chinese',
   'French',
+  'Greek',
+  'Italian',
+  'Japanese',
+  'Mexican',
+  'Portuguese',
+  'Spanish',
+  'Thai',
+  'Turkish',
 ]
 
 export function CuisineSelect({ value, onChange }) {

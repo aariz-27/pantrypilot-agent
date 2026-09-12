@@ -931,3 +931,22 @@ async def test_provider_search_broadening_applies_to_free_text_enrichment_term_t
     )
     assert call_params[0]["ingredients"] == "ground beef"
     assert call_params[1]["search"] == "ground beef"
+
+
+async def test_search_sends_every_canonical_supported_cuisine_unchanged():
+    # 2026-09-13 cuisine-alignment fix (ticket section 5): the adapter
+    # must send exactly SUPPORTED_STRICT_CUISINES' own lowercase values
+    # to RecipeAPI.io -- never transformed into an unsupported variant.
+    from app.recipe.provider import SUPPORTED_STRICT_CUISINES
+
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request.url.params.get("cuisine"))
+        return httpx.Response(200, json={"data": [], "meta": {}})
+
+    adapter = make_adapter(handler)
+    for cuisine in sorted(SUPPORTED_STRICT_CUISINES):
+        await adapter.search(SearchStrategy(cuisine=cuisine))
+
+    assert captured == sorted(SUPPORTED_STRICT_CUISINES)

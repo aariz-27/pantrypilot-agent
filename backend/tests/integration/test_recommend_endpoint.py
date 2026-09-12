@@ -618,3 +618,100 @@ def test_contains_active_anchor_defaults_to_none_when_no_anchor_tracked():
         assert response.json()["recommendations"][0]["contains_active_anchor"] is None
     finally:
         _clear()
+
+
+# -- cuisine/RecipeAPI enum alignment (2026-09-13) --------------------------
+
+
+def test_strict_cuisine_accepts_every_supported_value():
+    from app.rate_limit import limiter
+    from app.recipe.provider import SUPPORTED_STRICT_CUISINES
+
+    fake = FakeOrchestrator(_happy_path_result())
+    _override(fake)
+    try:
+        client = TestClient(app)
+        for cuisine in sorted(SUPPORTED_STRICT_CUISINES):
+            limiter.reset()  # 11 supported cuisines exceed the 10/minute /recommend limit otherwise
+            response = client.post(
+                "/api/recommend", json={**VALID_REQUEST, "cuisine": cuisine, "cuisine_strict": True}
+            )
+            assert response.status_code == 200, (cuisine, response.text)
+            assert fake.request.cuisine_preference == cuisine
+            assert fake.request.cuisine_strict is True
+    finally:
+        _clear()
+
+
+def test_strict_cuisine_accepts_title_cased_supported_value_case_insensitively():
+    # The frontend submits the display label ("Italian"), not the
+    # lowercase canonical form -- validation must not require callers
+    # to pre-lowercase.
+    _override(FakeOrchestrator(_happy_path_result()))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json={**VALID_REQUEST, "cuisine": "Italian", "cuisine_strict": True})
+        assert response.status_code == 200
+    finally:
+        _clear()
+
+
+def test_strict_cuisine_rejects_unsupported_values():
+    # No custom RequestValidationError handler is registered (matches
+    # every other 422 in this file, e.g. test_missing_servings_is_rejected
+    # -- none inspect the body shape) -- FastAPI's default
+    # {"detail": [...]} envelope applies, not the PantryPilotError
+    # {"error": {...}} shape (that handler only fires for a raised
+    # PantryPilotError, never a Pydantic ValidationError).
+    client = TestClient(app)
+    for unsupported in ("Indian", "Pakistani", "Asian", "Mediterranean", "indian"):
+        response = client.post(
+            "/api/recommend", json={**VALID_REQUEST, "cuisine": unsupported, "cuisine_strict": True}
+        )
+        assert response.status_code == 422, unsupported
+        assert "not a supported cuisine" in response.json()["detail"][0]["msg"]
+
+
+def test_strict_cuisine_rejection_never_reaches_the_orchestrator():
+    # Do not silently send an unsupported cuisine to RecipeAPI.io --
+    # confirmed here by proving the (fake, but request-recording)
+    # orchestrator is never even invoked for a rejected request.
+    fake = FakeOrchestrator(_happy_path_result())
+    _override(fake)
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json={**VALID_REQUEST, "cuisine": "Indian", "cuisine_strict": True})
+        assert response.status_code == 422
+        assert not hasattr(fake, "request")
+    finally:
+        _clear()
+
+
+def test_non_strict_unsupported_cuisine_is_still_accepted():
+    # DEC-003: "indian"/"pakistani"/"desi" remain valid NON-strict
+    # cuisine_preference values (they route to the separate
+    # LocalCuratedRecipeProvider) -- this ticket only restricts STRICT
+    # cuisine filtering, which is the combination that previously
+    # produced silent, always-empty RecipeAPI.io results.
+    fake = FakeOrchestrator(_happy_path_result())
+    _override(fake)
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/recommend", json={**VALID_REQUEST, "cuisine": "Indian", "cuisine_strict": False}
+        )
+        assert response.status_code == 200
+        assert fake.request.cuisine_preference == "Indian"
+        assert fake.request.cuisine_strict is False
+    finally:
+        _clear()
+
+
+def test_no_cuisine_search_still_works():
+    _override(FakeOrchestrator(_happy_path_result()))
+    try:
+        client = TestClient(app)
+        response = client.post("/api/recommend", json=VALID_REQUEST)
+        assert response.status_code == 200
+    finally:
+        _clear()
