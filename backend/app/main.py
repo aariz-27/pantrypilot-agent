@@ -5,6 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
+from app.api.admin_audit import router as admin_audit_router
+from app.api.admin_auth import router as admin_auth_router
+from app.api.admin_dashboard import router as admin_dashboard_router
+from app.api.admin_ingredients import router as admin_ingredients_router
+from app.api.admin_prices import router as admin_prices_router
 from app.api.health import router as health_router
 from app.api.ingredients import router as ingredients_router
 from app.api.recommend import router as recommend_router
@@ -32,6 +37,12 @@ _ERROR_CODE_HTTP_STATUS: dict[str, int] = {
     "LLM_PROVIDER_MALFORMED_RESPONSE": 502,
     "AGENT_MALFORMED_ACTION": 503,
     "AGENT_UNSUPPORTED_ACTION": 500,
+    "ADMIN_UNAUTHORIZED": 401,
+    "ADMIN_CSRF_INVALID": 403,
+    "ADMIN_NOT_FOUND": 404,
+    "ADMIN_CONFLICT": 409,
+    "ADMIN_VALIDATION_ERROR": 422,
+    "ADMIN_NOT_CONFIGURED": 503,
 }
 
 
@@ -70,6 +81,16 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(recommend_router, prefix="/api")
     app.include_router(ingredients_router, prefix="/api")
+    # Admin dashboard (feature/admin-ingredient-dashboard, ticket
+    # section 5): a separate /api/admin/... namespace. Every route in
+    # these routers independently enforces its own session/CSRF
+    # dependency (app.admin.deps) -- this include_router call adds no
+    # additional auth of its own, matching the public routers' style.
+    app.include_router(admin_auth_router, prefix="/api")
+    app.include_router(admin_ingredients_router, prefix="/api")
+    app.include_router(admin_prices_router, prefix="/api")
+    app.include_router(admin_audit_router, prefix="/api")
+    app.include_router(admin_dashboard_router, prefix="/api")
     return app
 
 

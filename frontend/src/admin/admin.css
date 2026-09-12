@@ -1,0 +1,458 @@
+/* Admin dashboard layout (ticket section 23): visually belongs to
+   PantryPilot (reuses tokens.css + global.css's .btn/.card/.badge/
+   .field-* classes directly) but is information-dense and practical --
+   no decorative background imagery, no hero typography, no ambient
+   motion. "Premium operations console." */
+
+.admin-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.admin-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--color-bg-elevated);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5) var(--space-4);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.admin-sidebar__brand {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  color: var(--color-gold);
+  margin-bottom: var(--space-6);
+}
+
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.admin-nav__item {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-nav__item:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.admin-nav__item--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.admin-sidebar__footer {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-sidebar__user {
+  font-size: 13px;
+  color: var(--color-text-subtle);
+}
+
+.admin-logout-btn {
+  width: 100%;
+}
+
+.admin-main {
+  flex: 1;
+  padding: var(--space-6);
+  max-width: 1100px;
+}
+
+.admin-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.admin-page-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.admin-muted {
+  color: var(--color-text-subtle);
+  font-size: 14px;
+}
+
+.admin-success-text {
+  color: var(--color-success);
+  font-size: 13px;
+}
+
+.admin-error-text {
+  color: var(--color-danger);
+}
+
+.admin-boot-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+}
+
+/* -- login screen -------------------------------------------------- */
+
+.admin-login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  padding: var(--space-5);
+}
+
+.admin-login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-login-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  margin: 0;
+  color: var(--color-gold);
+}
+
+.admin-login-subtitle {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.admin-login-submit {
+  width: 100%;
+  margin-top: var(--space-2);
+}
+
+.admin-login-error {
+  margin: 0;
+}
+
+/* -- dashboard metrics ------------------------------------------------ */
+
+.admin-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4);
+}
+
+.admin-metric-card {
+  padding: var(--space-4);
+}
+
+.admin-metric-card__value {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-gold);
+}
+
+.admin-metric-card__label {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* -- toolbars / forms / tables ----------------------------------------- */
+
+.admin-toolbar {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.admin-toolbar .field-input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.admin-form {
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-form__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.admin-inline-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.admin-reassign-form {
+  background: var(--color-surface-raised);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.admin-inline-input {
+  width: 100px;
+}
+
+.admin-section {
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.admin-section__title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  margin: 0 0 var(--space-3);
+}
+
+.admin-subsection-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin: var(--space-4) 0 var(--space-2);
+}
+
+.admin-table-scroller {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th {
+  text-align: left;
+  color: var(--color-text-subtle);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.admin-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.admin-table code {
+  background: var(--color-input-well);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.admin-table__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.admin-empty-row {
+  text-align: center;
+  color: var(--color-text-subtle);
+  padding: var(--space-5) 0;
+}
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.admin-tag-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.admin-tag {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+  border-radius: var(--radius-pill);
+  padding: 4px 6px 4px 12px;
+  font-size: 13px;
+}
+
+.admin-tag__reassign {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.admin-tag__remove {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+}
+
+.admin-tag__remove:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.admin-destructive-link {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+/* -- confirm dialog ------------------------------------------------ */
+
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 6, 14, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 100;
+}
+
+.admin-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-5);
+}
+
+.admin-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* Deliberate visual separation between SAVE and DELETE/DEACTIVATE
+   (ticket section 18) -- destructive confirm buttons are always red,
+   never share the gold/sapphire primary-action styling. */
+.admin-destructive-btn {
+  background: var(--color-danger);
+  color: #1a0e0c;
+  border: none;
+}
+
+.admin-destructive-btn:hover {
+  background: #e8998d;
+}
+
+/* -- responsive (ticket section 43: 1440/1280/768/390) --------------- */
+
+@media (max-width: 900px) {
+  .admin-shell {
+    flex-direction: column;
+  }
+
+  .admin-sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .admin-sidebar__brand {
+    margin-bottom: 0;
+    margin-right: auto;
+  }
+
+  .admin-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: initial;
+  }
+
+  .admin-sidebar__footer {
+    border-top: none;
+    padding-top: 0;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .admin-logout-btn {
+    width: auto;
+  }
+
+  .admin-main {
+    padding: var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-toolbar {
+    flex-direction: column;
+  }
+
+  .admin-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

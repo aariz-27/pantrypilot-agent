@@ -49,3 +49,44 @@ def test_allowed_origins_rejects_wildcard():
 def test_allowed_origins_rejects_wildcard_mixed_with_real_origins():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, allowed_origins="https://a.example,*")
+
+
+# -- admin dashboard config (feature/admin-ingredient-dashboard) -----------
+#
+# Regression coverage for a real bug caught during live-server
+# acceptance testing (2026-09-13): the admin_* fields must be
+# populated from the ticket-mandated PANTRYPILOT_ADMIN_* env var names
+# specifically -- not the bare field name (there is no global
+# env_prefix on Settings) -- while ALSO remaining constructible by
+# plain Python kwarg (every admin test fixture and FastAPI
+# dependency-override in this repo does exactly that). Both paths must
+# keep working; a regression in either one previously passed unit
+# tests that only exercised the other.
+
+
+def test_admin_not_configured_by_default():
+    settings = Settings(_env_file=None)
+    assert settings.admin_configured is False
+
+
+def test_admin_configured_via_direct_kwargs():
+    settings = Settings(
+        _env_file=None, admin_username="founder", admin_password_hash="scrypt$hash", admin_session_secret="secret"
+    )
+    assert settings.admin_username == "founder"
+    assert settings.admin_configured is True
+
+
+def test_admin_configured_via_pantrypilot_prefixed_env_vars(monkeypatch):
+    monkeypatch.setenv("PANTRYPILOT_ADMIN_USERNAME", "founder")
+    monkeypatch.setenv("PANTRYPILOT_ADMIN_PASSWORD_HASH", "scrypt$hash")
+    monkeypatch.setenv("PANTRYPILOT_ADMIN_SESSION_SECRET", "secret")
+    settings = Settings(_env_file=None)
+    assert settings.admin_username == "founder"
+    assert settings.admin_password_hash.get_secret_value() == "scrypt$hash"
+    assert settings.admin_configured is True
+
+
+def test_admin_partial_configuration_is_not_configured():
+    settings = Settings(_env_file=None, admin_username="founder")
+    assert settings.admin_configured is False
