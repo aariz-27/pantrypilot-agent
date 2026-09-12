@@ -18,16 +18,19 @@
 
 /* ---- Hero ---- */
 
-/* Positioned so HeroDecor (fixed, z-index 0) can sit visually behind
-   the hero + search panel (z-index 1) without blocking any control --
-   see CulinaryMotifs.jsx. */
+/* HeroDecor sits absolutely within .hero-section (matching its exact
+   height -- "vertically aligned with the hero/search area", not a
+   full-viewport layer) at z-index 0. .hero and .search-form are
+   explicitly given z-index 1 each (not just relying on default
+   positioned-vs-static paint order, which is easy to get backwards)
+   so they are unambiguously guaranteed to stack above the decor. */
 .hero-section {
   position: relative;
   z-index: 1;
 }
 
 .hero-decor {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 0;
   overflow: hidden;
@@ -35,7 +38,8 @@
 }
 
 /* Mobile: no decorative layer at all, glows included -- readability
-   and performance take priority (ticket section "Mobile"). */
+   and performance take priority (ticket: "Mobile ... usability and
+   readability take priority"). */
 @media (max-width: 767px) {
   .hero-decor {
     display: none;
@@ -44,82 +48,92 @@
 
 .hero-decor__glow {
   position: absolute;
-  width: 560px;
-  height: 560px;
+  width: 480px;
+  height: 480px;
   border-radius: 50%;
-  filter: blur(100px);
-  opacity: 0.55;
+  filter: blur(90px);
+  opacity: 0.5;
 }
 
 .hero-decor__glow--left {
-  left: -220px;
-  top: 90px;
+  left: -180px;
+  top: 40px;
   background: radial-gradient(circle, var(--color-gold-soft), transparent 70%);
 }
 
 .hero-decor__glow--right {
-  right: -240px;
-  top: 280px;
+  right: -200px;
+  top: 160px;
   background: radial-gradient(circle, var(--color-primary-soft), transparent 70%);
 }
 
-/* Decorative culinary still-life panels (locally-generated vector art,
-   rasterized to WebP -- see CulinaryMotifs.jsx and
-   src/assets/decor/source/*.svg). A CSS background-image is only
-   fetched by the browser when the media query that sets it actually
-   matches, so mobile below 768px references the file nowhere and
-   never downloads it at all -- not just a hidden 0-opacity element
-   (ticket: "mobile may... disappear entirely", "do not block initial
-   rendering unnecessarily"). */
+/* Decorative culinary still-life panels -- Founder-provided photos,
+   compressed to WebP (src/assets/backgrounds/pantrypilot-bg-{left,
+   right}.webp; the original .png sits alongside for provenance and is
+   never itself referenced). A CSS background-image is only fetched by
+   the browser when the media query that sets it actually matches, so
+   mobile below 768px references the files nowhere and downloads zero
+   bytes of them -- not just a hidden 0-opacity element (verified via
+   a network-request check). A radial-gradient mask (not a straight
+   edge fade) softens BOTH the inward and vertical edges at once, so
+   there is no hard rectangular boundary in any direction ("no obvious
+   sticker effect"). */
 .hero-decor__panel {
   display: none;
   position: absolute;
   top: 0;
   bottom: 0;
   background-repeat: no-repeat;
-  background-position: top center;
   background-size: cover;
 }
 
 .hero-decor__panel--left {
   left: 0;
-  background-image: linear-gradient(90deg, var(--color-bg) 0%, transparent 55%),
-    url('./assets/decor/left-panel.webp');
-  mask-image: linear-gradient(90deg, black 0%, black 45%, transparent 92%);
-  -webkit-mask-image: linear-gradient(90deg, black 0%, black 45%, transparent 92%);
+  background-image: url('./assets/backgrounds/pantrypilot-bg-left.webp');
+  background-position: 30% 32%;
+  mask-image: radial-gradient(ellipse 100% 85% at 8% 34%, black 30%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse 100% 85% at 8% 34%, black 30%, transparent 85%);
 }
 
 .hero-decor__panel--right {
   right: 0;
-  background-image: linear-gradient(270deg, var(--color-bg) 0%, transparent 55%),
-    url('./assets/decor/right-panel.webp');
-  background-position: top right;
-  mask-image: linear-gradient(270deg, black 0%, black 45%, transparent 92%);
-  -webkit-mask-image: linear-gradient(270deg, black 0%, black 45%, transparent 92%);
+  background-image: url('./assets/backgrounds/pantrypilot-bg-right.webp');
+  background-position: 75% 40%;
+  mask-image: radial-gradient(ellipse 100% 85% at 92% 46%, black 30%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse 100% 85% at 92% 46%, black 30%, transparent 85%);
 }
 
-/* Tablet tier: present but deliberately reduced coverage/opacity,
-   tucked mostly past the edge so it never competes with the
-   already-narrow content column (ticket section "Tablet: reduce
-   opacity/coverage"). */
+/* Tablet tier (>=768px): present but reduced substantially so it
+   never crowds the search panel. */
 @media (min-width: 768px) {
   .hero-decor__panel {
     display: block;
-    width: 150px;
-    opacity: 0.16;
+    width: 130px;
+    opacity: 0.14;
   }
 }
 
-/* Desktop tier: the full, more visible composition -- there is real
-   margin outside the 1080px content column here. */
-@media (min-width: 1180px) {
+/* Laptop tier (>=1280px): slightly reduced from the full desktop
+   composition. */
+@media (min-width: 1280px) {
+  .hero-decor__panel {
+    width: 300px;
+    opacity: 0.38;
+  }
+}
+
+/* Desktop tier (>=1440px): the full composition, ~26% of viewport
+   width per side. */
+@media (min-width: 1440px) {
   .hero-decor__panel {
     width: 380px;
-    opacity: 0.5;
+    opacity: 0.55;
   }
 }
 
 .hero {
+  position: relative;
+  z-index: 1;
   text-align: center;
   max-width: 640px;
   margin: 0 auto var(--space-7);

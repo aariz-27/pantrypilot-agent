@@ -1,10 +1,10 @@
-// Purely decorative, locally-authored culinary still-life imagery --
-// never a photo of a real dish, never presented as or implied to be
-// recipe imagery, never claiming provenance of any specific returned
-// recipe (ticket: no external stock photography, no scraping, no
-// fabricated recipe images). Rendered as vector art and rasterized to
-// WebP locally (src/assets/decor/source/*.svg has the originals) so
-// there is no licensing question at all, unlike a sourced photograph.
+// Purely decorative culinary still-life imagery -- never presented as
+// or implied to be recipe imagery, never claiming provenance of any
+// specific returned recipe. Source assets are Founder-provided,
+// pre-approved photos: src/assets/backgrounds/pantrypilot-bg-{left,
+// right}.png (originals, kept for provenance) with a compressed
+// pantrypilot-bg-{left,right}.webp derivative alongside them (the one
+// actually referenced from CSS) -- not duplicated anywhere else.
 //
 // The actual background-image URLs live in App.css, not here: a CSS
 // background-image inside a media query is only fetched by the
