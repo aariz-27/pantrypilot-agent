@@ -12,7 +12,9 @@ trace, never a secret.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.recipe.provider import SUPPORTED_STRICT_CUISINES
 
 
 class RecommendRequest(BaseModel):
@@ -35,6 +37,28 @@ class RecommendRequest(BaseModel):
             if len(item) > 80:
                 raise ValueError("each ingredient must be 1-80 characters")
         return cleaned
+
+    @model_validator(mode="after")
+    def _validate_strict_cuisine_is_provider_supported(self) -> "RecommendRequest":
+        # 2026-09-13 cuisine-alignment fix: scoped to STRICT cuisine
+        # filtering only. A strict request for a cuisine RecipeAPI.io's
+        # own filter enum does not support (e.g. "Indian", "Asian")
+        # previously reached RecipeAPI.io anyway and silently produced
+        # zero results every time -- rejected cleanly here instead, at
+        # the request boundary, before any provider call is made.
+        #
+        # Non-strict `cuisine` is deliberately left unenumerated: DEC-003
+        # approves "indian"/"pakistani"/"desi" as legitimate non-strict
+        # values that route to the separate LocalCuratedRecipeProvider
+        # (app.agent.tools.APPROVED_LOCAL_CURATED_CUISINES) -- untouched
+        # by this ticket.
+        if self.cuisine_strict and self.cuisine is not None:
+            if self.cuisine.strip().lower() not in SUPPORTED_STRICT_CUISINES:
+                raise ValueError(
+                    f"'{self.cuisine}' is not a supported cuisine for strict matching. "
+                    f"Supported cuisines: {', '.join(sorted(SUPPORTED_STRICT_CUISINES))}"
+                )
+        return self
 
 
 class MissingIngredientCost(BaseModel):
