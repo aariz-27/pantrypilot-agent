@@ -2,38 +2,61 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-cool);
   border-radius: var(--radius-pill);
-  padding: 4px 6px;
-  background: var(--color-surface);
+  padding: 4px 10px;
+  background: var(--color-input-well);
 }
 
+/* Stronger number hierarchy: the current serving count is the thing
+   this control exists to show, so it carries display-serif weight and
+   a noticeably larger size than the surrounding buttons/labels. */
 .servings-stepper__value {
-  min-width: 24px;
+  min-width: 30px;
   text-align: center;
+  font-family: var(--font-display);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  font-size: 19px;
+  color: var(--color-text);
 }
 
 .servings-stepper__button {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid var(--color-primary);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
+  border: 1px solid var(--color-border-cool);
+  background: transparent;
+  color: var(--color-text-muted);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 120ms ease, color 120ms ease, transform 80ms ease;
+  transition: background-color 140ms var(--ease-premium), border-color 140ms var(--ease-premium),
+    color 140ms var(--ease-premium), transform 100ms var(--ease-premium);
 }
 
 .servings-stepper__button:hover:not(:disabled) {
-  background: var(--color-primary);
-  color: var(--color-primary-contrast);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+/* Section 7 of the correction brief: gold highlight specifically on
+   the increase control (the "grow" action) rather than both buttons
+   sharing one treatment -- decrease stays neutral/sapphire. */
+.servings-stepper__button:last-child {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+  background: var(--color-gold-soft);
+}
+
+.servings-stepper__button:last-child:hover:not(:disabled) {
+  background: linear-gradient(155deg, var(--color-gold-hover), var(--color-gold));
+  border-color: var(--color-gold);
+  color: var(--color-gold-contrast);
 }
 
 .servings-stepper__button:active:not(:disabled) {
@@ -51,4 +74,13 @@
   color: var(--color-text-subtle);
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .servings-stepper__button {
+    transition: none;
+  }
+  .servings-stepper__button:active:not(:disabled) {
+    transform: none;
+  }
 }

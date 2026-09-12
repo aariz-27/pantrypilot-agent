@@ -6,21 +6,26 @@
 
 .time-selector__option {
   min-height: 40px;
-  padding: 0 14px;
+  padding: 0 16px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
+  /* Section 6 of the correction brief: unselected pills get a soft
+     blue-gray border, not the default gold-tinted hairline, so the
+     champagne fill on the selected pill reads as a clear, deliberate
+     contrast rather than "everything already has a bit of gold". */
+  border: 1px solid var(--color-border-cool);
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease;
+  transition: background-color 140ms var(--ease-premium), border-color 140ms var(--ease-premium),
+    color 140ms var(--ease-premium), transform 100ms var(--ease-premium);
 }
 
 .time-selector__option:hover:not([aria-pressed='true']) {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+  background: var(--color-gold-soft);
 }
 
 .time-selector__option:active {
@@ -32,13 +37,26 @@
   box-shadow: var(--focus-ring);
 }
 
+/* Section 12 of the correction brief: the selected time preset is one
+   of the deliberate, sparing gold uses -- champagne fill, dark navy
+   text, strong contrast. */
 .time-selector__option[aria-pressed='true'] {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: var(--color-primary-contrast);
+  background: linear-gradient(155deg, var(--color-gold-hover), var(--color-gold));
+  border-color: var(--color-gold);
+  color: var(--color-gold-contrast);
+  box-shadow: var(--shadow-gold);
 }
 
 .time-selector__custom {
   margin-top: var(--space-2);
   max-width: 160px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .time-selector__option {
+    transition: none;
+  }
+  .time-selector__option:active {
+    transform: none;
+  }
 }

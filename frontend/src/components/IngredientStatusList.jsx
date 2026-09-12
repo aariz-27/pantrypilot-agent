@@ -1,31 +1,38 @@
+import '../styles/panels.css'
+
 export function IngredientStatusList({ card, onMarkHave, onMarkHaveUnresolved }) {
   return (
     <div>
-      <div style={{ display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap', fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+      <div className="ingredient-status-list__legend">
         <span>✓ In your pantry</span>
         <span>✕ Missing</span>
         {card.unresolved_ingredients.length ? <span>◐ Uncertain</span> : null}
       </div>
 
-      <h3 style={{ fontSize: 14, margin: '0 0 var(--space-2)' }}>You already have</h3>
-      <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 var(--space-4)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <h3 className="ingredient-status-list__group-title">You already have</h3>
+      <ul className="ingredient-status-list__list">
         {card.matched_ingredients.map((name) => (
-          <li key={name} style={{ color: 'var(--color-success)', fontWeight: 600, fontSize: 14 }}>
+          <li key={name} className="ingredient-status-list__row ingredient-status-list__row--have">
             ✓ {name}
           </li>
         ))}
         {card.matched_ingredients.length === 0 ? (
-          <li style={{ color: 'var(--color-text-subtle)', fontSize: 13 }}>None of this recipe&rsquo;s ingredients are in your pantry yet.</li>
+          <li className="ingredient-status-list__row--empty">None of this recipe&rsquo;s ingredients are in your pantry yet.</li>
         ) : null}
       </ul>
 
-      <h3 style={{ fontSize: 14, margin: '0 0 var(--space-2)' }}>You need</h3>
-      <ul style={{ listStyle: 'none', padding: 0, margin: card.unresolved_ingredients.length ? '0 0 var(--space-4)' : 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <h3 className="ingredient-status-list__group-title">You need</h3>
+      <ul
+        className={`ingredient-status-list__list${card.unresolved_ingredients.length ? '' : ' ingredient-status-list__list--tight'}`}
+      >
         {card.missing_ingredients.map((row) => (
-          <li key={`${row.canonical_id ?? row.raw_name}`} style={{ color: 'var(--color-danger)', fontWeight: 600, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <li
+            key={`${row.canonical_id ?? row.raw_name}`}
+            className="ingredient-status-list__row ingredient-status-list__row--missing"
+          >
             <span>✕ {row.display_name}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontWeight: 500 }}>
+            <span className="ingredient-status-list__row-meta">
+              <span className="ingredient-status-list__price">
                 {row.price_complete && row.estimated_cost_aed !== null
                   ? `Est. AED ${row.estimated_cost_aed.toFixed(2)}`
                   : 'Price unavailable'}
@@ -35,7 +42,7 @@ export function IngredientStatusList({ card, onMarkHave, onMarkHaveUnresolved })
                   canonical_id) is never trusted through this control
                   (ticket section 2). */}
               {row.canonical_id && onMarkHave ? (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500, color: 'var(--color-text)', cursor: 'pointer' }}>
+                <label className="ingredient-status-list__have-checkbox">
                   <input
                     type="checkbox"
                     onChange={() => onMarkHave(row.canonical_id)}
@@ -48,18 +55,18 @@ export function IngredientStatusList({ card, onMarkHave, onMarkHaveUnresolved })
           </li>
         ))}
         {card.missing_ingredients.length === 0 ? (
-          <li style={{ color: 'var(--color-text-subtle)', fontSize: 13 }}>Nothing missing -- you have everything for this recipe.</li>
+          <li className="ingredient-status-list__row--empty">Nothing missing -- you have everything for this recipe.</li>
         ) : null}
       </ul>
 
       {card.unresolved_ingredients.length ? (
         <>
-          <h3 style={{ fontSize: 14, margin: '0 0 var(--space-2)' }}>Uncertain</h3>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <h3 className="ingredient-status-list__group-title">Uncertain</h3>
+          <ul className="ingredient-status-list__list ingredient-status-list__list--tight">
             {card.unresolved_ingredients.map((row) => (
               <li
                 key={row.identity_key || row.raw_name}
-                style={{ color: 'var(--color-warning)', fontWeight: 600, fontSize: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
+                className="ingredient-status-list__row ingredient-status-list__row--uncertain"
               >
                 <span>◐ {row.display_name}</span>
                 {/* Priority 3 (ticket, PR #15 correction pass): the user
@@ -69,7 +76,7 @@ export function IngredientStatusList({ card, onMarkHave, onMarkHaveUnresolved })
                     tables; it only records the user's own raw pantry
                     state for this session. */}
                 {onMarkHaveUnresolved ? (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500, color: 'var(--color-text)', cursor: 'pointer' }}>
+                  <label className="ingredient-status-list__have-checkbox">
                     <input
                       type="checkbox"
                       onChange={() => onMarkHaveUnresolved(row.identity_key, row.raw_name)}

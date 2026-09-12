@@ -5,17 +5,30 @@
   margin-top: var(--space-3);
 }
 
+/* Section 11: selected ingredients read as rich sapphire fill with
+   ivory text -- a deliberately more saturated treatment than the
+   soft-tint pills used elsewhere (badges, "you have" ticks), so a
+   confirmed pantry item feels tactile rather than merely labeled. */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   padding: 6px 8px 6px 14px;
   border-radius: var(--radius-pill);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
+  background: var(--color-primary-solid);
+  color: var(--color-primary-solid-contrast);
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-primary-solid-border);
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.chip:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.chip:focus-within {
+  box-shadow: var(--focus-ring);
 }
 
 .chip--unresolved {
@@ -36,8 +49,28 @@
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
+  transition: background-color 120ms ease;
 }
 
-.chip__remove:hover {
-  background: rgba(0, 0, 0, 0.08);
+/* Resolved chips are always a solid saturated sapphire fill (both
+   themes), so a light hover overlay reads correctly either way. */
+.chip:not(.chip--unresolved) .chip__remove:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Unresolved chips stay a soft warning tint (pale in light theme, a
+   dark-tinted glow in dark theme), so the hover direction still needs
+   to flip per theme. */
+.chip--unresolved .chip__remove:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+:root[data-theme='dark'] .chip--unresolved .chip__remove:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .chip--unresolved .chip__remove:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
 }

@@ -1,7 +1,9 @@
 .local-data-panel__overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.55);
+  background: rgba(6, 9, 16, 0.62);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -15,15 +17,18 @@
   max-width: 560px;
   max-height: 88vh;
   overflow-y: auto;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
+  border: 1px solid var(--color-border);
 }
 
 .local-data-panel__header {
   position: sticky;
   top: 0;
   z-index: 5;
-  background: var(--color-surface);
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
@@ -32,11 +37,24 @@
   padding: var(--space-3) var(--space-4);
 }
 
+.local-data-panel__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 19px;
+}
+
 .local-data-panel__body {
   padding: var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-6);
+}
+
+.local-data-panel__intro {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 .local-data-panel__section-header {
@@ -44,7 +62,26 @@
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.local-data-panel__section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.local-data-panel__section-title--standalone {
+  margin-bottom: var(--space-3);
+}
+
+.local-data-panel__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-subtle);
 }
 
 .local-data-panel__link-btn {
@@ -55,6 +92,10 @@
   font-weight: 600;
   color: var(--color-primary);
   cursor: pointer;
+}
+
+.local-data-panel__link-btn:hover {
+  color: var(--color-primary-hover);
 }
 
 .local-data-panel__list {
@@ -74,6 +115,11 @@
   padding: var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  transition: border-color 140ms ease;
+}
+
+.local-data-panel__row:hover {
+  border-color: var(--color-border-strong);
 }
 
 .local-data-panel__row-text {
@@ -94,6 +140,12 @@
 .local-data-panel__row-meta {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.local-data-panel__reset-row {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 @media (max-width: 640px) {

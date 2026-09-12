@@ -11,7 +11,7 @@ import './IngredientAutocomplete.css'
 // canonical taxonomy or pricing tables (that promotion only happens,
 // if at all, deterministically server-side and is out of this
 // component's authority entirely).
-export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRemove, helpText }) {
+export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRemove, helpText, variant = 'default' }) {
   const inputId = useId()
   const listboxId = useId()
   const [query, setQuery] = useState('')
@@ -152,7 +152,7 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
   const activeOptionId = activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined
 
   return (
-    <div className="autocomplete" ref={containerRef}>
+    <div className={`autocomplete${variant === 'primary' ? ' autocomplete--primary' : ''}`} ref={containerRef}>
       <label className="field-label" htmlFor={inputId}>
         {label}
       </label>

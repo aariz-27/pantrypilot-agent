@@ -1,0 +1,202 @@
+/* Shared styles for the small informational/status panels used across
+   results and recipe-detail views (empty/error/notice states, cost
+   summary, ingredient status lists). Grouped in one file since each
+   component is a handful of lines and the visual language -- card
+   surface, icon medallion, muted secondary text -- is identical. */
+
+/* ---- Empty / error states ---- */
+
+.empty-state {
+  padding: var(--space-8) var(--space-5);
+  text-align: center;
+}
+
+.empty-state__icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--space-4);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  background: var(--color-gold-soft);
+  border: 1px solid var(--color-border-strong);
+}
+
+.empty-state__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 22px;
+  margin: 0 0 var(--space-2);
+}
+
+.empty-state__body {
+  color: var(--color-text-muted);
+  max-width: 420px;
+  margin: 0 auto var(--space-5);
+  line-height: 1.6;
+}
+
+.error-state {
+  padding: var(--space-6) var(--space-5);
+  text-align: center;
+  border-left: 3px solid var(--color-danger);
+}
+
+.error-state__icon {
+  font-size: 22px;
+  margin-bottom: var(--space-2);
+}
+
+.error-state__message {
+  margin: 0 0 var(--space-3);
+  font-weight: 700;
+  color: var(--color-danger);
+}
+
+/* ---- Closest-match notice ---- */
+
+.closest-match-notice {
+  padding: var(--space-4);
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.closest-match-notice__icon {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary-soft);
+}
+
+.closest-match-notice__title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.closest-match-notice__body {
+  margin: 4px 0 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+/* ---- Cost summary ---- */
+
+.cost-summary {
+  padding: var(--space-4);
+}
+
+.cost-summary__headline {
+  margin: 0;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.cost-summary__headline--warning {
+  color: var(--color-warning);
+}
+
+.cost-summary__note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.cost-summary__disclaimer {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-subtle);
+}
+
+/* ---- Ingredient status list ---- */
+
+.ingredient-status-list__legend {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.ingredient-status-list__group-title {
+  font-size: 14px;
+  margin: 0 0 var(--space-2);
+  font-weight: 700;
+}
+
+.ingredient-status-list__list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ingredient-status-list__list--tight {
+  margin-bottom: 0;
+}
+
+.ingredient-status-list__row {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ingredient-status-list__row--have {
+  color: var(--color-success);
+}
+
+.ingredient-status-list__row--empty {
+  color: var(--color-text-subtle);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.ingredient-status-list__row--missing,
+.ingredient-status-list__row--uncertain {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.ingredient-status-list__row--missing {
+  color: var(--color-danger);
+}
+
+.ingredient-status-list__row--uncertain {
+  color: var(--color-warning);
+}
+
+.ingredient-status-list__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ingredient-status-list__price {
+  font-weight: 500;
+}
+
+.ingredient-status-list__have-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.ingredient-status-list__have-checkbox input {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}

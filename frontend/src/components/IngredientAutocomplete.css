@@ -8,21 +8,69 @@
 
 .autocomplete__icon {
   position: absolute;
-  left: 12px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--color-text-subtle);
   pointer-events: none;
+  font-size: 15px;
 }
 
 .autocomplete__input {
-  padding-left: 36px;
+  padding-left: 38px;
+}
+
+/* The main pantry-ingredient field is the single most important
+   control on the page (brief: "large, visually dominant") -- everything
+   else on the form is secondary to it. */
+.autocomplete--primary .autocomplete__input {
+  min-height: 56px;
+  padding-left: 46px;
+  font-size: 17px;
+  border-radius: var(--radius-lg);
+  /* A visibly gold border at rest, not just on focus -- and a darker,
+     more solid recessed well than the glass panel around it, so the
+     input reads as inset into the glass rather than another sheet of
+     the same translucency. */
+  border-color: rgba(211, 176, 108, 0.45);
+  background: var(--color-input-well);
+  color: var(--color-text);
+  transition: border-color 160ms var(--ease-premium), box-shadow 160ms var(--ease-premium),
+    background-color 160ms var(--ease-premium);
+}
+
+.autocomplete--primary .autocomplete__input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.autocomplete--primary .autocomplete__icon {
+  left: 18px;
+  font-size: 18px;
+  color: var(--color-gold);
+  opacity: 0.7;
+}
+
+.autocomplete--primary .autocomplete__input:hover {
+  border-color: rgba(211, 176, 108, 0.65);
+}
+
+.autocomplete--primary .autocomplete__input:focus-visible {
+  border-color: var(--color-gold);
+  background: var(--color-input-well);
+  box-shadow: 0 0 0 4px var(--color-gold-soft), 0 0 0 1px var(--color-gold), 0 0 24px rgba(211, 176, 108, 0.25);
+}
+
+.autocomplete--primary .field-label {
+  font-size: 15px;
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-weight: 600;
 }
 
 .autocomplete__listbox {
   position: absolute;
   z-index: 20;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   left: 0;
   right: 0;
   max-height: 260px;
@@ -45,6 +93,7 @@
   cursor: pointer;
   font-size: 14px;
   color: var(--color-text);
+  transition: background-color 100ms ease, color 100ms ease;
 }
 
 .autocomplete__option[aria-selected='true'],
@@ -72,4 +121,8 @@
   cursor: pointer;
   padding: var(--space-2) 0 0;
   font-size: 14px;
+}
+
+.autocomplete__empty-action:hover {
+  color: var(--color-primary-hover);
 }

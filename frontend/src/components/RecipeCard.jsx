@@ -1,4 +1,5 @@
 import { safeHttpUrl } from '../utils/safeUrl'
+import { cuisineGlyph } from '../utils/cuisineGlyph'
 import './RecipeCard.css'
 
 const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', unknown: 'Unknown' }
@@ -23,10 +24,10 @@ export function RecipeCard({ card, onOpen, saved }) {
           <img src={imageUrl} alt={card.name} />
         ) : (
           <div className="recipe-card__no-image">
-            <span aria-hidden="true" style={{ fontSize: 28 }}>
-              🍽️
+            <span className="recipe-card__no-image-glyph" aria-hidden="true">
+              {cuisineGlyph(card.cuisine)}
             </span>
-            No image available
+            <span className="recipe-card__no-image-label">No image available</span>
           </div>
         )}
         <span className="badge badge-success recipe-card__match-badge">★ {matchPercent}% pantry match</span>
@@ -51,11 +52,7 @@ export function RecipeCard({ card, onOpen, saved }) {
               only ever appears here when the search's active anchor's
               own matching pool was exhausted -- never presented as an
               equally strong match. */}
-          {card.contains_active_anchor === false ? (
-            <span className="badge" style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning)' }}>
-              Alternative pick
-            </span>
-          ) : null}
+          {card.contains_active_anchor === false ? <span className="badge badge-warning">Alternative pick</span> : null}
         </div>
 
         <h3 className="recipe-card__title">{card.name}</h3>
@@ -64,8 +61,8 @@ export function RecipeCard({ card, onOpen, saved }) {
           <p className="recipe-card__deviation">{card.deviation_reasons.join(' · ')}</p>
         ) : null}
 
-        <div>
-          <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600 }}>{matchPercent}% pantry match</p>
+        <div className="recipe-card__match">
+          <p className="recipe-card__match-label">{matchPercent}% pantry match</p>
           <div className="recipe-card__progress-track">
             <div className="recipe-card__progress-fill" style={{ width: `${matchPercent}%` }} />
           </div>
@@ -78,9 +75,7 @@ export function RecipeCard({ card, onOpen, saved }) {
 
         <CostLabel card={card} />
 
-        <span className="btn btn-secondary" style={{ marginTop: 4 }}>
-          View recipe
-        </span>
+        <span className="btn btn-secondary recipe-card__cta">View recipe</span>
       </div>
     </button>
   )

@@ -21,6 +21,7 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 img {
@@ -28,8 +29,17 @@ img {
   display: block;
 }
 
+/* Root-cause fix (visual-correction pass): native <button> elements
+   do not inherit `color` from context by default (a long-standing CSS
+   gotcha for form controls) -- text nested inside a button that never
+   set its own explicit color, like RecipeCard's title, was silently
+   falling back to the browser's default button text color instead of
+   the theme's --color-text. Invisible in the light theme by
+   coincidence; unreadable against the new dark card surfaces, which
+   is what surfaced it. */
 button {
   font-family: inherit;
+  color: inherit;
 }
 
 a {
@@ -54,6 +64,35 @@ a {
   border: 0;
 }
 
+/* ---- Typography ---- */
+
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+}
+
+.eyebrow::before {
+  content: '';
+  width: 18px;
+  height: 1px;
+  background: var(--color-gold);
+  opacity: 0.7;
+}
+
+/* ---- Buttons ---- */
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -66,21 +105,37 @@ a {
   padding: 10px 18px;
   min-height: 44px;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  transition: background-color 160ms var(--ease-premium), border-color 160ms var(--ease-premium),
+    color 160ms var(--ease-premium), opacity 160ms var(--ease-premium), transform 160ms var(--ease-premium),
+    box-shadow 160ms var(--ease-premium);
 }
 
 .btn:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
+/* The one flagship gold surface in the whole system -- every primary
+   call-to-action (Find meals, Try again, Try a new search) shares it,
+   so gold stays legible as "the button that moves you forward"
+   instead of being sprinkled around. */
+/* Section 11 of the correction brief: the strongest visual accent on
+   the page. A subtle top inner-highlight (mimicking a light catching
+   a curved metallic edge) layered under the ambient glow/elevation
+   shadow, on top of the existing gold gradient fill. */
 .btn-primary {
-  background: var(--color-primary);
-  color: var(--color-primary-contrast);
+  background: linear-gradient(155deg, var(--color-gold-hover), var(--color-gold));
+  color: var(--color-gold-contrast);
+  box-shadow: var(--shadow-gold), var(--glow-gold), inset 0 1px 0 rgba(255, 245, 220, 0.45);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(201, 164, 99, 0.3), var(--glow-gold), inset 0 1px 0 rgba(255, 245, 220, 0.5);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn-secondary {
@@ -91,6 +146,7 @@ a {
 
 .btn-secondary:hover:not(:disabled) {
   border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .btn-icon {
@@ -101,6 +157,20 @@ a {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   color: var(--color-text);
+}
+
+.btn-icon:hover {
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: none;
+  }
 }
 
 .field-input,
@@ -135,6 +205,32 @@ a {
   border-color: var(--color-border);
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+/* Section 9 of the correction brief: a dark premium dropdown with a
+   thin gold border and a custom gold chevron -- native <select> can't
+   take a real ::after in every browser, so the chevron is a
+   background-image (an inline SVG data-URI, themed via the
+   --chevron-gold token) with appearance:none replacing the browser's
+   own arrow glyph. Only .field-select is affected; .field-input keeps
+   the shared sapphire hover/focus above. */
+.field-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border-color: var(--color-border-strong);
+  padding-right: 34px;
+  background-image: var(--chevron-gold);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+.field-select:hover {
+  border-color: var(--color-gold);
+}
+
+.field-select:focus-visible {
+  border-color: var(--color-gold);
+  box-shadow: 0 0 0 3px var(--color-gold-soft), 0 0 0 1px var(--color-gold);
 }
 
 /* Cross-browser removal of native number-input spinners (post-review
@@ -179,9 +275,41 @@ a {
   box-shadow: var(--shadow-sm);
 }
 
+/* Translucent, blurred panel for the highest-emphasis surfaces (the
+   search card, modals) -- used sparingly, not on every card, so the
+   "glass" reads as a deliberate premium accent rather than a texture
+   slapped on everything (brief: "tasteful... light glass effects").
+   Four box-shadow layers, outside-in: a soft outer ambient gold glow,
+   a brighter gold top-edge highlight, a sapphire inner highlight along
+   the bottom (a little visual depth/dimensionality), and the
+   pre-existing elevation shadow -- together read as "floating premium
+   glass" lit from within, not a flat translucent rectangle. */
+.glass-panel {
+  background: var(--color-surface-glass);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg), 0 0 110px rgba(211, 176, 108, 0.1), inset 0 1px 0 rgba(230, 200, 134, 0.22),
+    inset 0 -1px 0 rgba(127, 155, 240, 0.14), inset 0 0 60px rgba(127, 155, 240, 0.05);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel {
+    background: var(--color-surface-raised);
+  }
+}
+
 .container {
   width: 100%;
   max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+.container-wide {
+  width: 100%;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 0 var(--space-4);
 }
@@ -216,8 +344,14 @@ a {
   color: var(--color-primary);
 }
 
+.badge-gold {
+  background: var(--color-gold-soft);
+  color: var(--color-gold);
+}
+
 @media (max-width: 359px) {
-  .container {
+  .container,
+  .container-wide {
     padding: 0 var(--space-3);
   }
 }

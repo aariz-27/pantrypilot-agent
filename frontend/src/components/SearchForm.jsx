@@ -24,7 +24,7 @@ export function SearchForm({ formState, onChange, onSubmit, submitting }) {
   }
 
   return (
-    <form className="card search-form" onSubmit={handleSubmit} noValidate>
+    <form className="card glass-panel search-form" onSubmit={handleSubmit} noValidate>
       <IngredientAutocomplete
         label="What ingredients do you have?"
         placeholder="Type an ingredient (e.g. rice, chicken, tomato...)"
@@ -32,6 +32,7 @@ export function SearchForm({ formState, onChange, onSubmit, submitting }) {
         onAdd={(item) => update({ pantryItems: [...formState.pantryItems, item] })}
         onRemove={(id) => update({ pantryItems: formState.pantryItems.filter((i) => i.id !== id) })}
         helpText="At least one recognized ingredient is required."
+        variant="primary"
       />
 
       <div className="search-form__row">
@@ -101,6 +102,7 @@ export function SearchForm({ formState, onChange, onSubmit, submitting }) {
 
       <button type="submit" className="btn btn-primary search-form__submit" disabled={!canSubmit}>
         {submitting ? 'Finding meals…' : 'Find meals'}
+        <span aria-hidden="true">→</span>
       </button>
     </form>
   )

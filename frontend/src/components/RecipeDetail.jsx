@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react'
 import { IngredientStatusList } from './IngredientStatusList'
 import { CostSummary } from './CostSummary'
 import { safeHttpUrl } from '../utils/safeUrl'
+import { cuisineGlyph } from '../utils/cuisineGlyph'
 import './RecipeDetail.css'
 
 const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', unknown: 'Unknown' }
@@ -109,8 +110,11 @@ export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved, 
           {imageUrl ? (
             <img src={imageUrl} alt={card.name} />
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--color-text-subtle)' }}>
-              No image available
+            <div className="recipe-detail__no-image">
+              <span className="recipe-detail__no-image-glyph" aria-hidden="true">
+                {cuisineGlyph(card.cuisine)}
+              </span>
+              <span className="recipe-detail__no-image-label">No image available</span>
             </div>
           )}
         </div>
@@ -121,10 +125,7 @@ export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved, 
               {card.name}
             </h2>
             <p className="recipe-detail__subline">{subline}</p>
-            <p
-              className="recipe-detail__subline"
-              style={scalingUncertain ? { color: 'var(--color-warning)', fontWeight: 600 } : undefined}
-            >
+            <p className={`recipe-detail__subline${scalingUncertain ? ' recipe-detail__subline--warning' : ''}`}>
               {servingsLabel}
             </p>
           </div>
@@ -144,8 +145,8 @@ export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved, 
             </div>
           </div>
 
-          <div className="card" style={{ padding: 'var(--space-4)' }}>
-            <p style={{ margin: '0 0 var(--space-2)', fontWeight: 700 }}>
+          <div className="card recipe-detail__match-card">
+            <p className="recipe-detail__match-count">
               {/* Priority 3 (PR #15 correction pass, 2026-09-08): the
                   total must include unresolved ingredients too, or
                   confirming an uncertain one as owned would make this
@@ -168,20 +169,20 @@ export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved, 
           <CostSummary card={card} />
 
           <div>
-            <h3 style={{ fontSize: 16 }}>Steps</h3>
+            <h3 className="recipe-detail__section-title">Steps</h3>
             <Steps instructions={card.instructions} />
           </div>
 
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <div className="recipe-detail__actions">
             {sourceUrl ? (
-              <a href={sourceUrl} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ alignSelf: 'flex-start' }}>
+              <a href={sourceUrl} target="_blank" rel="noreferrer" className="btn btn-secondary">
                 View Original Recipe
               </a>
             ) : null}
             {onToggleSaved ? (
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-primary"
                 aria-pressed={Boolean(saved)}
                 onClick={() => onToggleSaved(card)}
               >
