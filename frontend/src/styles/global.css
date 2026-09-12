@@ -29,8 +29,17 @@ img {
   display: block;
 }
 
+/* Root-cause fix (visual-correction pass): native <button> elements
+   do not inherit `color` from context by default (a long-standing CSS
+   gotcha for form controls) -- text nested inside a button that never
+   set its own explicit color, like RecipeCard's title, was silently
+   falling back to the browser's default button text color instead of
+   the theme's --color-text. Invisible in the light theme by
+   coincidence; unreadable against the new dark card surfaces, which
+   is what surfaced it. */
 button {
   font-family: inherit;
+  color: inherit;
 }
 
 a {
@@ -113,12 +122,12 @@ a {
 .btn-primary {
   background: linear-gradient(155deg, var(--color-gold-hover), var(--color-gold));
   color: var(--color-gold-contrast);
-  box-shadow: var(--shadow-gold);
+  box-shadow: var(--shadow-gold), var(--glow-gold);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 14px 34px rgba(201, 164, 99, 0.3);
+  box-shadow: 0 14px 34px rgba(201, 164, 99, 0.3), var(--glow-gold);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -244,7 +253,7 @@ a {
   background: var(--color-surface-glass);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(211, 176, 108, 0.08);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }

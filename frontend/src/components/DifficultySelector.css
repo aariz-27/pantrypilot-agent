@@ -20,7 +20,8 @@
 .difficulty-selector__option input[type='checkbox'] {
   width: 18px;
   height: 18px;
-  accent-color: var(--color-primary);
+  /* Section 14: checked = warm-gold/champagne indicator. */
+  accent-color: var(--color-gold);
   cursor: pointer;
 }
 

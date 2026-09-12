@@ -19,9 +19,9 @@
 }
 
 .time-selector__option:hover:not([aria-pressed='true']) {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
+  border-color: var(--color-gold);
+  color: var(--color-gold);
+  background: var(--color-gold-soft);
 }
 
 .time-selector__option:active {
@@ -33,11 +33,14 @@
   box-shadow: var(--focus-ring);
 }
 
+/* Section 12 of the correction brief: the selected time preset is one
+   of the deliberate, sparing gold uses -- champagne fill, dark navy
+   text, strong contrast. */
 .time-selector__option[aria-pressed='true'] {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: var(--color-primary-contrast);
-  box-shadow: var(--shadow-sm);
+  background: linear-gradient(155deg, var(--color-gold-hover), var(--color-gold));
+  border-color: var(--color-gold);
+  color: var(--color-gold-contrast);
+  box-shadow: var(--shadow-gold);
 }
 
 .time-selector__custom {

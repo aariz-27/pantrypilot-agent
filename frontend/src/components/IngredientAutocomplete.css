@@ -29,6 +29,8 @@
   font-size: 17px;
   border-radius: var(--radius-lg);
   border-color: var(--color-border-strong);
+  /* Section 10: a dark translucent field, not a flat solid surface. */
+  background: var(--color-surface-glass);
 }
 
 .autocomplete--primary .autocomplete__icon {

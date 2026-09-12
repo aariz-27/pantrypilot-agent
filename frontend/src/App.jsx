@@ -14,6 +14,7 @@ import { dedupePantryItems } from './domain/pantryItems'
 import { readVersioned, writeVersioned, clearVersioned } from './utils/storage'
 import { useRecentSearches } from './hooks/useRecentSearches'
 import { useSavedRecipes } from './hooks/useSavedRecipes'
+import { HeroDecor } from './components/decor/CulinaryMotifs'
 import './App.css'
 
 const PANTRY_STORAGE_KEY = 'pantry'
@@ -277,7 +278,8 @@ export default function App() {
       <Header onBrandClick={handleNewSearch} onOpenLocalData={() => setLocalDataOpen(true)} />
       <main className="container app-main">
         {view === 'search' ? (
-          <>
+          <div className="hero-section">
+            <HeroDecor />
             <div className="hero">
               <span className="eyebrow hero__eyebrow">Pantry-First Recipes</span>
               <h1 className="hero__title">Cook smarter with what you already have.</h1>
@@ -286,7 +288,7 @@ export default function App() {
               </p>
             </div>
             <SearchForm formState={formState} onChange={setFormState} onSubmit={handleSubmit} submitting={false} />
-          </>
+          </div>
         ) : null}
 
         {view === 'loading' ? <LoadingState /> : null}

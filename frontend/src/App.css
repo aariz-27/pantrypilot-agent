@@ -1,13 +1,13 @@
-/* App shell: a restrained decorative backdrop built entirely from CSS
+/* App shell: a layered dark-navy backdrop built entirely from CSS
    gradients (no external imagery, no fabricated recipe photography --
-   ticket constraint). A soft gold glow top-right and a deeper sapphire
-   pool bottom-left suggest warmth/atmosphere behind the surfaces
-   without competing with recipe content. */
+   ticket constraint). Multiple soft glows at different depths read as
+   cinematic ambient lighting rather than a flat fill. */
 .app-shell {
   min-height: 100%;
   background-color: var(--color-bg);
-  background-image: radial-gradient(720px 420px at 88% -8%, var(--color-gold-soft), transparent 60%),
-    radial-gradient(640px 480px at -10% 18%, var(--color-primary-soft), transparent 55%);
+  background-image: radial-gradient(900px 560px at 85% -10%, var(--color-gold-soft), transparent 62%),
+    radial-gradient(760px 620px at -8% 12%, var(--color-primary-soft), transparent 58%),
+    radial-gradient(1100px 700px at 50% 120%, var(--color-bg-elevated), transparent 70%);
   background-repeat: no-repeat;
 }
 
@@ -17,6 +17,82 @@
 }
 
 /* ---- Hero ---- */
+
+/* Positioned so HeroDecor (fixed, z-index 0) can sit visually behind
+   the hero + search panel (z-index 1) without blocking any control --
+   see CulinaryMotifs.jsx. */
+.hero-section {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-decor {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hero-decor__glow {
+  position: absolute;
+  width: 560px;
+  height: 560px;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.55;
+}
+
+.hero-decor__glow--left {
+  left: -220px;
+  top: 90px;
+  background: radial-gradient(circle, var(--color-gold-soft), transparent 70%);
+}
+
+.hero-decor__glow--right {
+  right: -240px;
+  top: 280px;
+  background: radial-gradient(circle, var(--color-primary-soft), transparent 70%);
+}
+
+.hero-decor__motif {
+  position: absolute;
+  color: var(--color-border-strong);
+}
+
+.hero-decor__motif--herb {
+  left: 3%;
+  top: 40px;
+  width: 130px;
+  height: auto;
+  opacity: 0.4;
+}
+
+.hero-decor__motif--citrus {
+  left: 5.5%;
+  bottom: 60px;
+  width: 96px;
+  height: auto;
+  opacity: 0.28;
+}
+
+.hero-decor__motif--wheat {
+  right: 4%;
+  top: 60px;
+  width: 108px;
+  height: auto;
+  opacity: 0.4;
+}
+
+/* Section 27: decorative edge imagery is a desktop-only atmosphere
+   layer -- below the width where there's real margin outside the
+   1080px content column, it would only ever overlap the UI, so it is
+   removed entirely rather than shrunk (usability over atmosphere). */
+@media (max-width: 1180px) {
+  .hero-decor {
+    display: none;
+  }
+}
 
 .hero {
   text-align: center;

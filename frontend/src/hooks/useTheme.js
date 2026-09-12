@@ -3,19 +3,23 @@ import { useCallback, useEffect, useState } from 'react'
 const STORAGE_KEY = 'pantrypilot.theme'
 const THEMES = ['system', 'light', 'dark']
 
+// Founder visual-correction pass: the luxury redesign's dark navy/gold
+// system IS the product's visual identity now, so a fresh visitor must
+// see it regardless of their OS light/dark preference -- a "system"
+// default silently showed the light theme to anyone on a light-mode
+// OS/browser, which is what triggered this correction pass. "system"
+// remains a real, selectable option in the cycle below (functionality
+// preserved); it is simply no longer what an unconfigured browser gets.
 function readStoredTheme() {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY)
-    return THEMES.includes(stored) ? stored : 'system'
+    return THEMES.includes(stored) ? stored : 'dark'
   } catch {
-    // Private browsing / storage blocked -- fall back to system default
-    // rather than throwing.
-    return 'system'
+    // Private browsing / storage blocked -- fall back to the dark
+    // default rather than throwing.
+    return 'dark'
   }
 }
-
-// Default is system theme (ticket section 4); an explicit user choice
-// is remembered locally and wins over the OS preference until changed.
 export function useTheme() {
   const [theme, setThemeState] = useState(readStoredTheme)
 
