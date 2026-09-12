@@ -48,37 +48,6 @@
   object-fit: cover;
 }
 
-.recipe-detail__no-image {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  background: radial-gradient(90% 160% at 50% 0%, var(--color-gold-soft), transparent 55%),
-    linear-gradient(155deg, var(--color-surface-raised), var(--color-bg-elevated));
-}
-
-.recipe-detail__no-image-glyph {
-  font-size: 34px;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-strong);
-  box-shadow: var(--shadow-sm);
-}
-
-.recipe-detail__no-image-label {
-  color: var(--color-text-subtle);
-  font-size: 13px;
-  font-weight: 600;
-}
-
 .recipe-detail__body {
   padding: var(--space-6);
   display: flex;

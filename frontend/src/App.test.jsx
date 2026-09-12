@@ -395,7 +395,7 @@ describe('"I have this" for unresolved ingredients (Priority 3, PR #15 correctio
 })
 
 
-describe('additional_options "Show more options" (Priority 4, PR #15 correction pass)', () => {
+describe('additional_options "Show more options" (initial reveal 3 -> 6, frontend polish patch)', () => {
   beforeEach(() => vi.clearAllMocks())
 
   function reserveCard(overrides = {}) {
@@ -409,7 +409,31 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
     })
   }
 
-  it('shows only the top 3 initially, with a "Show more options" control when reserve candidates exist', async () => {
+  // With a single top recommendation, the initial reveal pulls 5
+  // additional_options (1 + 5 = 6 shown total) -- these fillers occupy
+  // exactly that initial slice so a 6th/"real" reserve card placed
+  // after them stays hidden until "Show more options" is clicked.
+  function fillerReserves(count) {
+    return Array.from({ length: count }, (_, i) => reserveCard({ recipe_id: `filler-${i}`, name: `Filler Reserve ${i + 1}` }))
+  }
+
+  it('shows up to 6 initially (recommendations + already-evaluated reserve candidates), with "Show more options" when more exist beyond that', async () => {
+    const response = baseResponse({
+      recommendations: [card()],
+      additional_options: [...fillerReserves(5), reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+    })
+    api.postRecommend.mockResolvedValue(response)
+    render(<App />)
+    await addRecognizedIngredientAndSubmit()
+
+    await waitFor(() => screen.getByText('Chicken Fried Rice'))
+    // 1 recommendation + the first 5 reserve candidates = 6 shown already.
+    expect(screen.getByText('Filler Reserve 5')).toBeInTheDocument()
+    expect(screen.queryByText('Reserve One')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show more options' })).toBeInTheDocument()
+  })
+
+  it('shows exactly what is available when fewer than 6 feasible recipes exist (never padded)', async () => {
     const response = baseResponse({
       recommendations: [card()],
       additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
@@ -419,14 +443,16 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
     await addRecognizedIngredientAndSubmit()
 
     await waitFor(() => screen.getByText('Chicken Fried Rice'))
-    expect(screen.queryByText('Reserve One')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Show more options' })).toBeInTheDocument()
+    // Only 2 candidates exist in total (1 recommendation + 1 reserve) --
+    // both show immediately, and there is nothing left to reveal.
+    expect(screen.getByText('Reserve One')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Show more options' })).not.toBeInTheDocument()
   })
 
-  it('clicking "Show more options" reveals additional cards and makes no new API call', async () => {
+  it('clicking "Show more options" reveals further cards and makes no new API call', async () => {
     const response = baseResponse({
       recommendations: [card()],
-      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+      additional_options: [...fillerReserves(5), reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
     })
     api.postRecommend.mockResolvedValue(response)
     render(<App />)
@@ -444,7 +470,7 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
   it('hides "Show more options" once every reserve candidate is revealed', async () => {
     const response = baseResponse({
       recommendations: [card()],
-      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
+      additional_options: [...fillerReserves(5), reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
     })
     api.postRecommend.mockResolvedValue(response)
     render(<App />)
@@ -456,7 +482,7 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
     expect(screen.queryByRole('button', { name: 'Show more options' })).not.toBeInTheDocument()
   })
 
-  it('a reserve candidate can move into the visible top 3 after "I have this" recomputation, still with no new API call', async () => {
+  it('a reserve candidate can move into the visible recommendations after "I have this" recomputation, still with no new API call', async () => {
     const weakTop = card({
       recipe_id: 'weak-top',
       name: 'Weak Top',
@@ -471,7 +497,10 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
       missing_ingredients: [{ raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true }],
       pantry_coverage: 0.2,
     })
-    const response = baseResponse({ recommendations: [weakTop], additional_options: [strongReserve] })
+    const response = baseResponse({
+      recommendations: [weakTop],
+      additional_options: [...fillerReserves(5), strongReserve],
+    })
     api.postRecommend.mockResolvedValue(response)
     render(<App />)
     await addRecognizedIngredientAndSubmit()
@@ -495,14 +524,12 @@ describe('additional_options "Show more options" (Priority 4, PR #15 correction 
   it('"Refresh recommendations" remains the only action that starts a fresh search', async () => {
     const response = baseResponse({
       recommendations: [card({ missing_ingredients: [{ raw_name: 'onion', canonical_id: 'onion', display_name: 'Onion', estimated_cost_aed: 2.5, price_complete: true }] })],
-      additional_options: [reserveCard({ recipe_id: 'r1', name: 'Reserve One' })],
     })
     api.postRecommend.mockResolvedValueOnce(response)
     render(<App />)
     await addRecognizedIngredientAndSubmit()
     await waitFor(() => screen.getByText('Chicken Fried Rice'))
 
-    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
     await userEvent.click(screen.getByRole('button', { name: /Chicken Fried Rice/ }))
     await userEvent.click(screen.getByRole('checkbox', { name: 'I have Onion' }))
     await userEvent.click(screen.getByRole('button', { name: 'Back to results' }))
@@ -562,7 +589,9 @@ describe('additional_options anchor discipline end-to-end (PR #15 second correct
   it('additional_options from a real response never contains a non-anchor card (Blocker 3)', async () => {
     // The backend guarantees this, but this test locks in that the
     // frontend simply displays what it is given -- an additional_option
-    // marked contains_active_anchor: true never shows the badge.
+    // marked contains_active_anchor: true never shows the badge. With
+    // only 1 recommendation + 1 reserve candidate (2 total), the
+    // initial reveal (up to 6) already shows both -- no click needed.
     const response = baseResponse({
       recommendations: [card({ recipe_id: 'anchor-1', contains_active_anchor: true })],
       additional_options: [card({ recipe_id: 'anchor-2', name: 'Reserve Anchor Dish', contains_active_anchor: true })],
@@ -571,8 +600,6 @@ describe('additional_options anchor discipline end-to-end (PR #15 second correct
     render(<App />)
     await addRecognizedIngredientAndSubmit()
     await waitFor(() => screen.getByText('Chicken Fried Rice'))
-
-    await userEvent.click(screen.getByRole('button', { name: 'Show more options' }))
 
     expect(screen.getByText('Reserve Anchor Dish')).toBeInTheDocument()
     expect(screen.queryByText('Alternative pick')).not.toBeInTheDocument()

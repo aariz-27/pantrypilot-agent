@@ -52,25 +52,15 @@
   transition: background-color 120ms ease;
 }
 
-/* Resolved chips are always a solid saturated sapphire fill (both
-   themes), so a light hover overlay reads correctly either way. */
+/* Resolved chips are always a solid saturated sapphire fill, so a
+   light hover overlay reads correctly. */
 .chip:not(.chip--unresolved) .chip__remove:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Unresolved chips stay a soft warning tint (pale in light theme, a
-   dark-tinted glow in dark theme), so the hover direction still needs
-   to flip per theme. */
+/* Unresolved chips stay a soft warning tint (a dark-tinted glow), so
+   the remove control gets a lightening hover rather than a darkening
+   one. */
 .chip--unresolved .chip__remove:hover {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-:root[data-theme='dark'] .chip--unresolved .chip__remove:hover {
   background: rgba(255, 255, 255, 0.14);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .chip--unresolved .chip__remove:hover {
-    background: rgba(255, 255, 255, 0.14);
-  }
 }

@@ -2,7 +2,6 @@ import { useEffect, useId, useRef } from 'react'
 import { IngredientStatusList } from './IngredientStatusList'
 import { CostSummary } from './CostSummary'
 import { safeHttpUrl } from '../utils/safeUrl'
-import { cuisineGlyph } from '../utils/cuisineGlyph'
 import './RecipeDetail.css'
 
 const DIFFICULTY_LABEL = { easy: 'Easy', medium: 'Medium', hard: 'Hard', unknown: 'Unknown' }
@@ -106,18 +105,15 @@ export function RecipeDetail({ card, onClose, onMarkHave, onMarkHaveUnresolved, 
           <strong>Back to results</strong>
         </div>
 
-        <div className="recipe-detail__media">
-          {imageUrl ? (
+        {/* No provider image_url -- render no image block/frame/
+            placeholder at all (never a fabricated photo); the body
+            content below simply starts right after the sticky
+            header, moving upward naturally. */}
+        {imageUrl ? (
+          <div className="recipe-detail__media">
             <img src={imageUrl} alt={card.name} />
-          ) : (
-            <div className="recipe-detail__no-image">
-              <span className="recipe-detail__no-image-glyph" aria-hidden="true">
-                {cuisineGlyph(card.cuisine)}
-              </span>
-              <span className="recipe-detail__no-image-label">No image available</span>
-            </div>
-          )}
-        </div>
+          </div>
+        ) : null}
 
         <div className="recipe-detail__body">
           <div>

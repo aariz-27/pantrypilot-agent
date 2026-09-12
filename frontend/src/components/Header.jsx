@@ -1,4 +1,3 @@
-import { ThemeToggle } from './ThemeToggle'
 import './Header.css'
 
 export function Header({ onBrandClick, onOpenLocalData }) {
@@ -25,7 +24,6 @@ export function Header({ onBrandClick, onOpenLocalData }) {
               <span aria-hidden="true">🔖</span>
             </button>
           ) : null}
-          <ThemeToggle />
         </div>
       </div>
     </header>

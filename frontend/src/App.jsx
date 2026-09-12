@@ -63,6 +63,18 @@ function buildPayload(formState) {
   }
 }
 
+// Frontend polish patch: the initial results view shows up to 6 cards
+// total (previously 3), not by fetching more or padding -- it just
+// reveals however many already-returned, already-ranked
+// additional_options are needed to reach 6 combined with the backend's
+// own `recommendations`. Never negative, never more than what the
+// backend actually returned.
+const INITIAL_RECOMMENDATION_TARGET = 6
+
+function initialAdditionalReveal(recommendations) {
+  return Math.max(0, INITIAL_RECOMMENDATION_TARGET - (recommendations?.length ?? 0))
+}
+
 export default function App() {
   const [formState, setFormState] = useState(loadInitialFormState)
   const [view, setView] = useState('search') // 'search' | 'loading' | 'results' | 'error'
@@ -98,9 +110,9 @@ export default function App() {
   // pantry state for this session.
   const [extraUnresolvedPantry, setExtraUnresolvedPantry] = useState(() => new Map())
   // Priority 4 (ticket, PR #15 correction pass, 2026-09-08): how many
-  // additional_options are currently revealed, in batches of 3. Purely
-  // a display cursor over data the search already returned -- "Show
-  // more options" never calls the backend.
+  // additional_options are currently revealed, in batches of 3 beyond
+  // the initial reveal. Purely a display cursor over data the search
+  // already returned -- "Show more options" never calls the backend.
   const [visibleAdditionalCount, setVisibleAdditionalCount] = useState(0)
 
   const runSearch = useCallback(async (currentFormState) => {
@@ -114,7 +126,15 @@ export default function App() {
       setResponse(result)
       setExtraPantry(new Map())
       setExtraUnresolvedPantry(new Map())
-      setVisibleAdditionalCount(0)
+      // Frontend polish (initial visible recommendation count 3 -> 6):
+      // `recommendations` alone may be fewer than 6 (backend's own top
+      // match count, never padded here), so the initial reveal pulls
+      // just enough already-evaluated additional_options -- same
+      // ranking order, zero extra requests -- to reach 6 total when
+      // enough exist; fewer than 6 combined shows exactly what's
+      // available, never fabricated. "Show more options" continues to
+      // reveal further reserve candidates 3 at a time beyond that.
+      setVisibleAdditionalCount(initialAdditionalReveal(result.recommendations))
       setView('results')
     } catch (err) {
       setError(err)
@@ -302,7 +322,9 @@ export default function App() {
         {view === 'loading' ? <LoadingState /> : null}
 
         {view === 'error' ? (
-          <ErrorState message={error?.message} retryable={error?.retryable} onRetry={() => runSearch(formState)} />
+          <div className="state-view">
+            <ErrorState message={error?.message} retryable={error?.retryable} onRetry={() => runSearch(formState)} />
+          </div>
         ) : null}
 
         {view === 'results' && displayResponse ? (
@@ -381,7 +403,11 @@ function ResultsView({
   const hasSeparateClosestAlternatives = hasExact && closestAlternatives.length > 0
 
   if (!hasExact && cardsToShow.length === 0) {
-    return <EmptyState onNewSearch={onNewSearch} />
+    return (
+      <div className="state-view">
+        <EmptyState onNewSearch={onNewSearch} />
+      </div>
+    )
   }
 
   return (

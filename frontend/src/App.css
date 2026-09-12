@@ -24,6 +24,18 @@
   padding-bottom: var(--space-8);
 }
 
+/* A lightweight single-card state (empty/error) left at the top of a
+   tall viewport with nothing else on the page reads as unfinished --
+   this keeps it in a calmer, more intentional middle band instead of
+   a small card followed by a long empty void (frontend design polish
+   pass). Capped so it never forces extra scroll on short viewports. */
+.state-view {
+  min-height: min(52vh, 480px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 /* ---- Hero ---- */
 
 /* HeroDecor is rendered as a sibling of <Header>/<main> at the
