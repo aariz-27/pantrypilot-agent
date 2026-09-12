@@ -81,6 +81,41 @@ class Settings(BaseSettings):
     admin_session_ttl_minutes: int = 60
     rate_limit_admin_login: str = "5/minute"
 
+    # Quota-aware recommendation depth (2026-09-13 trial-quota ticket).
+    # Deliberately NOT hardcoded to the free-plan defaults still baked
+    # into app.recipe.provider.MAX_PAGE_SIZE (10) / app.agent.state's
+    # old fixed reserve-depth target -- both are now overridable per
+    # deployment so a future plan downgrade (trial expiry) needs only an
+    # env change, never a code change. Bounds are a safety ceiling
+    # against a misconfigured value causing a malformed provider
+    # request or unbounded search effort, not a claim about what any
+    # specific plan actually supports.
+    #
+    # recipeapi_page_size default of 25 is evidence-based, not guessed:
+    # confirmed live against the active RecipeAPI.io trial (2026-09-13,
+    # one bounded GET /recipes call) that per_page=25 is accepted and
+    # actually returns 25 items (meta.per_page echoed back as 25, not
+    # silently capped). Reduce to 10 (the confirmed free-plan ceiling)
+    # after the trial expires -- see docs/admin/ADMIN_DASHBOARD.md's
+    # sibling recommendation-depth doc for the exact rollback steps.
+    recipeapi_page_size: int = Field(
+        default=25, ge=1, le=100, validation_alias="PANTRYPILOT_RECIPEAPI_PAGE_SIZE"
+    )
+    # How many strong, same-anchor, grounded feasible candidates the
+    # agent should make a reasonable effort to find before treating the
+    # pool as "enough" (app.agent.observations.build_decision_payload's
+    # sufficient_feasible_found). Advisory only -- DEC-005 keeps stop/
+    # continue authority with the LLM; provider inventory exhaustion or
+    # constraint scarcity can still legitimately yield fewer. Previously
+    # a fixed 3 (app.agent.state.MAX_FINAL_RECOMMENDATIONS doubled as
+    # both "how many are top-tier recommendations" and "when is it okay
+    # to stop") -- now decoupled: MAX_FINAL_RECOMMENDATIONS still
+    # governs the recommendations/additional_options split (unchanged,
+    # 3), while this governs only the stop-policy signal.
+    target_feasible_results: int = Field(
+        default=6, ge=1, le=20, validation_alias="PANTRYPILOT_TARGET_FEASIBLE_RESULTS"
+    )
+
     @property
     def admin_configured(self) -> bool:
         return (

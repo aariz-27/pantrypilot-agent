@@ -3,7 +3,7 @@ from __future__ import annotations
 from tests.admin.conftest import ADMIN_PASSWORD, admin_headers
 
 
-def _create_ingredient(client, cookies, csrf, canonical_id="ginger", display_name="Ginger"):
+def _create_ingredient(client, cookies, csrf, canonical_id="test_ginger", display_name="Ginger"):
     return client.post(
         "/api/admin/ingredients",
         json={"canonical_id": canonical_id, "display_name": display_name, "default_unit": "g"},
@@ -26,17 +26,17 @@ def test_ingredient_create_creates_audit_record(logged_in_admin):
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["action"] == "ingredient_created"
-    assert body["items"][0]["entity_id"] == "ginger"
+    assert body["items"][0]["entity_id"] == "test_ginger"
 
 
 def test_alias_and_price_mutations_create_audit_records(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     _create_ingredient(client, cookies, csrf)
     client.post(
-        "/api/admin/ingredients/ginger/aliases", json={"alias": "root ginger"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_ginger/aliases", json={"alias": "root ginger"}, cookies=cookies, headers=admin_headers(csrf)
     )
     client.post(
-        "/api/admin/ingredients/ginger/prices",
+        "/api/admin/ingredients/test_ginger/prices",
         json={
             "normalized_unit": "g", "display_name": "Ginger", "normalized_price_per_unit": 0.013,
             "provenance_note": "test",

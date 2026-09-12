@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from tests.admin.conftest import admin_headers
 
 
-def _create_ingredient(client, cookies, csrf, canonical_id="bell_pepper", display_name="Bell Pepper", default_unit="g"):
+def _create_ingredient(client, cookies, csrf, canonical_id="test_bell_pepper", display_name="Bell Pepper", default_unit="g"):
     return client.post(
         "/api/admin/ingredients",
         json={"canonical_id": canonical_id, "display_name": display_name, "default_unit": default_unit},
@@ -17,7 +19,7 @@ def test_create_ingredient_success(logged_in_admin):
     response = _create_ingredient(client, cookies, csrf)
     assert response.status_code == 201
     body = response.json()
-    assert body["canonical_id"] == "bell_pepper"
+    assert body["canonical_id"] == "test_bell_pepper"
     assert body["status"] == "active"
     assert body["alias_count"] == 0
 
@@ -40,7 +42,7 @@ def test_create_ingredient_rejects_empty_display_name(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     response = client.post(
         "/api/admin/ingredients",
-        json={"canonical_id": "onion", "display_name": "", "default_unit": "g"},
+        json={"canonical_id": "test_onion", "display_name": "", "default_unit": "g"},
         cookies=cookies,
         headers=admin_headers(csrf),
     )
@@ -49,18 +51,21 @@ def test_create_ingredient_rejects_empty_display_name(logged_in_admin):
 
 def test_list_ingredients_search_by_canonical_and_alias(logged_in_admin):
     client, cookies, csrf = logged_in_admin
-    _create_ingredient(client, cookies, csrf, canonical_id="bell_pepper", display_name="Bell Pepper")
+    _create_ingredient(client, cookies, csrf, canonical_id="test_bell_pepper", display_name="Bell Pepper")
     client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "capsicum"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper/aliases",
+        json={"alias": "synthetic test alias xyz"},
+        cookies=cookies,
+        headers=admin_headers(csrf),
     )
 
     by_canonical = client.get("/api/admin/ingredients", params={"q": "bell"}, cookies=cookies)
     assert by_canonical.status_code == 200
     assert len(by_canonical.json()["items"]) == 1
 
-    by_alias = client.get("/api/admin/ingredients", params={"q": "capsicum"}, cookies=cookies)
+    by_alias = client.get("/api/admin/ingredients", params={"q": "synthetic test alias"}, cookies=cookies)
     assert by_alias.status_code == 200
-    assert by_alias.json()["items"][0]["canonical_id"] == "bell_pepper"
+    assert by_alias.json()["items"][0]["canonical_id"] == "test_bell_pepper"
 
     no_match = client.get("/api/admin/ingredients", params={"q": "nonexistent-xyz"}, cookies=cookies)
     assert no_match.json()["items"] == []
@@ -85,7 +90,7 @@ def test_edit_ingredient_display_name_and_status(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     _create_ingredient(client, cookies, csrf)
     response = client.patch(
-        "/api/admin/ingredients/bell_pepper",
+        "/api/admin/ingredients/test_bell_pepper",
         json={"display_name": "Bell Peppers (Capsicum)", "status": "archived"},
         cookies=cookies,
         headers=admin_headers(csrf),
@@ -94,14 +99,14 @@ def test_edit_ingredient_display_name_and_status(logged_in_admin):
     body = response.json()
     assert body["display_name"] == "Bell Peppers (Capsicum)"
     assert body["status"] == "archived"
-    assert body["canonical_id"] == "bell_pepper"  # immutable
+    assert body["canonical_id"] == "test_bell_pepper"  # immutable
 
 
 def test_edit_ingredient_rejects_invalid_status(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     _create_ingredient(client, cookies, csrf)
     response = client.patch(
-        "/api/admin/ingredients/bell_pepper", json={"status": "deleted"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper", json={"status": "deleted"}, cookies=cookies, headers=admin_headers(csrf)
     )
     assert response.status_code == 422
 
@@ -128,12 +133,15 @@ def test_create_alias_success(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     _create_ingredient(client, cookies, csrf)
     response = client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "Capsicum"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper/aliases",
+        json={"alias": "Test Alias Pepper"},
+        cookies=cookies,
+        headers=admin_headers(csrf),
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["alias"] == "capsicum"  # normalized lowercase
-    assert body["canonical_id"] == "bell_pepper"
+    assert body["alias"] == "test alias pepper"  # normalized lowercase
+    assert body["canonical_id"] == "test_bell_pepper"
 
 
 def test_create_alias_for_missing_ingredient_returns_404(logged_in_admin):
@@ -150,21 +158,28 @@ def test_create_alias_for_missing_ingredient_returns_404(logged_in_admin):
 def test_create_duplicate_alias_same_ingredient_rejected(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     _create_ingredient(client, cookies, csrf)
-    client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "capsicum"}, cookies=cookies, headers=admin_headers(csrf)
+    first = client.post(
+        "/api/admin/ingredients/test_bell_pepper/aliases",
+        json={"alias": "test alias pepper"},
+        cookies=cookies,
+        headers=admin_headers(csrf),
     )
+    assert first.status_code == 201
     response = client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "capsicum"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper/aliases",
+        json={"alias": "test alias pepper"},
+        cookies=cookies,
+        headers=admin_headers(csrf),
     )
     assert response.status_code == 409
 
 
 def test_create_alias_conflicting_with_different_ingredient_rejected(logged_in_admin):
     client, cookies, csrf = logged_in_admin
-    _create_ingredient(client, cookies, csrf, canonical_id="bell_pepper", display_name="Bell Pepper")
+    _create_ingredient(client, cookies, csrf, canonical_id="test_bell_pepper", display_name="Bell Pepper")
     _create_ingredient(client, cookies, csrf, canonical_id="chili", display_name="Chili")
     client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "pepper"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper/aliases", json={"alias": "pepper"}, cookies=cookies, headers=admin_headers(csrf)
     )
     response = client.post(
         "/api/admin/ingredients/chili/aliases", json={"alias": "pepper"}, cookies=cookies, headers=admin_headers(csrf)
@@ -178,27 +193,30 @@ def test_deactivate_alias(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     _create_ingredient(client, cookies, csrf)
     client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "capsicum"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper/aliases",
+        json={"alias": "test alias pepper"},
+        cookies=cookies,
+        headers=admin_headers(csrf),
     )
-    response = client.delete("/api/admin/aliases/capsicum", cookies=cookies, headers=admin_headers(csrf))
+    response = client.delete(f"/api/admin/aliases/{quote('test alias pepper')}", cookies=cookies, headers=admin_headers(csrf))
     assert response.status_code == 200
     assert response.json()["active"] is False
 
-    active_aliases = client.get("/api/admin/ingredients/bell_pepper/aliases", cookies=cookies)
+    active_aliases = client.get("/api/admin/ingredients/test_bell_pepper/aliases", cookies=cookies)
     assert active_aliases.json() == []
 
     all_aliases = client.get(
-        "/api/admin/ingredients/bell_pepper/aliases", params={"include_inactive": True}, cookies=cookies
+        "/api/admin/ingredients/test_bell_pepper/aliases", params={"include_inactive": True}, cookies=cookies
     )
     assert len(all_aliases.json()) == 1
 
 
 def test_reassign_alias_requires_explicit_confirmation(logged_in_admin):
     client, cookies, csrf = logged_in_admin
-    _create_ingredient(client, cookies, csrf, canonical_id="bell_pepper", display_name="Bell Pepper")
+    _create_ingredient(client, cookies, csrf, canonical_id="test_bell_pepper", display_name="Bell Pepper")
     _create_ingredient(client, cookies, csrf, canonical_id="chili", display_name="Chili")
     client.post(
-        "/api/admin/ingredients/bell_pepper/aliases", json={"alias": "pepper"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_bell_pepper/aliases", json={"alias": "pepper"}, cookies=cookies, headers=admin_headers(csrf)
     )
 
     unconfirmed = client.patch(

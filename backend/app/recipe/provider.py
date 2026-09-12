@@ -26,7 +26,22 @@ from app.domain.models import Recipe
 # RecipeAPI.io's free plan caps per_page at 10 (confirmed against live
 # provider documentation, 2026-09-05); this is also the page size
 # TECHNICAL_SPEC.md section 10 recommends as "normal" for any plan.
+# Kept as SearchStrategy's own default (unchanged) so any caller that
+# constructs one without specifying page_size keeps the historically
+# safe free-plan value; app.agent.orchestrator explicitly overrides
+# this per-request from Settings.recipeapi_page_size (2026-09-13
+# quota-aware recommendation-depth revision).
 MAX_PAGE_SIZE = 10
+
+# Structural safety ceiling only -- NOT a claim about what any specific
+# plan supports. Settings.recipeapi_page_size (app.config) is where the
+# actual per-deployment value is tuned; this just bounds Pydantic
+# validation against a wildly wrong configuration value (e.g. a typo
+# adding an extra zero) from ever reaching a provider request at all.
+# Confirmed live (2026-09-13, one bounded call) that the active trial
+# accepts and honors per_page=25; this ceiling is deliberately well
+# above that so a plan upgrade never requires touching this constant.
+ABSOLUTE_MAX_PAGE_SIZE = 100
 
 # PR #15 fifth correction pass (2026-09-08, product decision): a small,
 # reviewed, ONE-DIRECTIONAL mapping from canonical id to an alternate
@@ -82,7 +97,7 @@ class SearchStrategy(BaseModel):
     cuisine: str | None = None
     max_prep_time_minutes: int | None = Field(default=None, gt=0)
     page: int = Field(default=1, ge=1, le=1000)
-    page_size: int = Field(default=MAX_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
+    page_size: int = Field(default=MAX_PAGE_SIZE, ge=1, le=ABSOLUTE_MAX_PAGE_SIZE)
     # Priority-1 efficiency fix (PR #15 correction pass, 2026-09-08): the
     # RecipeAPI.io adapter's ingredients filter can silently contribute
     # zero relevance for some well-represented pantry ingredient terms

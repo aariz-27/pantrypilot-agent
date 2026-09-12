@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
+from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES
 
 DEFAULT_SUGGESTION_LIMIT = 10
 MAX_SUGGESTION_LIMIT = 20
@@ -30,11 +30,17 @@ def humanize_canonical_id(canonical_id: str) -> str:
     return canonical_id.replace("_", " ").strip().title()
 
 
-def _display_names() -> dict[str, str]:
-    return {cid: humanize_canonical_id(cid) for cid in CANONICAL_GROCERY_INGREDIENTS}
+def _display_names(canonical_vocabulary: frozenset[str]) -> dict[str, str]:
+    return {cid: humanize_canonical_id(cid) for cid in canonical_vocabulary}
 
 
-def suggest_ingredients(query: str, limit: int = DEFAULT_SUGGESTION_LIMIT) -> list[IngredientSuggestion]:
+def suggest_ingredients(
+    query: str,
+    limit: int = DEFAULT_SUGGESTION_LIMIT,
+    *,
+    canonical_vocabulary: frozenset[str] = CANONICAL_GROCERY_INGREDIENTS,
+    aliases: dict[str, str] = RECIPE_INGREDIENT_ALIASES,
+) -> list[IngredientSuggestion]:
     """Bounded, display-friendly, alias-aware canonical ingredient
     suggestions for the given free-text query prefix/substring.
 
@@ -42,6 +48,21 @@ def suggest_ingredients(query: str, limit: int = DEFAULT_SUGGESTION_LIMIT) -> li
     with-query, then substring match anywhere (in the display name or
     any alias text pointing at that canonical id), then alphabetical --
     entirely deterministic, no ranking "score" is exposed.
+
+    `canonical_vocabulary`/`aliases` default to the built-in taxonomy
+    (unchanged behavior for any existing caller) but are parameterized,
+    same pattern as app.domain.ingredient_normalizer.normalize_ingredient_name,
+    so a caller with admin-runtime-integration access (app.api.ingredients)
+    can pass the merged built-in+DB vocabulary from
+    app.repositories.runtime_ingredient_repository without this domain
+    module ever importing a repository or touching a database itself
+    (ticket section 9; runtime integration, 2026-09-13). The default
+    alias set changed from GROCERY_INGREDIENT_ALIASES to the superset
+    RECIPE_INGREDIENT_ALIASES (2026-09-13) specifically so autocomplete
+    and pantry/recipe normalization (which already used
+    RECIPE_INGREDIENT_ALIASES) agree on what resolves -- ticket section
+    10's cross-layer consistency requirement -- this can only ever ADD
+    matches, never remove one an existing caller relied on.
     """
 
     cleaned = query.strip().lower()
@@ -49,12 +70,12 @@ def suggest_ingredients(query: str, limit: int = DEFAULT_SUGGESTION_LIMIT) -> li
     if not cleaned:
         return []
 
-    display_by_id = _display_names()
+    display_by_id = _display_names(canonical_vocabulary)
 
-    # alias text (already lowercased in GROCERY_INGREDIENT_ALIASES) that
-    # matches, grouped by the canonical id it resolves to.
+    # alias text (already lowercased/normalized) that matches, grouped
+    # by the canonical id it resolves to.
     alias_hits: dict[str, str] = {}
-    for alias_text, canonical_id in GROCERY_INGREDIENT_ALIASES.items():
+    for alias_text, canonical_id in aliases.items():
         if cleaned in alias_text and canonical_id not in alias_hits:
             alias_hits[canonical_id] = alias_text
 

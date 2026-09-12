@@ -12,15 +12,15 @@ def test_dashboard_summary_counts_reflect_real_data(logged_in_admin):
     client, cookies, csrf = logged_in_admin
     client.post(
         "/api/admin/ingredients",
-        json={"canonical_id": "onion", "display_name": "Onion", "default_unit": "g"},
+        json={"canonical_id": "test_onion", "display_name": "Onion", "default_unit": "g"},
         cookies=cookies,
         headers=admin_headers(csrf),
     )
     client.post(
-        "/api/admin/ingredients/onion/aliases", json={"alias": "onions"}, cookies=cookies, headers=admin_headers(csrf)
+        "/api/admin/ingredients/test_onion/aliases", json={"alias": "onions"}, cookies=cookies, headers=admin_headers(csrf)
     )
     client.post(
-        "/api/admin/ingredients/onion/prices",
+        "/api/admin/ingredients/test_onion/prices",
         json={"normalized_unit": "g", "display_name": "Onion", "normalized_price_per_unit": 0.01, "provenance_note": "t"},
         cookies=cookies,
         headers=admin_headers(csrf),

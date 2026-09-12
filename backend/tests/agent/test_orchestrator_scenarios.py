@@ -1373,6 +1373,10 @@ async def test_items_without_full_recipe_still_use_get_details(price_db):
 
 
 async def test_sufficient_feasible_found_flag_reflects_best_feasible_threshold(price_db):
+    # 2026-09-13 quota-aware recommendation-depth revision: the
+    # threshold is now AgentOrchestrator's target_feasible_results
+    # (default 6, was a fixed 3) -- 6 same-anchor feasible candidates
+    # is the new "sufficient" boundary.
     recipes = {
         str(i): make_recipe(
             id=f"recipeapi_io:{i}",
@@ -1380,11 +1384,11 @@ async def test_sufficient_feasible_found_flag_reflects_best_feasible_threshold(p
             name=f"Dish {i}",
             ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
         )
-        for i in (1, 2, 3)
+        for i in range(1, 7)
     }
     provider = FakeRecipeProvider(
         "recipeapi_io",
-        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        searches=[ScriptedSearch(result=_search_result(*[str(i) for i in range(1, 7)]))],
         details_by_id=recipes,
     )
     llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
@@ -1408,6 +1412,66 @@ async def test_sufficient_feasible_found_false_below_threshold(price_db):
     await orch.run(_base_request())
 
     assert llm.requests[1].observation["state_summary"]["sufficient_feasible_found"] is False
+
+
+async def test_sufficient_feasible_found_false_at_old_free_tier_threshold_of_three(price_db):
+    # Explicit regression for the actual product bug this ticket fixes:
+    # 3 feasible candidates (the OLD threshold) must no longer report
+    # sufficient -- 3 was the free-tier-quota-conserving bar and is not
+    # the goal by itself anymore. This is what makes the agent continue
+    # past 3 when it otherwise would have stopped, ONLY when a genuine
+    # avenue actually remains (that judgment call stays the LLM's, per
+    # DEC-005 -- this test only proves the deterministic evidence
+    # reflects the new, higher bar).
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["current_best_feasible_count"] == 3
+    assert state_summary["target_feasible_results"] == 6
+    assert state_summary["sufficient_feasible_found"] is False
+
+
+async def test_target_feasible_results_is_configurable_per_orchestrator(price_db):
+    # Proves the value actually flows from the orchestrator constructor
+    # (which app.api.recommend wires from Settings.target_feasible_results)
+    # through to the observation the LLM sees -- not just a default.
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(
+        llm, {"recipeapi_io": provider}, PriceRepository(price_db), target_feasible_results=3
+    )
+
+    await orch.run(_base_request())
+
+    state_summary = llm.requests[1].observation["state_summary"]
+    assert state_summary["target_feasible_results"] == 3
+    assert state_summary["sufficient_feasible_found"] is True
 
 
 async def test_same_anchors_with_enrich_free_text_toggled_is_not_treated_as_identical(price_db):
@@ -1694,11 +1758,15 @@ async def test_mostly_generic_overlap_true_when_anchor_underrepresented(price_db
 
 
 async def test_sufficient_feasible_found_false_when_mostly_generic_overlap_despite_enough_raw_feasible_count(price_db):
-    # Regression for a real bug caught via live validation (2026-09-08):
-    # 3+ feasible candidates with an acceptable average top-3 coverage
-    # can still be a "mostly generic overlap" pool (chosen anchor barely
+    # Regression for a real bug caught via live validation (2026-09-08),
+    # strengthened 2026-09-13 for the new higher (6) threshold: 6+
+    # feasible candidates with an acceptable average coverage can still
+    # be a "mostly generic overlap" pool (chosen anchor barely
     # represented) -- sufficient_feasible_found must not fire on raw
-    # count/coverage alone once an anchor is defined.
+    # count/coverage alone once an anchor is defined. Raw count (7) on
+    # its own now clears the new target_feasible_results=6 bar, so this
+    # specifically proves the ANCHOR-FRACTION gate is what still forces
+    # False, not merely an insufficient raw count.
     anchor_recipe = make_recipe(
         id="recipeapi_io:1", provider_recipe_id="1", name="Anchor Dish",
         ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
@@ -1708,11 +1776,11 @@ async def test_sufficient_feasible_found_false_when_mostly_generic_overlap_despi
             id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Generic {i}",
             ingredients=[RecipeIngredient(raw_name="onion", raw_measure="100 g")],
         )
-        for i in (2, 3, 4)
+        for i in range(2, 8)
     }
     provider = FakeRecipeProvider(
         "recipeapi_io",
-        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4"))],
+        searches=[ScriptedSearch(result=_search_result(*[str(i) for i in range(1, 8)]))],
         details_by_id={"1": anchor_recipe, **generic_recipes},
     )
     llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
@@ -1721,26 +1789,25 @@ async def test_sufficient_feasible_found_false_when_mostly_generic_overlap_despi
     await orch.run(_base_request())
 
     state_summary = llm.requests[1].observation["state_summary"]
-    # 4 feasible total, avg coverage among top 3 is comfortably high
-    # (all candidates share the same single-ingredient full-coverage
-    # shape here), yet only 1 of 4 contains the anchor -- must not
-    # report sufficient.
-    assert state_summary["current_best_feasible_count"] == 4
+    assert state_summary["current_best_feasible_count"] == 7
     assert state_summary["feasible_anchor_candidates_total"] == 1
     assert state_summary["sufficient_feasible_found"] is False
 
 
 async def test_sufficient_feasible_found_true_when_anchor_well_represented(price_db):
+    # 2026-09-13: 6 candidates (the new target_feasible_results
+    # default), all containing the anchor -- was 3 under the old
+    # threshold.
     recipes = {
         str(i): make_recipe(
             id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Dish {i}",
             ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
         )
-        for i in (1, 2, 3)
+        for i in range(1, 7)
     }
     provider = FakeRecipeProvider(
         "recipeapi_io",
-        searches=[ScriptedSearch(result=_search_result("1", "2", "3"))],
+        searches=[ScriptedSearch(result=_search_result(*[str(i) for i in range(1, 7)]))],
         details_by_id=recipes,
     )
     llm = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
@@ -1749,7 +1816,7 @@ async def test_sufficient_feasible_found_true_when_anchor_well_represented(price
     await orch.run(_base_request())
 
     state_summary = llm.requests[1].observation["state_summary"]
-    assert state_summary["feasible_anchor_candidates_total"] == 3
+    assert state_summary["feasible_anchor_candidates_total"] == 6
     assert state_summary["mostly_generic_overlap"] is False
     assert state_summary["sufficient_feasible_found"] is True
 
@@ -2502,3 +2569,50 @@ async def test_malicious_provider_content_stays_inert_untrusted_data(price_db):
     stored_evaluation = next(iter(result.recipe_by_id.values()))
     assert stored_evaluation.name == malicious_name  # confirms the field really was populated, not silently dropped
 
+
+
+# --- quota/provider failure preserves already-grounded results (ticket -------
+# section 27/30, 2026-09-13 quota-aware recommendation-depth revision) -------
+
+
+async def test_rate_limit_on_a_later_attempt_preserves_earlier_grounded_results(price_db):
+    # A real provider failure (e.g. quota/rate-limit hit) on a SECOND
+    # search attempt must never discard the first attempt's already-
+    # evaluated, already-grounded feasible candidates -- execute_search
+    # (app.agent.tools) already converts a RecipeProviderError into a
+    # typed per-attempt outcome rather than letting it propagate as an
+    # exception, so _finalize is always reachable with whatever was
+    # accumulated so far. This proves that architecture end-to-end
+    # rather than only at the tools.execute_search unit level.
+    recipes = {
+        str(i): make_recipe(
+            id=f"recipeapi_io:{i}", provider_recipe_id=str(i), name=f"Dish {i}",
+            ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+        )
+        for i in (1, 2, 3)
+    }
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[
+            ScriptedSearch(result=_search_result("1", "2", "3", has_more=True)),
+            ScriptedSearch(error=RecipeProviderRateLimitedError),
+        ],
+        details_by_id=recipes,
+    )
+    # Paginate (not a new search) keeps the SAME anchor ("tomato") --
+    # this isolates the thing under test (a later provider failure must
+    # not discard earlier results) from the separate, already-covered
+    # anchor-discipline behavior (switching anchors reclassifies earlier
+    # candidates as non-anchor, which is correct and intentional, but
+    # not what this test is about).
+    llm = FakeLLMProvider(
+        [_search_action(["tomato"]), _paginate_action(), _stop_action(StopReason.PROVIDER_UNAVAILABLE_NO_FALLBACK)]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request())
+
+    assert result.status == "completed"
+    assert len(result.recommendations) == 3
+    assert {c.recipe_id for c in result.recommendations} == {"recipeapi_io:1", "recipeapi_io:2", "recipeapi_io:3"}
+    assert result.provider_status["recipeapi_io"] == "rate_limited"

@@ -1,17 +1,26 @@
 import pytest
 
-from app.recipe.provider import SearchResultItem, SearchStrategy, dedupe_search_results
+from app.recipe.provider import ABSOLUTE_MAX_PAGE_SIZE, MAX_PAGE_SIZE, SearchResultItem, SearchStrategy, dedupe_search_results
 
 
 def test_search_strategy_defaults_are_bounded():
     strategy = SearchStrategy()
     assert strategy.page == 1
-    assert 1 <= strategy.page_size <= 10
+    assert strategy.page_size == MAX_PAGE_SIZE  # unchanged default (10) when not overridden
+
+
+def test_search_strategy_accepts_a_larger_configured_page_size():
+    # 2026-09-13 quota-aware recommendation-depth revision: page_size is
+    # now genuinely configurable per deployment (Settings.recipeapi_page_size),
+    # not hard-clamped back to the old free-plan MAX_PAGE_SIZE. 25 is the
+    # value confirmed live against the active RecipeAPI.io trial.
+    strategy = SearchStrategy(page_size=25)
+    assert strategy.page_size == 25
 
 
 def test_search_strategy_rejects_oversized_page_size():
     with pytest.raises(Exception):
-        SearchStrategy(page_size=11)
+        SearchStrategy(page_size=ABSOLUTE_MAX_PAGE_SIZE + 1)
 
 
 def test_search_strategy_rejects_zero_or_negative_page():

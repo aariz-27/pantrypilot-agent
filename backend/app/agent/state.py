@@ -20,7 +20,20 @@ from app.recipe.provider import SearchStrategy
 
 MAX_SEARCH_ATTEMPTS = 3
 MAX_EVALUATED_CANDIDATES = 20
+# Recommendations/additional_options split point only (ticket, 2026-09-13
+# recommendation-depth revision): how many of the ranked anchor-feasible
+# pool become "recommendations" vs. "additional_options" in
+# AgentOrchestrator._finalize. Deliberately left at 3, unchanged --
+# raising this to 6 would collapse the recommendations/additional_options
+# distinction the frontend's "Show more options" reveal already relies
+# on (Option B chosen over Option A: least conceptual debt, zero schema
+# change, the frontend already combines both buckets up to
+# target_feasible_results for its initial 6-visible display). See
+# AgentState.target_feasible_results below for the SEPARATE, now-
+# configurable "how many should the agent try to find" stop-policy
+# target -- that is the value actually raised to 6.
 MAX_FINAL_RECOMMENDATIONS = 3
+DEFAULT_TARGET_FEASIBLE_RESULTS = 6
 MAX_CORRECTIVE_RETRIES_PER_STEP = 1
 # PR #15 HTTP-500 fix (2026-09-09): a structurally-valid action Python
 # rejects (AgentUnsupportedActionError -- e.g. a search anchor not
@@ -68,6 +81,14 @@ class AgentState:
 
     search_attempts: int = 0
     max_search_attempts: int = MAX_SEARCH_ATTEMPTS
+    # Per-run override of how many strong same-anchor feasible
+    # candidates the stop-policy signal (sufficient_feasible_found)
+    # treats as "enough" -- same per-instance-overridable-default
+    # pattern as max_search_attempts above. Set from
+    # Settings.target_feasible_results by AgentOrchestrator so it can
+    # be tuned per deployment (trial vs. post-trial quota) without a
+    # code change.
+    target_feasible_results: int = DEFAULT_TARGET_FEASIBLE_RESULTS
     searched_strategies: list[SearchAttemptRecord] = field(default_factory=list)
     distinct_search_signatures: set[tuple] = field(default_factory=set)
     # Recipe identity, matching app.recipe.provider.dedupe_search_results'

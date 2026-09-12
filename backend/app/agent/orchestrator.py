@@ -27,6 +27,7 @@ from app.agent.observations import (
 )
 from app.agent.policy import SYSTEM_POLICY
 from app.agent.state import (
+    DEFAULT_TARGET_FEASIBLE_RESULTS,
     MAX_CORRECTIVE_RETRIES_PER_STEP,
     MAX_FINAL_RECOMMENDATIONS,
     MAX_UNSUPPORTED_ACTION_CORRECTIONS,
@@ -42,14 +43,14 @@ from app.agent.tools import (
     normalize_recipe_ingredients,
 )
 from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
-from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES
 from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry
 from app.domain.models import CandidateEvaluation, Recipe, RejectionReason, UserConstraints
 from app.domain.ranker import rank_candidates
 from app.domain.serving_scaler import ScaledRecipe, scale_recipe_servings
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
-from app.recipe.provider import RecipeProvider, SearchStrategy
+from app.recipe.provider import MAX_PAGE_SIZE, RecipeProvider, SearchStrategy
 from app.repositories.price_repository import PriceRepository
+from app.repositories.runtime_ingredient_repository import get_merged_vocabulary
 
 _ACTION_SCHEMA = AgentAction.model_json_schema()
 
@@ -121,10 +122,35 @@ class AgentOrchestrator:
         llm_provider: LLMProvider,
         recipe_providers: dict[str, RecipeProvider],
         price_repository: PriceRepository,
+        *,
+        search_page_size: int = MAX_PAGE_SIZE,
+        target_feasible_results: int = DEFAULT_TARGET_FEASIBLE_RESULTS,
+        ingredient_db_path: str | None = None,
     ) -> None:
         self._llm = llm_provider
         self._providers = recipe_providers
         self._price_repository = price_repository
+        # Quota-aware recommendation depth (2026-09-13): both default to
+        # the pre-existing free-plan-safe values, so constructing an
+        # AgentOrchestrator without these kwargs (every existing test)
+        # is unchanged. app.api.recommend wires these from
+        # Settings.recipeapi_page_size / Settings.target_feasible_results
+        # in production.
+        self._search_page_size = search_page_size
+        self._target_feasible_results = target_feasible_results
+        # Runtime ingredient integration (2026-09-13): ingredient_db_path
+        # defaulting to None means "no admin database configured" --
+        # get_merged_vocabulary(None) returns the built-in taxonomy
+        # completely unchanged, with zero I/O attempted, so every
+        # existing test that constructs AgentOrchestrator without this
+        # kwarg keeps behaving exactly as before. app.api.recommend
+        # wires this from Settings.price_db_path (the SAME database the
+        # admin dashboard and PriceRepository already use -- no parallel
+        # database). Computed once per orchestrator instance (recommend.py
+        # constructs one per request), which naturally refreshes within
+        # the merge cache's TTL -- see
+        # app.repositories.runtime_ingredient_repository.
+        self._vocabulary = get_merged_vocabulary(ingredient_db_path)
 
     async def run(self, request: AgentRequest) -> AgentResult:
         state = self._init_state(request)
@@ -193,8 +219,8 @@ class AgentOrchestrator:
     # -- setup -----------------------------------------------------------
 
     def _init_state(self, request: AgentRequest) -> AgentState:
-        pantry = normalize_pantry(request.pantry_raw, CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES)
-        excluded = normalize_pantry(request.excluded_raw, CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES)
+        pantry = normalize_pantry(request.pantry_raw, self._vocabulary.canonical_ids, self._vocabulary.aliases)
+        excluded = normalize_pantry(request.excluded_raw, self._vocabulary.canonical_ids, self._vocabulary.aliases)
         return AgentState(
             request_id=request.request_id,
             pantry_raw=list(request.pantry_raw),
@@ -207,6 +233,7 @@ class AgentOrchestrator:
             excluded_raw=list(request.excluded_raw),
             excluded_canonical=excluded.canonical_ids,
             pantry_unresolved=pantry.unresolved,
+            target_feasible_results=self._target_feasible_results,
         )
 
     def _constraints(self, request: AgentRequest, excluded_canonical: frozenset[str]) -> UserConstraints:
@@ -306,7 +333,7 @@ class AgentOrchestrator:
 
         canonical_ids: list[str] = []
         for anchor in anchor_ingredients:
-            result = normalize_ingredient_name(anchor, CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES)
+            result = normalize_ingredient_name(anchor, self._vocabulary.canonical_ids, self._vocabulary.aliases)
             if result.canonical_id is None or result.canonical_id not in state.pantry_canonical:
                 raise AgentUnsupportedActionError(
                     f"search anchor {anchor!r} is not present in the user's pantry; anchors must be "
@@ -373,6 +400,7 @@ class AgentOrchestrator:
             query_ingredients=anchor_canonical_ids,
             cuisine=args.cuisine,
             page=1,
+            page_size=self._search_page_size,
             enrich_free_text=args.enrich_free_text,
             broaden_provider_search=args.broaden_provider_search,
         )
@@ -451,7 +479,9 @@ class AgentOrchestrator:
         for raw_recipe in fetched_recipes:
             scaled = scale_recipe_servings(raw_recipe, state.servings)
             state.scaling_by_id[raw_recipe.id] = scaled
-            normalized_scaled = normalize_recipe_ingredients(scaled.recipe)
+            normalized_scaled = normalize_recipe_ingredients(
+                scaled.recipe, canonical_vocabulary=self._vocabulary.canonical_ids, aliases=self._vocabulary.aliases
+            )
             state.recipe_by_id[raw_recipe.id] = normalized_scaled
             recipes.append(scaled.recipe)
 
@@ -467,7 +497,10 @@ class AgentOrchestrator:
             # rather than tuple-keyed like candidate_ids_seen above.
             state.recipe_meta_by_id[recipe.id] = (recipe.cuisine, recipe.name)
 
-        feasible, rejected = evaluate_and_rank(recipes, state.pantry_canonical, constraints, self._price_repository)
+        feasible, rejected = evaluate_and_rank(
+            recipes, state.pantry_canonical, constraints, self._price_repository,
+            canonical_vocabulary=self._vocabulary.canonical_ids, aliases=self._vocabulary.aliases,
+        )
         state.evaluated_candidates.extend(feasible + rejected)
         state.best_feasible = self._merge_best_feasible(state, feasible, constraints)
 

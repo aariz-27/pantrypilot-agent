@@ -10,13 +10,15 @@ The admin dashboard is additive to the existing PantryPilot application, not a s
 - **Backend:** new routers under `backend/app/api/admin_*.py`, mounted at `/api/admin/...`, alongside (not replacing) the existing `/api/recommend` and `/api/ingredients/suggest` routers in `backend/app/main.py`.
 - **Frontend:** a second root component (`frontend/src/admin/AdminApp.jsx`) that mounts instead of the public `App.jsx` only when the browser path starts with `/admin` (`frontend/src/main.jsx`). Same build, same bundle, no new framework, no router library — consistent with the existing `App.jsx` internal-state view-switching convention.
 
-### Important architecture boundary — read this before editing ingredients or aliases
+### Important architecture boundary — RESOLVED 2026-09-13
 
-The **live** pantry-matching/autocomplete/normalization code (`backend/app/domain/ingredient_normalizer.py`, `backend/app/domain/ingredient_autocomplete.py`) does **not** read canonical ingredients or aliases from the database. It reads two disconnected Python module-level constants (`app.domain.canonical_ingredients` and `app.domain.grocery_taxonomy`). The `ingredient_aliases` DB table existed before this ticket but was never read by any runtime code path (verified by repo-wide grep).
+**Update (2026-09-13):** the gap described below has been closed. See `docs/admin/RECOMMENDATION_DEPTH_AND_RUNTIME_INTEGRATION.md` for the full runtime-integration architecture. Admin-created/edited canonical ingredients and aliases now DO affect the live public autocomplete, pantry normalization, and recommendation pipeline, merged on top of (never replacing) the built-in `app.domain.grocery_taxonomy` vocabulary. The paragraph below is kept for historical context (it described the state as of the admin dashboard's initial commit `0b3afb7`) — do not rely on it for current behavior.
 
-Practical consequence: creating/editing a canonical ingredient or alias through this admin dashboard is fully real and persists correctly, and the dashboard reads its own writes back consistently — but it does **not** retroactively change what the live recommendation engine resolves a pantry ingredient to. Rewiring the normalizer/autocomplete to read from SQLite instead of the Python constants would be a real architecture change to Module A/B's frozen deterministic core (DEC-006) and was **not** authorized or made here.
+~~The **live** pantry-matching/autocomplete/normalization code (`backend/app/domain/ingredient_normalizer.py`, `backend/app/domain/ingredient_autocomplete.py`) does **not** read canonical ingredients or aliases from the database. It reads two disconnected Python module-level constants (`app.domain.canonical_ingredients` and `app.domain.grocery_taxonomy`). The `ingredient_aliases` DB table existed before this ticket but was never read by any runtime code path (verified by repo-wide grep).~~
 
-**Pricing has no such gap.** `ingredient_prices` and `manual_price_entries` are already the exact tables `PriceRepository` reads at runtime (DEC-013), so admin price edits have immediate, real effect on the live cost engine. `ingredient_prices` (LuLu-derived, median-aggregated) is admin-*viewable only* — never hand-edited, to preserve its aggregation provenance invariants. `manual_price_entries` is the only table admin price writes go to, which is exactly what DEC-013 designed that table for.
+~~Practical consequence: creating/editing a canonical ingredient or alias through this admin dashboard is fully real and persists correctly, and the dashboard reads its own writes back consistently — but it does **not** retroactively change what the live recommendation engine resolves a pantry ingredient to.~~
+
+**Pricing had no such gap even at initial commit.** `ingredient_prices` and `manual_price_entries` are already the exact tables `PriceRepository` reads at runtime (DEC-013), so admin price edits have immediate, real effect on the live cost engine. `ingredient_prices` (LuLu-derived, median-aggregated) is admin-*viewable only* — never hand-edited, to preserve its aggregation provenance invariants. `manual_price_entries` is the only table admin price writes go to, which is exactly what DEC-013 designed that table for.
 
 ## 2. Authentication / security model
 
@@ -186,7 +188,7 @@ A failed or reverted admin deployment never requires touching the public app's o
 
 ## 11. Known limitations
 
-- Canonical ingredient / alias admin edits are administrative records only — they do not (yet) change live pantry-matching/autocomplete behavior. See §1.
+- ~~Canonical ingredient / alias admin edits are administrative records only — they do not (yet) change live pantry-matching/autocomplete behavior.~~ **Resolved 2026-09-13** — see `docs/admin/RECOMMENDATION_DEPTH_AND_RUNTIME_INTEGRATION.md`.
 - `manual_price_entries` writes are per-(canonical_id, normalized_unit) row; there is no bulk import/edit UI.
 - Raw/mapped grocery product inspection (`/admin/grocery/products`) is read-only by design — no bulk remapping tool exists yet (ticket explicitly scoped this out for the first version).
 - Rate limiting uses the existing in-memory `slowapi` storage (Module F's own documented limitation) — counters reset on process restart and are not shared across multiple worker processes.

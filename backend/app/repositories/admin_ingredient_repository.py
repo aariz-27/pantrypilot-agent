@@ -1,10 +1,15 @@
 """Admin CRUD over canonical_ingredients + ingredient_aliases
-(feature/admin-ingredient-dashboard).
+(feature/admin-ingredient-dashboard; runtime-integrated 2026-09-13).
 
-See app.db.admin_schema's module docstring for the important
-architecture boundary: these tables are administrative records read
-back by this same admin dashboard, not (yet) the source the live
-pantry-matching/autocomplete path resolves against.
+As of the 2026-09-13 runtime integration ticket, these tables ARE the
+live source the public app's autocomplete/pantry-normalization path
+merges on top of the built-in app.domain.grocery_taxonomy vocabulary --
+see app.repositories.runtime_ingredient_repository for the merge logic
+and precedence rules, and docs/admin/ADMIN_DASHBOARD.md section 1 /
+docs/admin/RECOMMENDATION_DEPTH_AND_RUNTIME_INTEGRATION.md for the full
+architecture writeup. Every successful mutation here calls
+invalidate_runtime_ingredient_cache() so the change is visible on this
+process's very next lookup.
 """
 
 from __future__ import annotations
@@ -15,6 +20,8 @@ from datetime import datetime, timezone
 
 from app.admin.errors import AdminConflictError, AdminNotFoundError
 from app.db.connection import connection_scope
+from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS
+from app.repositories.runtime_ingredient_repository import alias_conflicts_with_builtin, invalidate_runtime_ingredient_cache
 
 _CANONICAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _MAX_DISPLAY_NAME_LENGTH = 120
@@ -146,6 +153,19 @@ class AdminIngredientRepository:
         display_name = display_name.strip()
         if not display_name or len(display_name) > _MAX_DISPLAY_NAME_LENGTH:
             raise AdminConflictError(f"display_name must be 1-{_MAX_DISPLAY_NAME_LENGTH} characters")
+        if canonical_id in CANONICAL_GROCERY_INGREDIENTS:
+            # Runtime integration (2026-09-13): a built-in canonical id's
+            # identity is never redefined by a DB row (precedence rule 1,
+            # app.repositories.runtime_ingredient_repository). Creating a
+            # DB row with the same id would be silently invisible to the
+            # live resolver (the built-in id already wins) while
+            # confusingly implying the admin "created" a new ingredient
+            # -- rejected outright rather than allowed to quietly do
+            # nothing useful.
+            raise AdminConflictError(
+                f"'{canonical_id}' is already a built-in canonical ingredient; it cannot be re-created "
+                "as an admin-managed one"
+            )
 
         now = _now_iso()
         with connection_scope(self._db_path, read_only=False) as connection:
@@ -164,6 +184,7 @@ class AdminIngredientRepository:
                 (canonical_id, display_name, default_unit, now, now, updated_by),
             )
             connection.commit()
+        invalidate_runtime_ingredient_cache(self._db_path)
 
         record = self.get_ingredient(canonical_id)
         assert record is not None
@@ -208,6 +229,12 @@ class AdminIngredientRepository:
                 (new_display_name, new_default_unit, new_status, _now_iso(), updated_by, canonical_id),
             )
             connection.commit()
+        if status is not None:
+            # Only a status change can affect the live merged vocabulary
+            # (_load_db_overlay filters WHERE status = 'active') --
+            # display_name/default_unit are administrative metadata the
+            # resolver never reads.
+            invalidate_runtime_ingredient_cache(self._db_path)
 
         record = self.get_ingredient(canonical_id)
         assert record is not None
@@ -254,6 +281,18 @@ class AdminIngredientRepository:
         if self.get_ingredient(canonical_id) is None:
             raise AdminNotFoundError(f"canonical ingredient '{canonical_id}' not found")
 
+        # Runtime integration (2026-09-13, ticket section 7): a conflict
+        # against the BUILT-IN taxonomy is checked before the DB-vs-DB
+        # check below -- prevents an admin write from silently repointing
+        # an alias/id the live public resolver already treats as
+        # authoritative, not just one another DB row already claimed.
+        builtin_conflict = alias_conflicts_with_builtin(cleaned, canonical_id, self._db_path)
+        if builtin_conflict is not None:
+            raise AdminConflictError(
+                f"alias '{cleaned}' already resolves to the built-in canonical ingredient "
+                f"'{builtin_conflict}' and cannot be remapped to '{canonical_id}'"
+            )
+
         with connection_scope(self._db_path, read_only=False) as connection:
             existing = connection.execute(
                 "SELECT canonical_id, active FROM ingredient_aliases WHERE alias = ?", (cleaned,)
@@ -291,6 +330,7 @@ class AdminIngredientRepository:
                     (cleaned, canonical_id, source, now, updated_by),
                 )
             connection.commit()
+        invalidate_runtime_ingredient_cache(self._db_path)
 
         alias_record = self._get_alias(cleaned)
         assert alias_record is not None
@@ -315,6 +355,7 @@ class AdminIngredientRepository:
                 (new_canonical_id, _now_iso(), updated_by, cleaned),
             )
             connection.commit()
+        invalidate_runtime_ingredient_cache(self._db_path)
 
         record = self._get_alias(cleaned)
         assert record is not None
@@ -332,6 +373,7 @@ class AdminIngredientRepository:
                 (_now_iso(), updated_by, cleaned),
             )
             connection.commit()
+        invalidate_runtime_ingredient_cache(self._db_path)
 
         record = self._get_alias(cleaned)
         assert record is not None

@@ -53,15 +53,6 @@ _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT = 1 / 3
 # the same way as _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT above.
 _MIN_ANCHOR_FRACTION_FOR_SUFFICIENT = 0.5
 
-# PR #15 fourth correction pass (2026-09-08, Blocker 4): descriptive
-# target for how many FEASIBLE same-anchor candidates should exist
-# beyond the top 3 (i.e. ~6 same-anchor feasible total: 3 shown + ~3
-# reserve) when the provider genuinely has that many available. Never a
-# hard requirement -- SYSTEM_POLICY treats reserve_depth_target_met as
-# one more piece of evidence for the agent's own stop/continue
-# judgment, same as every other observation field in this module.
-_RESERVE_DEPTH_TARGET = 3
-
 
 @dataclass(frozen=True)
 class AnchorStats:
@@ -261,7 +252,13 @@ def build_decision_payload(state: AgentState) -> dict:
     independent review finding that fixed this (2026-09-07)."""
 
     observation = state.last_observation
-    top_best_feasible = state.best_feasible[:MAX_FINAL_RECOMMENDATIONS]
+    # 2026-09-13 recommendation-depth revision: this quality-gate window
+    # now scales with state.target_feasible_results (default 6, was a
+    # fixed MAX_FINAL_RECOMMENDATIONS=3) -- "sufficient" now means the
+    # average pantry match among the top TARGET candidates clears the
+    # bar, not just the top 3, consistent with aiming for up to 6 shown
+    # initially rather than 3.
+    top_best_feasible = state.best_feasible[: state.target_feasible_results]
     best_feasible_avg_coverage = (
         sum(c.pantry_coverage for c in top_best_feasible) / len(top_best_feasible) if top_best_feasible else 0.0
     )
@@ -279,6 +276,7 @@ def build_decision_payload(state: AgentState) -> dict:
             "candidates_evaluated_total": len(state.evaluated_candidates),
             "candidate_cap_remaining": state.remaining_candidate_capacity(),
             "current_best_feasible_count": len(state.best_feasible),
+            "target_feasible_results": state.target_feasible_results,
             # Priority 5 additions: makes the LLM's own anchor choice's
             # real-world retrieval quality explicit and cumulative (never
             # Python's own classification of which ingredient matters --
@@ -304,28 +302,34 @@ def build_decision_payload(state: AgentState) -> dict:
                 and anchor_stats.anchor_canonical_id in PROVIDER_SEARCH_TERM_OVERRIDES
             ),
             "provider_broadening_already_used": state.active_anchor_broadening_used,
-            # Blocker 4: reserve-depth evidence -- how many FEASIBLE
-            # same-anchor candidates exist beyond what the top 3 already
-            # need. Target is descriptive (~3, i.e. ~6 same-anchor
-            # feasible total), never a hard requirement -- see
-            # SYSTEM_POLICY for how the agent may use it.
+            # Blocker 4 (original), revised 2026-09-13: reserve-depth
+            # evidence -- how many FEASIBLE same-anchor candidates exist
+            # beyond the top MAX_FINAL_RECOMMENDATIONS slots that become
+            # "recommendations" (still 3 -- see app.agent.state's
+            # module docstring on why that split point itself did not
+            # change). "Target met" now means the same-anchor feasible
+            # pool has reached state.target_feasible_results overall
+            # (default 6), not a fixed +3 -- equivalent to the old
+            # behavior at the default, but now configurable. Never a
+            # hard requirement -- see SYSTEM_POLICY for how the agent
+            # may use it.
             "same_anchor_reserve_count": max(
                 0, anchor_stats.feasible_anchor_candidate_count - MAX_FINAL_RECOMMENDATIONS
             ),
-            "reserve_depth_target_met": (
-                anchor_stats.feasible_anchor_candidate_count - MAX_FINAL_RECOMMENDATIONS
-            ) >= _RESERVE_DEPTH_TARGET,
+            "reserve_depth_target_met": anchor_stats.feasible_anchor_candidate_count >= state.target_feasible_results,
             # Priority-1 efficiency fix (PR #15 correction pass,
-            # 2026-09-08): explicit, unmissable boolean mirroring
-            # MAX_FINAL_RECOMMENDATIONS -- SYSTEM_POLICY already said
-            # "stop once enough strong feasible candidates exist" in
-            # prose, but nothing forced the model to compare
-            # current_best_feasible_count against the actual threshold
-            # itself. This never overrides the LLM's stop decision
-            # (DEC-005: the LLM controls stop conditions) -- it only
-            # makes the deterministic evidence for that decision explicit
-            # rather than implicit. Requires enough feasible candidates,
-            # a minimum average pantry match among them (see
+            # 2026-09-08), revised 2026-09-13: explicit, unmissable
+            # boolean mirroring state.target_feasible_results (was a
+            # fixed MAX_FINAL_RECOMMENDATIONS=3 -- raising the bar to a
+            # configurable, higher default of 6 is the actual mechanism
+            # behind "don't stop at 3 merely to conserve the old
+            # free-tier quota": with a higher bar, the model naturally
+            # continues past 3 whenever a genuine avenue remains,
+            # without Python ever forcing a specific count). This never
+            # overrides the LLM's stop decision (DEC-005) -- it only
+            # makes the deterministic evidence for that decision
+            # explicit rather than implicit. Requires enough feasible
+            # candidates, a minimum average pantry match among them (see
             # _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT), AND -- Priority 5 --
             # when an anchor is defined and anchor matches exist at all,
             # enough of those feasible candidates actually contain the
@@ -333,13 +337,13 @@ def build_decision_payload(state: AgentState) -> dict:
             # alone (hard_constraint_pass) says nothing about relevance;
             # coverage alone says nothing about WHY it's low.
             "sufficient_feasible_found": (
-                len(state.best_feasible) >= MAX_FINAL_RECOMMENDATIONS
+                len(state.best_feasible) >= state.target_feasible_results
                 and best_feasible_avg_coverage >= _MIN_AVERAGE_COVERAGE_FOR_SUFFICIENT
                 and (
                     anchor_stats.anchor_canonical_id is None
                     or anchor_stats.anchor_candidate_count == 0
                     or (
-                        anchor_stats.feasible_anchor_candidate_count >= MAX_FINAL_RECOMMENDATIONS
+                        anchor_stats.feasible_anchor_candidate_count >= state.target_feasible_results
                         and not anchor_stats.mostly_generic_overlap
                     )
                 )

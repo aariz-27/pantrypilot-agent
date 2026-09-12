@@ -75,7 +75,6 @@ from app.domain.provider_errors import (
 )
 from app.recipe.mapping import build_recipe_id, require_usable_identity
 from app.recipe.provider import (
-    MAX_PAGE_SIZE,
     PROVIDER_SEARCH_TERM_OVERRIDES,
     SearchResult,
     SearchResultItem,
@@ -232,9 +231,17 @@ class RecipeAPIIOAdapter:
         return canonical_id
 
     def _build_search_params(self, strategy: SearchStrategy) -> dict[str, object]:
+        # 2026-09-13 quota-aware recommendation-depth revision: this
+        # used to silently re-clamp to the free-plan MAX_PAGE_SIZE (10)
+        # regardless of what strategy.page_size actually requested,
+        # which would have completely defeated Settings.recipeapi_page_size
+        # (app.config) ever mattering. strategy.page_size is already
+        # bounded by SearchStrategy's own Pydantic validation
+        # (ABSOLUTE_MAX_PAGE_SIZE) -- trust it directly rather than
+        # duplicating a second, now-stale policy here.
         params: dict[str, object] = {
             "page": strategy.page,
-            "per_page": min(strategy.page_size, MAX_PAGE_SIZE),
+            "per_page": strategy.page_size,
             "lang": "en",
         }
         if strategy.query_ingredients:
