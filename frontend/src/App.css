@@ -1,36 +1,43 @@
 /* App shell: a layered dark-navy backdrop built entirely from CSS
-   gradients (no external imagery, no fabricated recipe photography --
-   ticket constraint). Multiple soft glows at different depths read as
-   cinematic ambient lighting rather than a flat fill. */
+   gradients, topped by the full-page HeroDecor photo layer below. The
+   center stays darkest (a tight, low-spread glow instead of the wide
+   one previously here) so the reading area behind the hero/search
+   panel remains calm even as the edge imagery gets more present. */
 .app-shell {
   min-height: 100%;
   background-color: var(--color-bg);
-  background-image: radial-gradient(900px 560px at 85% -10%, var(--color-gold-soft), transparent 62%),
-    radial-gradient(760px 620px at -8% 12%, var(--color-primary-soft), transparent 58%),
-    radial-gradient(1100px 700px at 50% 120%, var(--color-bg-elevated), transparent 70%);
+  background-image: radial-gradient(700px 460px at 85% -6%, var(--color-gold-soft), transparent 60%),
+    radial-gradient(620px 520px at -6% 10%, var(--color-primary-soft), transparent 55%),
+    radial-gradient(900px 520px at 50% 30%, var(--color-bg-elevated), transparent 65%),
+    radial-gradient(1200px 640px at 50% 118%, var(--color-bg-elevated), transparent 68%);
   background-repeat: no-repeat;
 }
 
 .app-main {
-  padding-top: var(--space-7);
+  padding-top: var(--space-6);
   padding-bottom: var(--space-8);
 }
 
 /* ---- Hero ---- */
 
-/* HeroDecor sits absolutely within .hero-section (matching its exact
-   height -- "vertically aligned with the hero/search area", not a
-   full-viewport layer) at z-index 0. .hero and .search-form are
-   explicitly given z-index 1 each (not just relying on default
-   positioned-vs-static paint order, which is easy to get backwards)
-   so they are unambiguously guaranteed to stack above the decor. */
+/* HeroDecor is rendered as a sibling of <Header>/<main> at the
+   app-shell level, NOT nested inside the 1080px-wide .container --
+   anchoring it inside that centered column was exactly what made the
+   imagery read as a boxed rectangle rather than a page-level
+   background (visual-correction pass). position:fixed here anchors to
+   the true viewport, independent of the content column's width, and
+   spans the full viewport height so the imagery continues behind the
+   header (through its glass translucency) and well past the search
+   panel, not just the hero's own height.
+   .hero-section/.hero/.search-form each carry an explicit z-index so
+   they unambiguously stack above this regardless of DOM nesting. */
 .hero-section {
   position: relative;
   z-index: 1;
 }
 
 .hero-decor {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
@@ -48,23 +55,48 @@
 
 .hero-decor__glow {
   position: absolute;
-  width: 480px;
-  height: 480px;
   border-radius: 50%;
   filter: blur(90px);
-  opacity: 0.5;
 }
 
 .hero-decor__glow--left {
-  left: -180px;
-  top: 40px;
+  width: 520px;
+  height: 520px;
+  left: -160px;
+  top: 30px;
+  opacity: 0.5;
   background: radial-gradient(circle, var(--color-gold-soft), transparent 70%);
 }
 
 .hero-decor__glow--right {
-  right: -200px;
-  top: 160px;
+  width: 520px;
+  height: 520px;
+  right: -180px;
+  top: 140px;
+  opacity: 0.5;
   background: radial-gradient(circle, var(--color-primary-soft), transparent 70%);
+}
+
+/* Warm low glow near the bottom of each side, echoing reflected
+   countertop lighting so the page doesn't cut abruptly from imagery
+   to plain navy further down (ticket section 8: "lower background /
+   countertop feel", without a literal fake mirrored panel). */
+.hero-decor__glow--lower-left {
+  width: 460px;
+  height: 460px;
+  left: -140px;
+  bottom: -120px;
+  opacity: 0.32;
+  background: radial-gradient(circle, var(--color-gold-soft), transparent 72%);
+}
+
+.hero-decor__glow--lower-right {
+  width: 460px;
+  height: 460px;
+  right: -160px;
+  bottom: -80px;
+  opacity: 0.32;
+  background: radial-gradient(circle, var(--color-primary-soft), transparent 72%);
 }
 
 /* Decorative culinary still-life panels -- Founder-provided photos,
@@ -75,9 +107,10 @@
    mobile below 768px references the files nowhere and downloads zero
    bytes of them -- not just a hidden 0-opacity element (verified via
    a network-request check). A radial-gradient mask (not a straight
-   edge fade) softens BOTH the inward and vertical edges at once, so
-   there is no hard rectangular boundary in any direction ("no obvious
-   sticker effect"). */
+   edge fade) softens the imagery toward the page center and toward
+   top/bottom at once, so there is no hard rectangular boundary in any
+   direction ("no obvious sticker effect") -- it reads as the page
+   background itself rather than a contained photo. */
 .hero-decor__panel {
   display: none;
   position: absolute;
@@ -90,17 +123,17 @@
 .hero-decor__panel--left {
   left: 0;
   background-image: url('./assets/backgrounds/pantrypilot-bg-left.webp');
-  background-position: 30% 32%;
-  mask-image: radial-gradient(ellipse 100% 85% at 8% 34%, black 30%, transparent 85%);
-  -webkit-mask-image: radial-gradient(ellipse 100% 85% at 8% 34%, black 30%, transparent 85%);
+  background-position: 30% 28%;
+  mask-image: radial-gradient(ellipse 130% 62% at 0% 42%, black 30%, transparent 88%);
+  -webkit-mask-image: radial-gradient(ellipse 130% 62% at 0% 42%, black 30%, transparent 88%);
 }
 
 .hero-decor__panel--right {
   right: 0;
   background-image: url('./assets/backgrounds/pantrypilot-bg-right.webp');
-  background-position: 75% 40%;
-  mask-image: radial-gradient(ellipse 100% 85% at 92% 46%, black 30%, transparent 85%);
-  -webkit-mask-image: radial-gradient(ellipse 100% 85% at 92% 46%, black 30%, transparent 85%);
+  background-position: 72% 34%;
+  mask-image: radial-gradient(ellipse 130% 62% at 100% 42%, black 30%, transparent 88%);
+  -webkit-mask-image: radial-gradient(ellipse 130% 62% at 100% 42%, black 30%, transparent 88%);
 }
 
 /* Tablet tier (>=768px): present but reduced substantially so it
@@ -108,8 +141,8 @@
 @media (min-width: 768px) {
   .hero-decor__panel {
     display: block;
-    width: 130px;
-    opacity: 0.14;
+    width: 170px;
+    opacity: 0.22;
   }
 }
 
@@ -117,17 +150,51 @@
    composition. */
 @media (min-width: 1280px) {
   .hero-decor__panel {
-    width: 300px;
-    opacity: 0.38;
+    width: 420px;
+    opacity: 0.55;
   }
 }
 
-/* Desktop tier (>=1440px): the full composition, ~26% of viewport
-   width per side. */
+/* Desktop tier (>=1440px): the full, clearly-visible composition --
+   the food elements should read clearly here, not just as a tint. */
 @media (min-width: 1440px) {
   .hero-decor__panel {
-    width: 380px;
-    opacity: 0.55;
+    width: 540px;
+    opacity: 0.72;
+  }
+}
+
+/* Restrained decorative side copy -- visual branding only, never
+   functional, aria-hidden (the whole .hero-decor tree already is),
+   and only shown on wide desktop where there's room for it not to
+   compete with anything. */
+.hero-decor__caption {
+  position: absolute;
+  top: 40%;
+  display: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-gold);
+  opacity: 0.6;
+  line-height: 1.8;
+  max-width: 108px;
+}
+
+.hero-decor__caption--left {
+  left: 22px;
+  text-align: left;
+}
+
+.hero-decor__caption--right {
+  right: 22px;
+  text-align: right;
+}
+
+@media (min-width: 1440px) {
+  .hero-decor__caption {
+    display: block;
   }
 }
 
@@ -136,20 +203,20 @@
   z-index: 1;
   text-align: center;
   max-width: 640px;
-  margin: 0 auto var(--space-7);
+  margin: 0 auto var(--space-6);
 }
 
 .hero__eyebrow {
   justify-content: center;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .hero__title {
   font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.015em;
-  font-size: clamp(28px, 5vw, 44px);
-  line-height: 1.12;
+  font-size: clamp(28px, 5vw, 46px);
+  line-height: 1.08;
   margin: 0 0 var(--space-4);
   color: var(--color-text);
 }

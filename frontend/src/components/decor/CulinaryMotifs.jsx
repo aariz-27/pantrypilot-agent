@@ -17,8 +17,19 @@ export function HeroDecor() {
     <div className="hero-decor" aria-hidden="true">
       <div className="hero-decor__glow hero-decor__glow--left" />
       <div className="hero-decor__glow hero-decor__glow--right" />
+      <div className="hero-decor__glow hero-decor__glow--lower-left" />
+      <div className="hero-decor__glow hero-decor__glow--lower-right" />
       <div className="hero-decor__panel hero-decor__panel--left" />
       <div className="hero-decor__panel hero-decor__panel--right" />
+      {/* Restrained visual branding only -- never functional, never
+          read by assistive tech (the whole tree is aria-hidden), and
+          only shown on wide desktop (see App.css). */}
+      <p className="hero-decor__caption hero-decor__caption--left">Great meals start here</p>
+      <p className="hero-decor__caption hero-decor__caption--right">
+        Simple ingredients
+        <br />
+        Extraordinary meals
+      </p>
     </div>
   )
 }

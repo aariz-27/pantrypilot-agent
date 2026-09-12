@@ -248,14 +248,20 @@ a {
 /* Translucent, blurred panel for the highest-emphasis surfaces (the
    search card, modals) -- used sparingly, not on every card, so the
    "glass" reads as a deliberate premium accent rather than a texture
-   slapped on everything (brief: "tasteful... light glass effects"). */
+   slapped on everything (brief: "tasteful... light glass effects").
+   Three box-shadow layers: a gold inner highlight along the top edge,
+   a faint sapphire inner highlight along the bottom (a little visual
+   depth/dimensionality, per the "floating premium glass" brief), and
+   a soft outer ambient glow so the panel reads as lit from within
+   rather than merely a flat translucent rectangle. */
 .glass-panel {
   background: var(--color-surface-glass);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(211, 176, 108, 0.08);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(211, 176, 108, 0.1), inset 0 -1px 0 rgba(127, 155, 240, 0.08),
+    0 0 90px rgba(211, 176, 108, 0.06);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

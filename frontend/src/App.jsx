@@ -275,11 +275,17 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {/* Rendered at the app-shell level (a true full-viewport layer),
+          not nested inside the 1080px-wide centered .container --
+          anchoring it there was exactly what made the imagery read as
+          a boxed rectangle instead of a page-level background
+          (visual-correction pass). Still gated to the search view
+          only. */}
+      {view === 'search' ? <HeroDecor /> : null}
       <Header onBrandClick={handleNewSearch} onOpenLocalData={() => setLocalDataOpen(true)} />
       <main className="container app-main">
         {view === 'search' ? (
           <div className="hero-section">
-            <HeroDecor />
             <div className="hero">
               <span className="eyebrow hero__eyebrow">Pantry-First Recipes</span>
               <h1 className="hero__title">Cook smarter with what you already have.</h1>
