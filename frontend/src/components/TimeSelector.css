@@ -8,7 +8,11 @@
   min-height: 40px;
   padding: 0 16px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
+  /* Section 6 of the correction brief: unselected pills get a soft
+     blue-gray border, not the default gold-tinted hairline, so the
+     champagne fill on the selected pill reads as a clear, deliberate
+     contrast rather than "everything already has a bit of gold". */
+  border: 1px solid var(--color-border-cool);
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 13px;

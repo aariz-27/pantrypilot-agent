@@ -24,11 +24,19 @@ export function HeroDecor() {
       {/* Restrained visual branding only -- never functional, never
           read by assistive tech (the whole tree is aria-hidden), and
           only shown on wide desktop (see App.css). */}
-      <p className="hero-decor__caption hero-decor__caption--left">Great meals start here</p>
-      <p className="hero-decor__caption hero-decor__caption--right">
-        Simple ingredients
+      <p className="hero-decor__caption hero-decor__caption--left">
+        Great Meals
         <br />
-        Extraordinary meals
+        Start Here
+      </p>
+      <p className="hero-decor__caption hero-decor__caption--right">
+        Simple
+        <br />
+        Ingredients
+        <br />
+        Extraordinary
+        <br />
+        Meals
       </p>
     </div>
   )

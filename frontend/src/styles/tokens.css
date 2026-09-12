@@ -16,8 +16,10 @@
   --color-surface: #fffdf9;
   --color-surface-raised: #ffffff;
   --color-surface-glass: rgba(255, 253, 249, 0.72);
+  --color-input-well: rgba(255, 253, 249, 0.55);
   --color-border: #e7dcc4;
   --color-border-strong: #d8c79c;
+  --color-border-cool: rgba(86, 96, 122, 0.28);
   --color-text: #1a2133;
   --color-text-muted: #56607a;
   --color-text-subtle: #8992a8;
@@ -34,6 +36,7 @@
   --color-gold-hover: #7c5417;
   --color-gold-contrast: #fffaf0;
   --color-gold-soft: rgba(150, 105, 29, 0.12);
+  --chevron-gold: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2396691d' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   --color-success: #1f7a52;
   --color-success-soft: #e5f3ec;
@@ -64,6 +67,7 @@
   --glow-gold: 0 0 0 rgba(0, 0, 0, 0);
 
   --font-display: 'Fraunces', Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  --font-script: 'Parisienne', 'Brush Script MT', cursive;
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 
@@ -77,9 +81,11 @@
     --color-bg-elevated: #0b1730;
     --color-surface: #0f1c34;
     --color-surface-raised: #142544;
-    --color-surface-glass: rgba(13, 23, 44, 0.5);
+    --color-surface-glass: rgba(13, 23, 44, 0.4);
+    --color-input-well: rgba(5, 9, 18, 0.5);
     --color-border: rgba(211, 176, 108, 0.16);
     --color-border-strong: rgba(211, 176, 108, 0.36);
+    --color-border-cool: rgba(127, 155, 240, 0.25);
     --color-text: #f5efe2;
     --color-text-muted: #aab4cf;
     --color-text-subtle: #77839f;
@@ -96,6 +102,7 @@
     --color-gold-hover: #e6c886;
     --color-gold-contrast: #14192a;
     --color-gold-soft: rgba(211, 176, 108, 0.16);
+    --chevron-gold: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23d3b06c' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
     --color-success: #57bb90;
     --color-success-soft: rgba(87, 187, 144, 0.16);
@@ -119,9 +126,11 @@
   --color-bg-elevated: #0b1730;
   --color-surface: #0f1c34;
   --color-surface-raised: #142544;
-  --color-surface-glass: rgba(13, 23, 44, 0.5);
+  --color-surface-glass: rgba(13, 23, 44, 0.4);
+  --color-input-well: rgba(5, 9, 18, 0.5);
   --color-border: rgba(211, 176, 108, 0.16);
   --color-border-strong: rgba(211, 176, 108, 0.36);
+  --color-border-cool: rgba(127, 155, 240, 0.25);
   --color-text: #f5efe2;
   --color-text-muted: #aab4cf;
   --color-text-subtle: #77839f;
@@ -138,6 +147,7 @@
   --color-gold-hover: #e6c886;
   --color-gold-contrast: #14192a;
   --color-gold-soft: rgba(211, 176, 108, 0.16);
+  --chevron-gold: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23d3b06c' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   --color-success: #57bb90;
   --color-success-soft: rgba(87, 187, 144, 0.16);

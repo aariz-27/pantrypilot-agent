@@ -1,20 +1,26 @@
 /* App shell: a layered dark-navy backdrop built entirely from CSS
-   gradients, topped by the full-page HeroDecor photo layer below. The
-   center stays darkest (a tight, low-spread glow instead of the wide
-   one previously here) so the reading area behind the hero/search
-   panel remains calm even as the edge imagery gets more present. */
+   gradients, topped by the full-page HeroDecor photo layer below.
+   Layers, back to front:
+   1) a sapphire glow centered behind the hero text
+   2) warm gold glows tucked at the far corners, near where the side
+      imagery sits, so the light source reads as coming from the food
+   3) a central dark vignette directly behind the hero/panel column
+      for reading contrast (never opaque enough to fight the imagery)
+   4) a warm, low "countertop" gradient at the very bottom -- a
+      continuation cue, not a literal mirror (section 12). */
 .app-shell {
   min-height: 100%;
   background-color: var(--color-bg);
-  background-image: radial-gradient(700px 460px at 85% -6%, var(--color-gold-soft), transparent 60%),
-    radial-gradient(620px 520px at -6% 10%, var(--color-primary-soft), transparent 55%),
-    radial-gradient(900px 520px at 50% 30%, var(--color-bg-elevated), transparent 65%),
-    radial-gradient(1200px 640px at 50% 118%, var(--color-bg-elevated), transparent 68%);
+  background-image: radial-gradient(760px 620px at 50% 8%, var(--color-primary-soft), transparent 62%),
+    radial-gradient(560px 480px at 92% 4%, var(--color-gold-soft), transparent 60%),
+    radial-gradient(560px 480px at 8% 14%, var(--color-gold-soft), transparent 60%),
+    radial-gradient(820px 640px at 50% 34%, var(--color-bg), transparent 60%),
+    radial-gradient(1300px 520px at 50% 100%, rgba(211, 176, 108, 0.05), var(--color-bg-elevated) 55%, transparent 78%);
   background-repeat: no-repeat;
 }
 
 .app-main {
-  padding-top: var(--space-6);
+  padding-top: var(--space-5);
   padding-bottom: var(--space-8);
 }
 
@@ -167,29 +173,33 @@
 /* Restrained decorative side copy -- visual branding only, never
    functional, aria-hidden (the whole .hero-decor tree already is),
    and only shown on wide desktop where there's room for it not to
-   compete with anything. */
+   compete with anything (hidden on tablet/mobile, out of layout flow
+   entirely since the whole .hero-decor tree is position:fixed). */
 .hero-decor__caption {
   position: absolute;
-  top: 40%;
+  top: 38%;
   display: none;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--color-gold);
-  opacity: 0.6;
-  line-height: 1.8;
-  max-width: 108px;
+  opacity: 0.65;
 }
 
 .hero-decor__caption--left {
-  left: 22px;
+  left: 30px;
   text-align: left;
+  font-family: var(--font-script);
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.15;
 }
 
 .hero-decor__caption--right {
-  right: 22px;
+  right: 26px;
   text-align: right;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.9;
+  text-transform: uppercase;
 }
 
 @media (min-width: 1440px) {
@@ -203,7 +213,7 @@
   z-index: 1;
   text-align: center;
   max-width: 640px;
-  margin: 0 auto var(--space-6);
+  margin: 0 auto var(--space-5);
 }
 
 .hero__eyebrow {
@@ -215,10 +225,14 @@
   font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.015em;
-  font-size: clamp(28px, 5vw, 46px);
-  line-height: 1.08;
-  margin: 0 0 var(--space-4);
+  font-size: clamp(28px, 5vw, 48px);
+  line-height: 1.04;
+  margin: 0 0 var(--space-3);
   color: var(--color-text);
+}
+
+.hero__title-accent {
+  color: var(--color-gold);
 }
 
 .hero__subtitle {

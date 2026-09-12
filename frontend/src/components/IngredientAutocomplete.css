@@ -28,19 +28,36 @@
   padding-left: 46px;
   font-size: 17px;
   border-radius: var(--radius-lg);
-  border-color: var(--color-border-strong);
-  /* Section 10: a dark translucent field, not a flat solid surface. */
-  background: var(--color-surface-glass);
+  /* A visibly gold border at rest, not just on focus -- and a darker,
+     more solid recessed well than the glass panel around it, so the
+     input reads as inset into the glass rather than another sheet of
+     the same translucency. */
+  border-color: rgba(211, 176, 108, 0.45);
+  background: var(--color-input-well);
+  color: var(--color-text);
+  transition: border-color 160ms var(--ease-premium), box-shadow 160ms var(--ease-premium),
+    background-color 160ms var(--ease-premium);
+}
+
+.autocomplete--primary .autocomplete__input::placeholder {
+  color: var(--color-text-subtle);
 }
 
 .autocomplete--primary .autocomplete__icon {
   left: 18px;
   font-size: 18px;
+  color: var(--color-gold);
+  opacity: 0.7;
+}
+
+.autocomplete--primary .autocomplete__input:hover {
+  border-color: rgba(211, 176, 108, 0.65);
 }
 
 .autocomplete--primary .autocomplete__input:focus-visible {
   border-color: var(--color-gold);
-  box-shadow: 0 0 0 3px var(--color-gold-soft), 0 0 0 1px var(--color-gold);
+  background: var(--color-input-well);
+  box-shadow: 0 0 0 4px var(--color-gold-soft), 0 0 0 1px var(--color-gold), 0 0 24px rgba(211, 176, 108, 0.25);
 }
 
 .autocomplete--primary .field-label {

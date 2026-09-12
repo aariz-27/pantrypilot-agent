@@ -141,7 +141,12 @@ describe('App end-to-end flow', () => {
     await waitFor(() => screen.getByText('Best matches for you'))
     await userEvent.click(screen.getByRole('button', { name: '← New search' }))
 
-    expect(screen.getByText('Cook smarter with what you already have.')).toBeInTheDocument()
+    // getByText only concatenates an element's DIRECT text-node
+    // children, not nested-element text -- the headline's "already
+    // have" is wrapped in its own <span> for gold emphasis, so the
+    // accessible-name-based role query (which does compute across
+    // nested elements) is used here instead.
+    expect(screen.getByRole('heading', { name: 'Cook smarter with what you already have.' })).toBeInTheDocument()
   })
 
   it('shows the higher-match-time-excluded message with a "Show longer recipes" action', async () => {

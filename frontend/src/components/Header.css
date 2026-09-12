@@ -33,8 +33,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
 }
 
 .app-header__brand {
@@ -86,7 +86,15 @@
 .app-header__actions {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
+}
+
+.app-header__actions .btn-icon {
+  transition: border-color 160ms var(--ease-premium), color 160ms var(--ease-premium), box-shadow 160ms var(--ease-premium);
+}
+
+.app-header__actions .btn-icon:hover {
+  box-shadow: 0 0 0 1px var(--color-gold-soft), 0 4px 16px rgba(211, 176, 108, 0.18);
 }
 
 @media (max-width: 480px) {

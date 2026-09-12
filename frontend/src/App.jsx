@@ -288,7 +288,9 @@ export default function App() {
           <div className="hero-section">
             <div className="hero">
               <span className="eyebrow hero__eyebrow">Pantry-First Recipes</span>
-              <h1 className="hero__title">Cook smarter with what you already have.</h1>
+              <h1 className="hero__title">
+                Cook smarter with what you <span className="hero__title-accent">already have</span>.
+              </h1>
               <p className="hero__subtitle">
                 PantryPilot searches real recipes based on ingredients you already have -- it never invents recipes.
               </p>

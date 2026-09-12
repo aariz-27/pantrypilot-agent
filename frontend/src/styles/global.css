@@ -119,15 +119,19 @@ a {
    call-to-action (Find meals, Try again, Try a new search) shares it,
    so gold stays legible as "the button that moves you forward"
    instead of being sprinkled around. */
+/* Section 11 of the correction brief: the strongest visual accent on
+   the page. A subtle top inner-highlight (mimicking a light catching
+   a curved metallic edge) layered under the ambient glow/elevation
+   shadow, on top of the existing gold gradient fill. */
 .btn-primary {
   background: linear-gradient(155deg, var(--color-gold-hover), var(--color-gold));
   color: var(--color-gold-contrast);
-  box-shadow: var(--shadow-gold), var(--glow-gold);
+  box-shadow: var(--shadow-gold), var(--glow-gold), inset 0 1px 0 rgba(255, 245, 220, 0.45);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 14px 34px rgba(201, 164, 99, 0.3), var(--glow-gold);
+  box-shadow: 0 14px 34px rgba(201, 164, 99, 0.3), var(--glow-gold), inset 0 1px 0 rgba(255, 245, 220, 0.5);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -203,6 +207,32 @@ a {
   opacity: 0.7;
 }
 
+/* Section 9 of the correction brief: a dark premium dropdown with a
+   thin gold border and a custom gold chevron -- native <select> can't
+   take a real ::after in every browser, so the chevron is a
+   background-image (an inline SVG data-URI, themed via the
+   --chevron-gold token) with appearance:none replacing the browser's
+   own arrow glyph. Only .field-select is affected; .field-input keeps
+   the shared sapphire hover/focus above. */
+.field-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border-color: var(--color-border-strong);
+  padding-right: 34px;
+  background-image: var(--chevron-gold);
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+.field-select:hover {
+  border-color: var(--color-gold);
+}
+
+.field-select:focus-visible {
+  border-color: var(--color-gold);
+  box-shadow: 0 0 0 3px var(--color-gold-soft), 0 0 0 1px var(--color-gold);
+}
+
 /* Cross-browser removal of native number-input spinners (post-review
    fix, 2026-09-08): the default spinner renders as an unthemed
    white/gray control surface, most jarring in dark mode. Numeric
@@ -249,19 +279,19 @@ a {
    search card, modals) -- used sparingly, not on every card, so the
    "glass" reads as a deliberate premium accent rather than a texture
    slapped on everything (brief: "tasteful... light glass effects").
-   Three box-shadow layers: a gold inner highlight along the top edge,
-   a faint sapphire inner highlight along the bottom (a little visual
-   depth/dimensionality, per the "floating premium glass" brief), and
-   a soft outer ambient glow so the panel reads as lit from within
-   rather than merely a flat translucent rectangle. */
+   Four box-shadow layers, outside-in: a soft outer ambient gold glow,
+   a brighter gold top-edge highlight, a sapphire inner highlight along
+   the bottom (a little visual depth/dimensionality), and the
+   pre-existing elevation shadow -- together read as "floating premium
+   glass" lit from within, not a flat translucent rectangle. */
 .glass-panel {
   background: var(--color-surface-glass);
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(211, 176, 108, 0.1), inset 0 -1px 0 rgba(127, 155, 240, 0.08),
-    0 0 90px rgba(211, 176, 108, 0.06);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  box-shadow: var(--shadow-lg), 0 0 110px rgba(211, 176, 108, 0.1), inset 0 1px 0 rgba(230, 200, 134, 0.22),
+    inset 0 -1px 0 rgba(127, 155, 240, 0.14), inset 0 0 60px rgba(127, 155, 240, 0.05);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
