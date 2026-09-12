@@ -116,17 +116,26 @@ async def fetch_recipe_details(
     return recipes, failed_ids
 
 
-def normalize_recipe_ingredients(recipe: Recipe) -> Recipe:
+def normalize_recipe_ingredients(
+    recipe: Recipe,
+    *,
+    canonical_vocabulary: frozenset[str] = CANONICAL_GROCERY_INGREDIENTS,
+    aliases: dict[str, str] = RECIPE_INGREDIENT_ALIASES,
+) -> Recipe:
     """M08 canonical resolution, applied with the same grocery-taxonomy
     vocabulary the pricing layer uses, so recipe-side and pantry-side
     canonical IDs correlate (proven pattern from
-    test_module_a_b_c_integration.py)."""
+    test_module_a_b_c_integration.py).
+
+    `canonical_vocabulary`/`aliases` default to the built-in taxonomy
+    (unchanged behavior for any existing caller) but are parameterized
+    so app.agent.orchestrator can pass its merged built-in+admin-DB
+    vocabulary (runtime integration, 2026-09-13) -- see
+    app.repositories.runtime_ingredient_repository."""
 
     normalized = []
     for ing in recipe.ingredients:
-        result = normalize_ingredient_name(
-            ing.raw_name, canonical_vocabulary=CANONICAL_GROCERY_INGREDIENTS, aliases=RECIPE_INGREDIENT_ALIASES
-        )
+        result = normalize_ingredient_name(ing.raw_name, canonical_vocabulary=canonical_vocabulary, aliases=aliases)
         normalized.append(
             ing.model_copy(update={"canonical_id": result.canonical_id, "normalization_status": result.status})
         )
@@ -138,10 +147,13 @@ def evaluate_recipe(
     pantry_canonical: frozenset[str],
     constraints: UserConstraints,
     price_repository: PriceRepository,
+    *,
+    canonical_vocabulary: frozenset[str] = CANONICAL_GROCERY_INGREDIENTS,
+    aliases: dict[str, str] = RECIPE_INGREDIENT_ALIASES,
 ) -> CandidateEvaluation:
     """M08 -> M09 -> M10 -> M11 -> M12 for one grounded recipe."""
 
-    normalized = normalize_recipe_ingredients(recipe)
+    normalized = normalize_recipe_ingredients(recipe, canonical_vocabulary=canonical_vocabulary, aliases=aliases)
     # PR #15 non-food wiring fix (2026-09-09): a non-food "other
     # requirement" (e.g. parchment_paper, cedar_plank) must never enter
     # cost estimation -- app.domain.pantry_matcher.match_pantry already
@@ -171,13 +183,22 @@ def evaluate_and_rank(
     pantry_canonical: frozenset[str],
     constraints: UserConstraints,
     price_repository: PriceRepository,
+    *,
+    canonical_vocabulary: frozenset[str] = CANONICAL_GROCERY_INGREDIENTS,
+    aliases: dict[str, str] = RECIPE_INGREDIENT_ALIASES,
 ) -> tuple[list[CandidateEvaluation], list[CandidateEvaluation]]:
     """Returns (feasible, rejected). Feasible candidates are M13-ranked;
     rejected candidates are returned in evaluation order for the
     "closest alternatives" report -- ranking is only defined for
     already-feasible candidates (M13's own contract)."""
 
-    all_evaluations = [evaluate_recipe(r, pantry_canonical, constraints, price_repository) for r in recipes]
+    all_evaluations = [
+        evaluate_recipe(
+            r, pantry_canonical, constraints, price_repository,
+            canonical_vocabulary=canonical_vocabulary, aliases=aliases,
+        )
+        for r in recipes
+    ]
     feasible = [e for e in all_evaluations if e.hard_constraint_pass]
     rejected = [e for e in all_evaluations if not e.hard_constraint_pass]
 

@@ -81,10 +81,18 @@ def get_orchestrator(
     llm_provider: AnthropicLLMProvider | None = Depends(get_llm_provider),
     recipe_providers: dict[str, RecipeProvider] = Depends(get_recipe_providers),
     price_repository: PriceRepository = Depends(get_price_repository),
+    settings: Settings = Depends(get_settings),
 ) -> AgentOrchestrator | None:
     if llm_provider is None:
         return None
-    return AgentOrchestrator(llm_provider, recipe_providers, price_repository)
+    return AgentOrchestrator(
+        llm_provider,
+        recipe_providers,
+        price_repository,
+        search_page_size=settings.recipeapi_page_size,
+        target_feasible_results=settings.target_feasible_results,
+        ingredient_db_path=settings.price_db_path,
+    )
 
 
 @router.post("/recommend", response_model=RecommendResponse)
