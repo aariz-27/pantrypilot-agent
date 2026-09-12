@@ -6,10 +6,22 @@ Secrets use SecretStr so they never appear in logs, reprs, or error output.
 
 from __future__ import annotations
 
+import json
+import re
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# CORS Origin syntax: scheme://host[:port], nothing else (no path, no
+# trailing slash, no whitespace) -- matches exactly what a browser's
+# Origin header actually looks like, and what CORSMiddleware compares
+# against verbatim. Covers domain names and IPv4 literals (the
+# production example, https://130.162.185.187); IPv6 bracket literals
+# are not needed by any current deployment target and are intentionally
+# out of scope here.
+_ORIGIN_PATTERN = re.compile(r"^https?://[a-zA-Z0-9.\-]+(:\d+)?$")
 
 
 class Settings(BaseSettings):
@@ -32,10 +44,37 @@ class Settings(BaseSettings):
     pantrypilot_llm_model: str | None = None
     recipeapi_io_api_key: SecretStr | None = None
 
-    # Comma-separated list of allowed frontend origins. Empty by default:
-    # CORS must be explicitly configured, never wildcarded, before any
-    # origin is trusted.
-    allowed_origins: list[str] = []
+    # Allowed frontend origins for CORS. Empty by default: CORS must be
+    # explicitly configured, never wildcarded, before any origin is
+    # trusted.
+    #
+    # Canonical format (documented, preferred): a JSON list, e.g.
+    #   ALLOWED_ORIGINS=["https://example.com","https://admin.example.com"]
+    # Backward-compatible fallback: a single origin, or a comma-
+    # separated list, e.g.
+    #   ALLOWED_ORIGINS=https://130.162.185.187
+    #   ALLOWED_ORIGINS=https://a.example,https://b.example
+    #
+    # `NoDecode` is required here: pydantic-settings' default behavior
+    # for any list-typed field is to JSON-decode the raw environment
+    # string BEFORE this class's own _parse_allowed_origins validator
+    # ever runs. That pre-decode has no fallback -- a real
+    # ALLOWED_ORIGINS environment variable in EITHER the comma-separated
+    # form or a single bare URL (neither is valid JSON) crashed the
+    # entire application at startup with a raw pydantic_settings.
+    # SettingsError, before FastAPI even began constructing routes. Also
+    # crashed on an EMPTY value (ALLOWED_ORIGINS=, exactly what
+    # .env.example itself ships) -- the single most likely value to be
+    # present, unmodified, in an early/incomplete deployment. Found
+    # live (2026-09-13) during unrelated admin-dashboard server testing;
+    # never caught by any prior test because every existing test
+    # constructed Settings(allowed_origins=...) directly in Python,
+    # which never goes through EnvSettingsSource's JSON pre-decode at
+    # all. `NoDecode` tells pydantic-settings to hand this field's raw
+    # string straight to _parse_allowed_origins unconditionally, so
+    # there is exactly one parsing path regardless of source (env var,
+    # .env file, or direct kwarg).
+    allowed_origins: Annotated[list[str], NoDecode] = []
 
     # PP-003 addition (backward-compatible, additive): path to the
     # packaged grocery reference-price SQLite database (M10). Read-only
@@ -129,10 +168,27 @@ class Settings(BaseSettings):
     def _parse_allowed_origins(cls, value: object) -> list[str]:
         if value is None or value == "":
             return []
+
         if isinstance(value, str):
-            parsed = [origin.strip() for origin in value.split(",") if origin.strip()]
+            stripped = value.strip()
+            if stripped.startswith("["):
+                # Canonical JSON-list format.
+                try:
+                    decoded = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"ALLOWED_ORIGINS looks like a JSON list but is not valid JSON: {exc}"
+                    ) from exc
+                if not isinstance(decoded, list) or not all(isinstance(item, str) for item in decoded):
+                    raise ValueError("ALLOWED_ORIGINS JSON value must be a list of strings")
+                parsed = [origin.strip() for origin in decoded if origin.strip()]
+            else:
+                # Backward-compatible fallback: a single bare origin, or
+                # a comma-separated list of them.
+                parsed = [origin.strip() for origin in stripped.split(",") if origin.strip()]
         else:
-            parsed = list(value)  # type: ignore[arg-type]
+            parsed = [str(origin).strip() for origin in value if str(origin).strip()]  # type: ignore[union-attr]
+
         # Module F 4.4: reject a wildcard origin outright rather than
         # silently accepting it. CORSMiddleware is configured with
         # allow_credentials=True (app.main), and browsers already
@@ -146,6 +202,21 @@ class Settings(BaseSettings):
                 "(wildcard origins are never permitted, and are incompatible "
                 "with allow_credentials=True regardless)"
             )
+
+        # Never silently accept a malformed origin (ticket requirement):
+        # each entry must be exactly scheme://host[:port] -- no path, no
+        # trailing slash, no embedded whitespace. A value that looks
+        # plausible but doesn't match real CORS Origin syntax would
+        # otherwise silently never match any real browser request,
+        # which is a worse failure mode than refusing it at startup.
+        invalid = [origin for origin in parsed if not _ORIGIN_PATTERN.match(origin)]
+        if invalid:
+            raise ValueError(
+                f"ALLOWED_ORIGINS contains invalid origin(s) {invalid!r} -- each entry must be exactly "
+                "scheme://host[:port] (http or https, no path, no trailing slash, e.g. "
+                "'https://example.com' or 'https://130.162.185.187')"
+            )
+
         return parsed
 
     @property

@@ -90,3 +90,121 @@ def test_admin_configured_via_pantrypilot_prefixed_env_vars(monkeypatch):
 def test_admin_partial_configuration_is_not_configured():
     settings = Settings(_env_file=None, admin_username="founder")
     assert settings.admin_configured is False
+
+
+# -- ALLOWED_ORIGINS real environment-variable parsing (2026-09-13) --------
+#
+# Regression coverage for a real, production-relevant bug: pydantic-
+# settings' default behavior for ANY list-typed field is to JSON-decode
+# the raw environment string BEFORE Settings._parse_allowed_origins
+# (the field_validator above) ever runs. A real ALLOWED_ORIGINS
+# environment variable in its own documented comma-separated form, a
+# single bare URL, or even an EMPTY value (exactly what .env.example
+# ships) is not valid JSON and crashed the entire application at
+# startup with a raw pydantic_settings.SettingsError -- never caught by
+# the tests above because every one of them constructs
+# Settings(allowed_origins=...) directly in Python (an "InitSettingsSource"
+# kwarg), which never goes through the environment-variable JSON
+# pre-decode at all. These tests use monkeypatch.setenv, exercising the
+# REAL EnvSettingsSource/DotEnvSettingsSource path that only a live
+# server boot previously exercised. Fixed via Annotated[list[str],
+# NoDecode] (app.config), which hands the raw string straight to the
+# validator unconditionally, regardless of source.
+
+
+def test_allowed_origins_json_list_single_origin_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", '["https://130.162.185.187"]')
+    settings = Settings(_env_file=None)
+    assert settings.allowed_origins == ["https://130.162.185.187"]
+
+
+def test_allowed_origins_json_list_multiple_origins_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", '["https://a.example","https://b.example"]')
+    settings = Settings(_env_file=None)
+    assert settings.allowed_origins == ["https://a.example", "https://b.example"]
+
+
+def test_allowed_origins_production_style_ip_origin_via_real_env_var(monkeypatch):
+    # The exact production value named in the ticket.
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://130.162.185.187")
+    settings = Settings(_env_file=None)
+    assert settings.allowed_origins == ["https://130.162.185.187"]
+
+
+def test_allowed_origins_comma_separated_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example,https://b.example")
+    settings = Settings(_env_file=None)
+    assert settings.allowed_origins == ["https://a.example", "https://b.example"]
+
+
+def test_allowed_origins_empty_string_via_real_env_var_does_not_crash(monkeypatch):
+    # The single most likely real-world value: exactly what
+    # backend/.env.example ships before an operator configures a real
+    # value. Previously crashed the entire application at import time.
+    monkeypatch.setenv("ALLOWED_ORIGINS", "")
+    settings = Settings(_env_file=None)
+    assert settings.allowed_origins == []
+
+
+def test_allowed_origins_unset_via_real_env_does_not_crash(monkeypatch):
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.allowed_origins == []
+
+
+def test_allowed_origins_malformed_json_rejected_safely_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "[this is not valid json")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_allowed_origins_garbage_string_rejected_safely_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "not a url and not json {{{")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_allowed_origins_wildcard_rejected_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "*")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_allowed_origins_wildcard_in_json_list_rejected_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", '["https://a.example","*"]')
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_allowed_origins_rejects_non_http_scheme_via_real_env_var(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "ftp://a.example")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_allowed_origins_rejects_origin_with_a_path_via_real_env_var(monkeypatch):
+    # A CORS Origin is scheme://host[:port] only -- an origin with a
+    # path would silently never match any real browser Origin header,
+    # which is a worse failure mode than refusing it at startup.
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example/some/path")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_allowed_origins_still_works_via_dotenv_file(tmp_path, monkeypatch):
+    # The same JSON pre-decode bug applies identically to .env-file-
+    # sourced values (DotEnvSettingsSource shares EnvSettingsSource's
+    # decode path) -- verified against a real file, not just os.environ.
+    env_file = tmp_path / ".env"
+    env_file.write_text('ALLOWED_ORIGINS=["https://130.162.185.187"]\n')
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    settings = Settings(_env_file=str(env_file))
+    assert settings.allowed_origins == ["https://130.162.185.187"]
+
+
+def test_allowed_origins_empty_via_dotenv_file_does_not_crash(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("ALLOWED_ORIGINS=\n")
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    settings = Settings(_env_file=str(env_file))
+    assert settings.allowed_origins == []
