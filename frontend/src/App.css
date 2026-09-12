@@ -34,6 +34,14 @@
   pointer-events: none;
 }
 
+/* Mobile: no decorative layer at all, glows included -- readability
+   and performance take priority (ticket section "Mobile"). */
+@media (max-width: 767px) {
+  .hero-decor {
+    display: none;
+  }
+}
+
 .hero-decor__glow {
   position: absolute;
   width: 560px;
@@ -55,42 +63,59 @@
   background: radial-gradient(circle, var(--color-primary-soft), transparent 70%);
 }
 
-.hero-decor__motif {
+/* Decorative culinary still-life panels (locally-generated vector art,
+   rasterized to WebP -- see CulinaryMotifs.jsx and
+   src/assets/decor/source/*.svg). A CSS background-image is only
+   fetched by the browser when the media query that sets it actually
+   matches, so mobile below 768px references the file nowhere and
+   never downloads it at all -- not just a hidden 0-opacity element
+   (ticket: "mobile may... disappear entirely", "do not block initial
+   rendering unnecessarily"). */
+.hero-decor__panel {
+  display: none;
   position: absolute;
-  color: var(--color-border-strong);
+  top: 0;
+  bottom: 0;
+  background-repeat: no-repeat;
+  background-position: top center;
+  background-size: cover;
 }
 
-.hero-decor__motif--herb {
-  left: 3%;
-  top: 40px;
-  width: 130px;
-  height: auto;
-  opacity: 0.4;
+.hero-decor__panel--left {
+  left: 0;
+  background-image: linear-gradient(90deg, var(--color-bg) 0%, transparent 55%),
+    url('./assets/decor/left-panel.webp');
+  mask-image: linear-gradient(90deg, black 0%, black 45%, transparent 92%);
+  -webkit-mask-image: linear-gradient(90deg, black 0%, black 45%, transparent 92%);
 }
 
-.hero-decor__motif--citrus {
-  left: 5.5%;
-  bottom: 60px;
-  width: 96px;
-  height: auto;
-  opacity: 0.28;
+.hero-decor__panel--right {
+  right: 0;
+  background-image: linear-gradient(270deg, var(--color-bg) 0%, transparent 55%),
+    url('./assets/decor/right-panel.webp');
+  background-position: top right;
+  mask-image: linear-gradient(270deg, black 0%, black 45%, transparent 92%);
+  -webkit-mask-image: linear-gradient(270deg, black 0%, black 45%, transparent 92%);
 }
 
-.hero-decor__motif--wheat {
-  right: 4%;
-  top: 60px;
-  width: 108px;
-  height: auto;
-  opacity: 0.4;
+/* Tablet tier: present but deliberately reduced coverage/opacity,
+   tucked mostly past the edge so it never competes with the
+   already-narrow content column (ticket section "Tablet: reduce
+   opacity/coverage"). */
+@media (min-width: 768px) {
+  .hero-decor__panel {
+    display: block;
+    width: 150px;
+    opacity: 0.16;
+  }
 }
 
-/* Section 27: decorative edge imagery is a desktop-only atmosphere
-   layer -- below the width where there's real margin outside the
-   1080px content column, it would only ever overlap the UI, so it is
-   removed entirely rather than shrunk (usability over atmosphere). */
-@media (max-width: 1180px) {
-  .hero-decor {
-    display: none;
+/* Desktop tier: the full, more visible composition -- there is real
+   margin outside the 1080px content column here. */
+@media (min-width: 1180px) {
+  .hero-decor__panel {
+    width: 380px;
+    opacity: 0.5;
   }
 }
 
