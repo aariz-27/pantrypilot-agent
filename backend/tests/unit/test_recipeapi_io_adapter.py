@@ -950,3 +950,61 @@ async def test_search_sends_every_canonical_supported_cuisine_unchanged():
         await adapter.search(SearchStrategy(cuisine=cuisine))
 
     assert captured == sorted(SUPPORTED_STRICT_CUISINES)
+
+
+# -- GET /ingredients?search= catalogue (2026-09-13 unified ingredient -----
+# resolution ticket, section 8) ---------------------------------------------
+
+
+async def test_search_ingredients_maps_the_real_confirmed_live_response_shape():
+    payload = {
+        "data": [
+            {"id": 1139, "name": "Lamb chop", "category": "meat"},
+            {"id": 3767, "name": "Lamb belly", "category": "meat"},
+        ],
+        "links": {},
+        "meta": {"total": 2},
+    }
+    adapter = make_adapter(json_response(200, payload))
+    results = await adapter.search_ingredients("lamb")
+    assert [(r.provider_id, r.name, r.category) for r in results] == [
+        ("1139", "Lamb chop", "meat"),
+        ("3767", "Lamb belly", "meat"),
+    ]
+
+
+async def test_search_ingredients_sends_the_search_query_param():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["params"] = dict(request.url.params)
+        return httpx.Response(200, json={"data": []})
+
+    adapter = make_adapter(handler)
+    await adapter.search_ingredients("lamb chop")
+    assert captured["params"] == {"search": "lamb chop"}
+
+
+async def test_search_ingredients_empty_query_returns_empty_without_a_request():
+    called = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called["count"] += 1
+        return httpx.Response(200, json={"data": []})
+
+    adapter = make_adapter(handler)
+    assert await adapter.search_ingredients("   ") == []
+    assert called["count"] == 0
+
+
+async def test_search_ingredients_skips_malformed_individual_items():
+    payload = {"data": [{"id": 1, "name": "Chicken"}, {"id": None, "name": "Bad"}, {"name": "Also bad"}, "not a dict"]}
+    adapter = make_adapter(json_response(200, payload))
+    results = await adapter.search_ingredients("chicken")
+    assert [r.name for r in results] == ["Chicken"]
+
+
+async def test_search_ingredients_raises_on_malformed_top_level_response():
+    adapter = make_adapter(json_response(200, {"no_data_key": True}))
+    with pytest.raises(RecipeProviderMalformedResponseError):
+        await adapter.search_ingredients("chicken")

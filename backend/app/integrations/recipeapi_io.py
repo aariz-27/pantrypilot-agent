@@ -63,6 +63,7 @@ import httpx
 
 from app.config import Settings
 from app.domain.errors import InvalidInputError
+from app.domain.ingredient_resolution import ProviderIngredient
 from app.domain.models import Difficulty, NormalizationStatus, Recipe, RecipeIngredient
 from app.domain.provider_errors import (
     RecipeNotFoundError,
@@ -366,6 +367,41 @@ class RecipeAPIIOAdapter:
                 "RecipeAPI.io detail response is missing a 'data' object"
             )
         return self._map_recipe(raw)
+
+    async def search_ingredients(self, query: str) -> list[ProviderIngredient]:
+        """GET /ingredients?search=<query> (2026-09-13 unified ingredient
+        resolution ticket, ticket section 8). Confirmed live (2026-09-13,
+        bounded calls): same {"data": [...], "links": ..., "meta": ...}
+        list envelope as /recipes; each item is {"id", "name", "category"}.
+
+        Returns an empty list (never raises) on a malformed individual
+        item -- this is a lookup used to GROUND a candidate name, not a
+        strict recipe detail fetch; a partially-unusable response should
+        degrade to "no safe match found" rather than fail the whole
+        request. A transport/HTTP-level failure still raises
+        RecipeProviderError normally, exactly like search()/get_details().
+        """
+
+        cleaned = query.strip()
+        if not cleaned:
+            return []
+        payload = await self._request("GET", "/ingredients", params={"search": cleaned})
+        raw_items = payload.get("data")
+        if not isinstance(raw_items, list):
+            raise RecipeProviderMalformedResponseError(
+                "RecipeAPI.io ingredients response is missing a 'data' list"
+            )
+        items: list[ProviderIngredient] = []
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            provider_id = raw.get("id")
+            name = raw.get("name")
+            if provider_id is None or not isinstance(name, str) or not name.strip():
+                continue
+            category = raw.get("category") if isinstance(raw.get("category"), str) else None
+            items.append(ProviderIngredient(provider_id=str(provider_id), name=name.strip(), category=category))
+        return items
 
     def _map_search_response(self, payload: dict, strategy: SearchStrategy) -> SearchResult:
         raw_items = payload.get("data")

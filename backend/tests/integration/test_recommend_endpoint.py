@@ -412,7 +412,8 @@ def test_invalid_grounded_anchor_rejection_recovers_and_returns_200_not_500(pric
         # The rejected "lamb" anchor never reached the provider -- only
         # the corrective, grounded "minced lamb" search did.
         assert len(provider.search_calls) == 1
-        assert provider.search_calls[0].query_ingredients == ["minced_lamb"]
+        # 2026-09-13: grounded provider term (space, not underscore).
+        assert provider.search_calls[0].query_ingredients == ["minced lamb"]
     finally:
         _clear()
 

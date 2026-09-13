@@ -14,9 +14,15 @@ import pytest
 from app.agent.actions import AgentAction
 from app.db.connection import connection_scope
 from app.db.schema import create_schema
+from app.domain.ingredient_resolution import ProviderIngredient
 from app.domain.models import Recipe
 from app.domain.provider_errors import RecipeProviderError
-from app.integrations.llm_provider import LLMDecisionRequest, LLMDecisionResponse
+from app.integrations.llm_provider import (
+    IngredientCorrectionRequest,
+    IngredientCorrectionResponse,
+    LLMDecisionRequest,
+    LLMDecisionResponse,
+)
 from app.recipe.provider import SearchResult, SearchStrategy
 
 
@@ -27,9 +33,18 @@ class FakeLLMProvider:
 
     provider_name = "fake"
 
-    def __init__(self, decisions: list[AgentAction | dict]) -> None:
+    def __init__(self, decisions: list[AgentAction | dict], *, ingredient_corrections: dict[str, str] | None = None) -> None:
         self._decisions = list(decisions)
         self.requests: list[LLMDecisionRequest] = []
+        # 2026-09-13 unified ingredient resolution ticket: keyed by the
+        # exact cleaned raw text passed in; absent/unmapped keys return
+        # "no confident correction" (proposed_name=None), matching the
+        # real AnthropicLLMProvider's own fail-closed default and
+        # preserving every EXISTING test's behavior unchanged (no test
+        # written before this ticket expects a typo-correction call to
+        # do anything).
+        self._ingredient_corrections = ingredient_corrections or {}
+        self.correction_requests: list[IngredientCorrectionRequest] = []
 
     async def decide(self, request: LLMDecisionRequest) -> LLMDecisionResponse:
         self.requests.append(request)
@@ -38,6 +53,11 @@ class FakeLLMProvider:
         next_decision = self._decisions.pop(0)
         raw = next_decision.model_dump(mode="json") if isinstance(next_decision, AgentAction) else next_decision
         return LLMDecisionResponse(raw_action=raw, model_name="fake-model")
+
+    async def propose_ingredient_correction(self, request: IngredientCorrectionRequest) -> IngredientCorrectionResponse:
+        self.correction_requests.append(request)
+        proposed = self._ingredient_corrections.get(request.raw_text)
+        return IngredientCorrectionResponse(proposed_name=proposed, model_name="fake-model")
 
     @property
     def call_count(self) -> int:
@@ -60,12 +80,28 @@ class FakeRecipeProvider:
         provider_name: str,
         searches: list[ScriptedSearch],
         details_by_id: dict[str, Recipe | type[RecipeProviderError]] | None = None,
+        ingredient_catalogue: dict[str, list[ProviderIngredient]] | None = None,
     ) -> None:
         self.provider_name = provider_name
         self._searches = list(searches)
         self._details_by_id = details_by_id or {}
         self.search_calls: list[SearchStrategy] = []
         self.detail_calls: list[str] = []
+        # 2026-09-13 unified ingredient resolution ticket: None (the
+        # default) means this fake does NOT implement search_ingredients
+        # at all -- AgentOrchestrator._catalogue_lookup's getattr(...,
+        # None) then sees nothing, exactly matching every EXISTING
+        # test's fixture shape and preserving their behavior unchanged.
+        # Pass a dict to opt a specific test into catalogue-grounding
+        # behavior.
+        self._ingredient_catalogue = ingredient_catalogue
+        self.ingredient_search_calls: list[str] = []
+        if ingredient_catalogue is not None:
+            self.search_ingredients = self._search_ingredients  # type: ignore[method-assign]
+
+    async def _search_ingredients(self, query: str) -> list[ProviderIngredient]:
+        self.ingredient_search_calls.append(query)
+        return self._ingredient_catalogue.get(query.strip().lower(), [])
 
     async def search(self, strategy: SearchStrategy) -> SearchResult:
         self.search_calls.append(strategy)

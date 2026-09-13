@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from app.domain.cost_engine import MissingIngredientBreakdown
 from app.domain.models import CandidateEvaluation, Recipe
+from app.agent.ingredient_resolution import PantryTermResolution
 from app.domain.serving_scaler import ScaledRecipe
 from app.recipe.provider import SearchStrategy
 
@@ -78,6 +79,42 @@ class AgentState:
     # for the API layer to surface as "Unrecognized" -- never silently
     # promoted into the canonical taxonomy or pricing tables.
     pantry_unresolved: tuple[str, ...] = field(default_factory=tuple)
+    # 2026-09-13 unified ingredient resolution ticket: pantry text that
+    # failed LOCAL canonical/alias resolution but WAS safely grounded
+    # against RecipeAPI.io's own ingredient catalogue (or an LLM
+    # proposal re-grounded the same way) -- keyed by the cleaned raw
+    # text identity (app.domain.ingredient_normalizer.normalize_raw_text_identity),
+    # valued by the exact provider-facing search term to use for it.
+    # These entries are NEVER canonical ids and NEVER feed pantry
+    # coverage/matching/pricing (see app.agent.ingredient_resolution's
+    # module docstring) -- they exist ONLY to let
+    # _require_anchors_grounded_in_pantry accept an anchor PantryPilot's
+    # local taxonomy has never learned, e.g. "chicken" (a real RecipeAPI.io
+    # ingredient with no generic PantryPilot canonical id at all).
+    pantry_free_text: dict[str, str] = field(default_factory=dict)
+    # Cleaned raw pantry text -> canonical id, for entries that only
+    # resolved to a real canonical id via LLM typo-correction (never
+    # via plain local normalization -- those are already reachable
+    # through pantry_canonical directly). Lets an LLM anchor choice
+    # that repeats the user's ORIGINAL (possibly misspelled) pantry
+    # text -- e.g. "chiken brest" -- still be recognized as the same,
+    # now-resolved pantry item in _require_anchors_grounded_in_pantry.
+    pantry_raw_to_canonical: dict[str, str] = field(default_factory=dict)
+    # Identity (canonical_id OR a pantry_free_text key) -> the exact
+    # RecipeAPI.io search term to use for it, resolved lazily (only for
+    # identities actually chosen as a search anchor -- ticket section
+    # 25) and memoized here for the rest of this run (pagination/retry
+    # reuse the same anchor without a repeat catalogue lookup) as well
+    # as cross-request via app.integrations.provider_ingredient_cache.
+    # Pre-seeded with pantry_free_text's own entries, since those are
+    # already fully resolved by the time AgentState is constructed.
+    pantry_provider_terms: dict[str, str] = field(default_factory=dict)
+    # Full per-pantry-item resolution diagnostics (ticket section 26) --
+    # never exposed to end users, but lets tests/logs assert exactly
+    # how each raw pantry phrase was resolved (LOCAL_EXACT,
+    # PROVIDER_CATALOG_RESOLVED, LLM_CORRECTED_AND_GROUNDED, UNRESOLVED,
+    # AMBIGUOUS, ...). Populated once, in AgentOrchestrator._init_state.
+    pantry_resolution_log: tuple[PantryTermResolution, ...] = field(default_factory=tuple)
 
     search_attempts: int = 0
     max_search_attempts: int = MAX_SEARCH_ATTEMPTS

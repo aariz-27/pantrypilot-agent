@@ -18,6 +18,11 @@ from pydantic import ValidationError
 
 from app.agent.actions import ActionType, AgentAction, SearchArgs
 from app.agent.errors import AgentMalformedActionError, AgentUnsupportedActionError
+from app.agent.ingredient_resolution import (
+    PantryTermResolution,
+    resolve_pantry_ingredient,
+    resolve_provider_search_term,
+)
 from app.agent.observations import (
     ObservationCandidate,
     SearchObservation,
@@ -43,12 +48,13 @@ from app.agent.tools import (
     normalize_recipe_ingredients,
 )
 from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
-from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry
-from app.domain.models import CandidateEvaluation, Recipe, RejectionReason, UserConstraints
+from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry, normalize_raw_text_identity
+from app.domain.ingredient_resolution import IngredientResolutionState
+from app.domain.models import CandidateEvaluation, NormalizationStatus, Recipe, RejectionReason, UserConstraints
 from app.domain.ranker import rank_candidates
 from app.domain.serving_scaler import ScaledRecipe, scale_recipe_servings
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
-from app.recipe.provider import MAX_PAGE_SIZE, RecipeProvider, SearchStrategy
+from app.recipe.provider import MAX_PAGE_SIZE, PROVIDER_SEARCH_TERM_OVERRIDES, RecipeProvider, SearchStrategy
 from app.repositories.price_repository import PriceRepository
 from app.repositories.runtime_ingredient_repository import get_merged_vocabulary
 
@@ -153,10 +159,16 @@ class AgentOrchestrator:
         self._vocabulary = get_merged_vocabulary(ingredient_db_path)
 
     async def run(self, request: AgentRequest) -> AgentResult:
-        state = self._init_state(request)
+        state = await self._init_state(request)
         constraints = self._constraints(request, state.excluded_canonical)
 
-        if request.pantry_raw and not state.pantry_canonical:
+        # 2026-09-13 unified ingredient resolution ticket: a pantry
+        # entirely made of catalogue/LLM-grounded FREE-TEXT terms (e.g.
+        # a single "chicken", which has no generic PantryPilot canonical
+        # id at all) must still be searchable -- this guard only stops
+        # the run when NOTHING at all was resolved, canonical or
+        # free-text.
+        if request.pantry_raw and not state.pantry_canonical and not state.pantry_free_text:
             state.record_progress("stop: all pantry ingredients unresolved")
             return self._finalize(state, "input_makes_search_impossible")
 
@@ -218,13 +230,83 @@ class AgentOrchestrator:
 
     # -- setup -----------------------------------------------------------
 
-    def _init_state(self, request: AgentRequest) -> AgentState:
+    def _catalogue_lookup(self):
+        """Bound RecipeAPI.io ingredient-catalogue lookup callable, or
+        None when unavailable (no recipeapi_io provider registered, or
+        a provider that doesn't implement it -- e.g. LocalCuratedRecipeProvider,
+        which has no catalogue concept at all). Deliberately duck-typed
+        rather than added to app.recipe.provider.RecipeProvider's own
+        Protocol (ticket section 5/8; see app.agent.ingredient_resolution's
+        module docstring)."""
+
+        provider = self._providers.get("recipeapi_io")
+        return getattr(provider, "search_ingredients", None)
+
+    async def _init_state(self, request: AgentRequest) -> AgentState:
         pantry = normalize_pantry(request.pantry_raw, self._vocabulary.canonical_ids, self._vocabulary.aliases)
         excluded = normalize_pantry(request.excluded_raw, self._vocabulary.canonical_ids, self._vocabulary.aliases)
+
+        # 2026-09-13 unified ingredient resolution ticket: every pantry
+        # item that failed LOCAL canonical/alias resolution gets one
+        # more chance -- grounded against RecipeAPI.io's own ingredient
+        # catalogue (and, only if that also fails, a bounded/optional
+        # LLM typo-correction proposal, itself re-grounded before ever
+        # being trusted) -- so a real, locally-unlearned ingredient
+        # (e.g. "chicken", which has no generic PantryPilot canonical id
+        # at all, or a genuine misspelling) can still enter the search
+        # pipeline (ticket sections 4, 6, 10, 20), instead of being
+        # silently dropped the way pantry_unresolved alone would.
+        # Locally-resolved items skip this entirely -- zero extra
+        # calls, zero extra latency (ticket section 25).
+        catalogue_lookup = self._catalogue_lookup()
+        pantry_free_text: dict[str, str] = {}
+        resolution_log: list[PantryTermResolution] = []
+        still_unresolved: list[str] = []
+        newly_resolved_canonical: set[str] = set()
+        pantry_raw_to_canonical: dict[str, str] = {}
+        for item in pantry.results:
+            if item.canonical_id is not None:
+                state_kind = (
+                    IngredientResolutionState.LOCAL_EXACT
+                    if item.status == NormalizationStatus.EXACT
+                    else IngredientResolutionState.LOCAL_ALIAS
+                )
+                resolution_log.append(
+                    PantryTermResolution(item.raw_name, item.canonical_id, item.canonical_id, state_kind)
+                )
+                continue
+
+            resolution = await resolve_pantry_ingredient(
+                item.raw_name,
+                self._vocabulary.canonical_ids,
+                self._vocabulary.aliases,
+                catalogue_lookup=catalogue_lookup,
+                llm_provider=self._llm,
+            )
+            resolution_log.append(resolution)
+            if resolution.canonical_id is not None:
+                # A typo-correction proposal grounded all the way to a
+                # REAL local canonical id (e.g. "chiken brest" ->
+                # "chicken breast" -> chicken_breast) -- the user
+                # genuinely has this ingredient, so it counts for
+                # pantry matching/coverage/pricing too, exactly like
+                # any other resolved pantry item (ticket section 10:
+                # this is a real, grounded correction, not merely a
+                # search-anchor allowance).
+                newly_resolved_canonical.add(resolution.canonical_id)
+                pantry_raw_to_canonical[normalize_raw_text_identity(item.raw_name)] = resolution.canonical_id
+            elif resolution.search_anchor_identity is not None:
+                pantry_free_text[normalize_raw_text_identity(item.raw_name)] = resolution.search_anchor_identity
+            else:
+                # Genuinely unresolved/ambiguous -- reported to the user
+                # exactly as before (never used in the search), never
+                # silently promoted (ticket section 21).
+                still_unresolved.append(item.raw_name)
+
         return AgentState(
             request_id=request.request_id,
             pantry_raw=list(request.pantry_raw),
-            pantry_canonical=pantry.canonical_ids,
+            pantry_canonical=pantry.canonical_ids | newly_resolved_canonical,
             budget_aed=request.budget_aed,
             cuisine_preference=request.cuisine_preference,
             cuisine_strict=request.cuisine_strict,
@@ -232,7 +314,11 @@ class AgentOrchestrator:
             max_total_time_minutes=request.max_total_time_minutes,
             excluded_raw=list(request.excluded_raw),
             excluded_canonical=excluded.canonical_ids,
-            pantry_unresolved=pantry.unresolved,
+            pantry_unresolved=tuple(still_unresolved),
+            pantry_free_text=pantry_free_text,
+            pantry_raw_to_canonical=pantry_raw_to_canonical,
+            pantry_provider_terms=dict(pantry_free_text),
+            pantry_resolution_log=tuple(resolution_log),
             target_feasible_results=self._target_feasible_results,
         )
 
@@ -324,23 +410,48 @@ class AgentOrchestrator:
         ingredient outside pantry_canonical, is rejected outright, never
         silently dropped or substituted for a different one.
 
-        Returns the resolved canonical ids, in the same order (PR #15
-        fourth correction pass, 2026-09-08, Blocker 2): the caller uses
-        these -- not the LLM's raw anchor text -- to build the provider
-        query, so canonical identity and provider-search wording stay
-        cleanly separated regardless of whether the LLM sent the exact
-        canonical id or an alias that resolves to it."""
+        Returns the resolved anchor IDENTITIES, in the same order (PR
+        #15 fourth correction pass, 2026-09-08, Blocker 2): the caller
+        uses these -- not the LLM's raw anchor text -- to build the
+        provider query, so canonical identity and provider-search
+        wording stay cleanly separated regardless of whether the LLM
+        sent the exact canonical id or an alias that resolves to it.
 
-        canonical_ids: list[str] = []
+        2026-09-13 unified ingredient resolution ticket: an identity is
+        no longer required to be a canonical id -- it may also be a
+        pantry_free_text key (a pantry phrase PantryPilot's local
+        taxonomy has never learned, but which
+        AgentOrchestrator._init_state already safely grounded against
+        RecipeAPI.io's own ingredient catalogue, or a re-grounded LLM
+        typo correction). Either way, the identity was already
+        established as something the user ACTUALLY has and that is
+        safe to search for -- an anchor resolving to neither is still
+        rejected outright, never silently dropped or substituted."""
+
+        identities: list[str] = []
         for anchor in anchor_ingredients:
             result = normalize_ingredient_name(anchor, self._vocabulary.canonical_ids, self._vocabulary.aliases)
-            if result.canonical_id is None or result.canonical_id not in state.pantry_canonical:
-                raise AgentUnsupportedActionError(
-                    f"search anchor {anchor!r} is not present in the user's pantry; anchors must be "
-                    "grounded in the user's actual canonical pantry, never invented"
-                )
-            canonical_ids.append(result.canonical_id)
-        return canonical_ids
+            if result.canonical_id is not None and result.canonical_id in state.pantry_canonical:
+                identities.append(result.canonical_id)
+                continue
+            cleaned = normalize_raw_text_identity(anchor)
+            if cleaned in state.pantry_free_text:
+                identities.append(cleaned)
+                continue
+            # The LLM anchored using the user's ORIGINAL (possibly
+            # misspelled) pantry text, which only resolved to a real
+            # canonical id via typo-correction (state.pantry_raw_to_canonical) --
+            # e.g. anchor text "chiken brest" for a pantry item already
+            # grounded to chicken_breast. Same identity either way.
+            mapped_canonical = state.pantry_raw_to_canonical.get(cleaned)
+            if mapped_canonical is not None:
+                identities.append(mapped_canonical)
+                continue
+            raise AgentUnsupportedActionError(
+                f"search anchor {anchor!r} is not present in the user's pantry; anchors must be "
+                "grounded in the user's actual canonical pantry, never invented"
+            )
+        return identities
 
     def _unsupported_action_feedback(self, state: AgentState, exc: AgentUnsupportedActionError) -> str:
         """Structured, deterministic corrective observation for a
@@ -357,22 +468,56 @@ class AgentOrchestrator:
         instruction the model is trusted to enforce on its own; the
         underlying guards remain the sole control."""
 
+        allowed = sorted(state.pantry_canonical | state.pantry_free_text.keys())
         return (
-            f"{exc.message} Allowed pantry canonical anchors: {sorted(state.pantry_canonical)}. "
+            f"{exc.message} Allowed pantry anchors: {allowed}. "
             "Choose a new search using only these grounded anchors, or a valid "
             "paginate/retry action for the immediately preceding attempt, or stop."
         )
 
+    async def _resolve_outbound_provider_term(self, state: AgentState, identity: str, *, broaden: bool) -> str:
+        """Identity (canonical id or pantry_free_text key) -> the exact
+        text to send RecipeAPI.io for this attempt (ticket sections 7,
+        13, 16). Memoized on `state` for the rest of this run (a
+        paginate/retry reusing the same anchor never repeats the
+        catalogue lookup) and, for the catalogue call itself, cached
+        across requests too (app.integrations.provider_ingredient_cache).
+
+        A reviewed PROVIDER_SEARCH_TERM_OVERRIDES entry (broadening,
+        opt-in, e.g. "minced_beef" -> "ground beef") is honored FIRST,
+        exactly like the pre-2026-09-13 behavior -- this is a known-good,
+        already-reviewed term, so it is used as-is rather than routed
+        through catalogue grounding a second time."""
+
+        if broaden and identity in PROVIDER_SEARCH_TERM_OVERRIDES:
+            return PROVIDER_SEARCH_TERM_OVERRIDES[identity]
+
+        cached = state.pantry_provider_terms.get(identity)
+        if cached is not None:
+            return cached
+
+        resolved = await resolve_provider_search_term(identity, self._catalogue_lookup())
+        state.pantry_provider_terms[identity] = resolved.provider_term
+        return resolved.provider_term
+
     async def _handle_search(self, state: AgentState, args: SearchArgs, constraints: UserConstraints) -> None:
-        anchor_canonical_ids = self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
+        anchor_identities = self._require_anchors_grounded_in_pantry(state, args.anchor_ingredients)
+        provider_terms = [
+            await self._resolve_outbound_provider_term(state, identity, broaden=args.broaden_provider_search)
+            for identity in anchor_identities
+        ]
 
         # Priority 5 (PR #15 correction pass, 2026-09-08): carry the
         # LLM's own primary-anchor choice into the observation loop.
         # Already validated above to resolve to a real pantry canonical
-        # id. Same "first anchor is the primary one" convention
+        # id (or, 2026-09-13, a grounded free-text pantry identity).
+        # Same "first anchor is the primary one" convention
         # RecipeAPIIOAdapter.enrich_with_free_text_search already uses,
-        # not a new one.
-        new_anchor = anchor_canonical_ids[0]
+        # not a new one. Tracked by IDENTITY (stable, canonical where
+        # possible), never by the outbound provider term text, so
+        # anchor-relevance comparisons (candidate_contains_anchor)
+        # keep working exactly as before.
+        new_anchor = anchor_identities[0]
         if new_anchor != state.active_anchor_canonical:
             # PR #15 fourth correction pass (2026-09-08, Blocker 4): a
             # fresh anchor has never had broadening tried for it yet --
@@ -389,15 +534,18 @@ class AgentOrchestrator:
             )
 
         strategy = SearchStrategy(
-            # PR #15 fourth correction pass (2026-09-08, Blocker 2): the
-            # RESOLVED canonical ids, not the LLM's raw anchor text --
-            # keeps canonical identity and provider-search wording
-            # cleanly separated regardless of whether the LLM sent an
-            # exact canonical id or an alias that resolves to one. Any
-            # broadening happens only inside the adapter, keyed off
-            # these exact ids (RecipeAPIIOAdapter.
-            # PROVIDER_SEARCH_TERM_OVERRIDES).
-            query_ingredients=anchor_canonical_ids,
+            # 2026-09-13 unified ingredient resolution ticket: the
+            # GROUNDED PROVIDER TERMS (e.g. "Lamb chop", "Chicken"),
+            # never the raw canonical id/identity (e.g. "lamb_chops")
+            # -- confirmed live that RecipeAPI.io's own ingredient
+            # vocabulary does not reliably match PantryPilot's internal
+            # snake_case identity, even space-converted (see
+            # app.agent.ingredient_resolution). Anchor IDENTITY (used
+            # for active_anchor_canonical/signature dedup/grounding)
+            # and PROVIDER TERM (used only here, for the actual outbound
+            # query) are deliberately different values now -- ticket
+            # section 1's core distinction.
+            query_ingredients=provider_terms,
             cuisine=args.cuisine,
             page=1,
             page_size=self._search_page_size,
@@ -411,10 +559,13 @@ class AgentOrchestrator:
         # different query text), not a repeat -- excluding enrich_free_text
         # here previously made that legitimate corrective action bounce
         # as "identical", discovered via a live Test A run; the same
-        # reasoning applies to broaden_provider_search.
+        # reasoning applies to broaden_provider_search. Deduped by
+        # ANCHOR IDENTITY, not provider term (ticket section 1) -- the
+        # question is "did we already search for this same pantry
+        # thing", which the identity answers stably.
         signature = (
             route,
-            tuple(sorted(anchor_canonical_ids)),
+            tuple(sorted(anchor_identities)),
             (args.cuisine or "").lower(),
             args.enrich_free_text,
             args.broaden_provider_search,
