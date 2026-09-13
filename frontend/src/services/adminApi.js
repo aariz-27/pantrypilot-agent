@@ -129,6 +129,16 @@ export function listIngredients({ q, status, page = 1, pageSize = 25 } = {}) {
   return adminFetch(`/admin/ingredients?${params.toString()}`)
 }
 
+// 2026-09-13 admin completion ticket: the EFFECTIVE catalog (built-in
+// app.domain.grocery_taxonomy vocabulary + admin-managed ingredients,
+// merged exactly as the live app resolves them) -- distinct from
+// listIngredients above, which remains the admin-DB-only CRUD listing.
+export function listEffectiveCatalog({ q, page = 1, pageSize = 25 } = {}) {
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+  if (q) params.set('q', q)
+  return adminFetch(`/admin/catalog?${params.toString()}`)
+}
+
 export function getIngredient(canonicalId) {
   return adminFetch(`/admin/ingredients/${encodeURIComponent(canonicalId)}`)
 }

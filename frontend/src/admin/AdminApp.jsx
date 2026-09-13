@@ -26,6 +26,7 @@ export function AdminApp() {
   const [username, setUsername] = useState(null)
   const [page, setPage] = useState(PAGES.DASHBOARD)
   const [selectedIngredientId, setSelectedIngredientId] = useState(null)
+  const [selectedIngredientSource, setSelectedIngredientSource] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -57,13 +58,15 @@ export function AdminApp() {
     setSelectedIngredientId(null)
   }, [])
 
-  const openIngredient = useCallback((canonicalId) => {
+  const openIngredient = useCallback((canonicalId, source) => {
     setSelectedIngredientId(canonicalId)
+    setSelectedIngredientSource(source ?? 'admin')
     setPage(PAGES.INGREDIENTS)
   }, [])
 
   const closeIngredientEditor = useCallback(() => {
     setSelectedIngredientId(null)
+    setSelectedIngredientSource(null)
   }, [])
 
   if (authState === 'checking') {
@@ -82,7 +85,7 @@ export function AdminApp() {
     <AdminLayout username={username} page={page} onNavigate={setPage} onLogout={handleLogout} pages={PAGES}>
       {page === PAGES.DASHBOARD ? <AdminDashboard onOpenIngredient={openIngredient} /> : null}
       {page === PAGES.INGREDIENTS && selectedIngredientId ? (
-        <IngredientEditor canonicalId={selectedIngredientId} onClose={closeIngredientEditor} />
+        <IngredientEditor canonicalId={selectedIngredientId} source={selectedIngredientSource} onClose={closeIngredientEditor} />
       ) : null}
       {page === PAGES.INGREDIENTS && !selectedIngredientId ? <IngredientList onOpenIngredient={openIngredient} /> : null}
       {page === PAGES.PRICES ? (
