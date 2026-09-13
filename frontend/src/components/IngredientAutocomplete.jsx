@@ -80,8 +80,13 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
     // Post-review fix (2026-09-08): ArrowDown/ArrowUp updated
     // activeIndex but never scrolled the listbox, so the highlighted
     // option could move outside the visible area. Only keyboard-driven
-    // moves scroll -- mouse hover (onMouseEnter) also sets activeIndex
-    // but must never yank the list while the user is pointing at it.
+    // moves scroll. activeIndex is now ONLY ever set by ArrowDown/
+    // ArrowUp (2026-09-13 hotfix: mouse hover used to also set it via
+    // onMouseEnter, which meant Enter could "select" whatever
+    // suggestion the cursor merely happened to be resting over --
+    // never an explicit choice. Hover highlighting is pure CSS
+    // (:hover in IngredientAutocomplete.css) now, so this guard is
+    // belt-and-suspenders, not load-bearing, but kept for clarity.
     if (!movedByKeyboardRef.current) return
     movedByKeyboardRef.current = false
     if (activeIndex < 0 || !listboxRef.current) return
@@ -240,7 +245,6 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
                 event.preventDefault()
                 selectSuggestion(suggestion)
               }}
-              onMouseEnter={() => setActiveIndex(index)}
             >
               {suggestion.display_name}
             </li>

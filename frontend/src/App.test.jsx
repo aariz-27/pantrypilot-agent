@@ -757,4 +757,29 @@ describe('Module F: production UX -- offline and rate-limit states', () => {
       expect(screen.getByText("You're searching a bit fast. Please wait a moment and try again.")).toBeInTheDocument(),
     )
   })
+
+  // 2026-09-13 hotfix: autocomplete suggestions must never replace what
+  // the user actually typed. "chicken" has several cut-specific
+  // suggestions (Chicken Breast, Chicken Broth, ...) but pressing Enter
+  // without explicitly navigating/clicking one must commit "chicken"
+  // itself, unchanged, all the way to the request payload.
+  describe('free-text ingredient survives autocomplete suggestions (TEST 8/9)', () => {
+    it('sends raw "chicken" in the request payload, never a narrower suggestion', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+      ])
+      api.postRecommend.mockResolvedValue(baseResponse({ recommendations: [card()] }))
+      render(<App />)
+
+      const input = screen.getByRole('combobox', { name: /What ingredients do you have/ })
+      await userEvent.type(input, 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+      await userEvent.keyboard('{Enter}')
+      await userEvent.click(screen.getByRole('button', { name: 'Find meals' }))
+
+      await waitFor(() => expect(api.postRecommend).toHaveBeenCalledTimes(1))
+      expect(api.postRecommend.mock.calls[0][0].ingredients).toEqual(['chicken'])
+    })
+  })
 })

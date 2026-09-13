@@ -212,6 +212,134 @@ describe('IngredientAutocomplete', () => {
     })
   })
 
+  // -- 2026-09-13 hotfix: autocomplete must not replace free text -----------
+  // Root cause: mouse hover (onMouseEnter) used to also set activeIndex,
+  // so Enter could "select" whatever suggestion the cursor merely
+  // happened to be resting over -- never an explicit choice. Hover
+  // highlighting is now pure CSS; activeIndex is only ever set by
+  // ArrowDown/ArrowUp.
+
+  describe('hotfix: autocomplete suggestions never override typed text (TESTS 1-6)', () => {
+    it('TEST 1: Enter with suggestions visible but no arrow navigation commits the raw typed text', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+        { canonical_id: 'chicken_drumsticks', display_name: 'Chicken Drumsticks' },
+      ])
+      const { onAdd } = setup()
+      const input = screen.getByRole('combobox')
+      await userEvent.type(input, 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+
+      await userEvent.keyboard('{Enter}')
+
+      expect(onAdd).toHaveBeenCalledWith({ id: 'unresolved:chicken', label: 'chicken', canonical_id: null, unresolved: true })
+    })
+
+    it('TEST 2: ArrowDown to a suggestion then Enter selects that suggestion', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+      ])
+      const { onAdd } = setup()
+      await userEvent.type(screen.getByRole('combobox'), 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+
+      await userEvent.keyboard('{ArrowDown}{Enter}')
+
+      expect(onAdd).toHaveBeenCalledWith({
+        id: 'chicken_breast', label: 'Chicken Breast', canonical_id: 'chicken_breast', unresolved: false,
+      })
+    })
+
+    it('TEST 3: clicking a suggestion explicitly selects it', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+      ])
+      const { onAdd } = setup()
+      await userEvent.type(screen.getByRole('combobox'), 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+
+      await userEvent.click(screen.getByText('Chicken Breast'))
+
+      expect(onAdd).toHaveBeenCalledWith({
+        id: 'chicken_breast', label: 'Chicken Breast', canonical_id: 'chicken_breast', unresolved: false,
+      })
+    })
+
+    it('TEST 4: "mutton" with suggestions visible commits unchanged on Enter', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([{ canonical_id: 'mutton_curry_cut', display_name: 'Mutton Curry Cut' }])
+      const { onAdd } = setup()
+      await userEvent.type(screen.getByRole('combobox'), 'mutton')
+      await waitFor(() => screen.getByText('Mutton Curry Cut'))
+
+      await userEvent.keyboard('{Enter}')
+
+      expect(onAdd).toHaveBeenCalledWith({ id: 'unresolved:mutton', label: 'mutton', canonical_id: null, unresolved: true })
+    })
+
+    it('TEST 5: "lamb" with suggestions visible commits unchanged on Enter', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([{ canonical_id: 'lamb_chops', display_name: 'Lamb Chops' }])
+      const { onAdd } = setup()
+      await userEvent.type(screen.getByRole('combobox'), 'lamb')
+      await waitFor(() => screen.getByText('Lamb Chops'))
+
+      await userEvent.keyboard('{Enter}')
+
+      expect(onAdd).toHaveBeenCalledWith({ id: 'unresolved:lamb', label: 'lamb', canonical_id: null, unresolved: true })
+    })
+
+    it('TEST 6: "chicken," with suggestions visible commits "chicken" unchanged, never the first suggestion', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+      ])
+      const { onAdd } = setup()
+      const input = screen.getByRole('combobox')
+      await userEvent.type(input, 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+
+      await userEvent.keyboard(',')
+
+      expect(onAdd).toHaveBeenCalledWith({ id: 'unresolved:chicken', label: 'chicken', canonical_id: null, unresolved: true })
+    })
+
+    it('root-cause regression: merely hovering a suggestion with the mouse does not make it win on Enter', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+      ])
+      const { onAdd } = setup()
+      const input = screen.getByRole('combobox')
+      await userEvent.type(input, 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+
+      // The cursor resting over a suggestion (e.g. because the dropdown
+      // renders directly under the input) must never count as explicit
+      // navigation or a click -- only ArrowDown/ArrowUp or an actual
+      // click may set the "active" selection Enter honors.
+      await userEvent.hover(screen.getByText('Chicken Breast'))
+      await userEvent.keyboard('{Enter}')
+
+      expect(onAdd).toHaveBeenCalledWith({ id: 'unresolved:chicken', label: 'chicken', canonical_id: null, unresolved: true })
+    })
+
+    it('opening the dropdown does not pre-highlight any suggestion (aria-selected is false for all options)', async () => {
+      api.fetchIngredientSuggestions.mockResolvedValue([
+        { canonical_id: 'chicken_breast', display_name: 'Chicken Breast' },
+        { canonical_id: 'chicken_broth', display_name: 'Chicken Broth' },
+      ])
+      setup()
+      await userEvent.type(screen.getByRole('combobox'), 'chicken')
+      await waitFor(() => screen.getByText('Chicken Breast'))
+
+      for (const option of screen.getAllByRole('option')) {
+        expect(option).toHaveAttribute('aria-selected', 'false')
+      }
+    })
+  })
+
   describe('keyboard scrolling', () => {
     // jsdom does not implement real layout/scrolling; Element.prototype
     // .scrollIntoView is stubbed per test to assert it was invoked.
