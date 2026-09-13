@@ -71,7 +71,8 @@ def test_admin_not_configured_by_default():
 
 def test_admin_configured_via_direct_kwargs():
     settings = Settings(
-        _env_file=None, admin_username="founder", admin_password_hash="scrypt$hash", admin_session_secret="secret"
+        _env_file=None, admin_username="founder", admin_password_hash="scrypt$hash",
+        admin_session_secret="a-session-secret-thats-at-least-32-characters-long",
     )
     assert settings.admin_username == "founder"
     assert settings.admin_configured is True
@@ -80,7 +81,7 @@ def test_admin_configured_via_direct_kwargs():
 def test_admin_configured_via_pantrypilot_prefixed_env_vars(monkeypatch):
     monkeypatch.setenv("PANTRYPILOT_ADMIN_USERNAME", "founder")
     monkeypatch.setenv("PANTRYPILOT_ADMIN_PASSWORD_HASH", "scrypt$hash")
-    monkeypatch.setenv("PANTRYPILOT_ADMIN_SESSION_SECRET", "secret")
+    monkeypatch.setenv("PANTRYPILOT_ADMIN_SESSION_SECRET", "a-session-secret-thats-at-least-32-characters-long")
     settings = Settings(_env_file=None)
     assert settings.admin_username == "founder"
     assert settings.admin_password_hash.get_secret_value() == "scrypt$hash"
@@ -90,6 +91,35 @@ def test_admin_configured_via_pantrypilot_prefixed_env_vars(monkeypatch):
 def test_admin_partial_configuration_is_not_configured():
     settings = Settings(_env_file=None, admin_username="founder")
     assert settings.admin_configured is False
+
+
+# -- 2026-09-13 security hardening patch -----------------------------------
+
+
+def test_weak_admin_session_secret_is_rejected():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, admin_session_secret="too-short")
+
+
+def test_blank_admin_session_secret_is_rejected():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, admin_session_secret="   ")
+
+
+def test_valid_32_char_admin_session_secret_is_accepted():
+    secret = "x" * 32
+    settings = Settings(_env_file=None, admin_session_secret=secret)
+    assert settings.admin_session_secret.get_secret_value() == secret
+
+
+def test_invalid_environment_value_is_rejected():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, environment="prod")
+
+
+def test_valid_environment_values_are_accepted():
+    for value in ("development", "test", "production"):
+        assert Settings(_env_file=None, environment=value).environment == value
 
 
 # -- ALLOWED_ORIGINS real environment-variable parsing (2026-09-13) --------

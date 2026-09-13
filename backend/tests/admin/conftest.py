@@ -30,7 +30,7 @@ def admin_settings(admin_db_path):
         price_db_path=admin_db_path,
         admin_username=ADMIN_USERNAME,
         admin_password_hash=hash_password(ADMIN_PASSWORD),
-        admin_session_secret="unit-test-session-secret-value",
+        admin_session_secret="unit-test-session-secret-value-thats-long-enough",
     )
 
 

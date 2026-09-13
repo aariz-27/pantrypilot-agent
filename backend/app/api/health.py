@@ -10,6 +10,12 @@ public contract) but this endpoint no longer emits it, since
 
 Only configuration presence/absence is reported for providers -- never
 the secret values themselves.
+
+2026-09-13 security hardening patch: in production, `database` and
+`providers` are omitted entirely (this public, unauthenticated
+endpoint returns only `{"status": "ok"}`) so no configuration/
+integration state is exposed to an unauthenticated caller.
+development/test are unaffected.
 """
 
 from __future__ import annotations
@@ -25,6 +31,14 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthResponse)
 def get_health(settings: Settings = Depends(get_settings)) -> HealthResponse:
+    # 2026-09-13 security hardening patch: this endpoint is public and
+    # unauthenticated. In production it reveals nothing beyond basic
+    # liveness -- no database reachability detail, no RecipeAPI/LLM
+    # configuration state (an attacker could otherwise fingerprint
+    # which integrations are live). development/test keep the existing
+    # detailed response unchanged, preserving current tests/tooling.
+    if settings.environment == "production":
+        return HealthResponse(status="ok")
     return HealthResponse(
         status="ok",
         database="ok" if check_database_health(settings.price_db_path) else "unavailable",

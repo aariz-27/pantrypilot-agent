@@ -49,7 +49,19 @@ _ERROR_CODE_HTTP_STATUS: dict[str, int] = {
 def create_app() -> FastAPI:
     configure_logging()
     settings = get_settings()
-    app = FastAPI(title="PantryPilot API")
+    # 2026-09-13 security hardening patch: /docs, /redoc, and
+    # /openapi.json are public, unauthenticated, and expose the full
+    # API surface (every route, schema, and parameter) -- disabled in
+    # production only. FastAPI's own docs_url/redoc_url/openapi_url
+    # kwargs already do this cleanly; no custom middleware needed.
+    # development/test keep the existing (default) URLs unchanged.
+    is_production = settings.environment == "production"
+    app = FastAPI(
+        title="PantryPilot API",
+        docs_url=None if is_production else "/docs",
+        redoc_url=None if is_production else "/redoc",
+        openapi_url=None if is_production else "/openapi.json",
+    )
     app.state.limiter = limiter
 
     app.add_middleware(
