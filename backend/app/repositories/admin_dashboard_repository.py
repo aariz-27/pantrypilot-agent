@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from app.db.connection import connection_scope
 from app.domain.grocery_models import MappingStatus
+from app.repositories.runtime_ingredient_repository import get_merged_vocabulary
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,12 @@ class AdminDashboardSummary:
     ingredients_without_known_price: int
     mapped_product_count: int
     unmapped_product_count: int
+    # 2026-09-13 admin completion ticket (section 4, status/usability):
+    # the FULL effective catalog size (built-in + admin merged, via the
+    # same get_merged_vocabulary the live app resolves against) --
+    # distinct from canonical_ingredient_count above, which only counts
+    # admin-managed rows.
+    effective_ingredient_count: int
 
 
 class AdminDashboardRepository:
@@ -56,6 +63,8 @@ class AdminDashboardRepository:
                 (MappingStatus.UNMAPPED_INGREDIENT.value,),
             ).fetchone()["c"]
 
+        effective_ingredient_count = len(get_merged_vocabulary(self._db_path).canonical_ids)
+
         return AdminDashboardSummary(
             canonical_ingredient_count=canonical_ingredient_count,
             active_alias_count=active_alias_count,
@@ -63,6 +72,7 @@ class AdminDashboardRepository:
             ingredients_without_known_price=ingredients_without_known_price,
             mapped_product_count=mapped_product_count,
             unmapped_product_count=unmapped_product_count,
+            effective_ingredient_count=effective_ingredient_count,
         )
 
     def list_grocery_products(

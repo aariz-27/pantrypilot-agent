@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { getDashboardSummary } from '../services/adminApi.js'
 
 const METRICS = [
-  { key: 'canonical_ingredient_count', label: 'Canonical ingredients' },
+  { key: 'effective_ingredient_count', label: 'Effective ingredients (built-in + admin)' },
+  { key: 'canonical_ingredient_count', label: 'Admin-managed ingredients' },
   { key: 'active_alias_count', label: 'Active aliases' },
   { key: 'ingredients_with_manual_price', label: 'Ingredients with manual price' },
   { key: 'ingredients_without_known_price', label: 'Ingredients without known price' },

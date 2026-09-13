@@ -32,6 +32,10 @@ def test_dashboard_summary_counts_reflect_real_data(logged_in_admin):
     assert body["active_alias_count"] == 1
     assert body["ingredients_with_manual_price"] == 1
     assert body["ingredients_without_known_price"] == 0
+    # 2026-09-13 admin completion ticket: the FULL effective catalog
+    # (built-in taxonomy + the one admin-created ingredient above),
+    # distinct from canonical_ingredient_count (admin-only).
+    assert body["effective_ingredient_count"] > 250
 
 
 def test_dashboard_summary_never_fabricates_grocery_counts_when_no_import_ran(logged_in_admin):

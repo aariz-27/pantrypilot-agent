@@ -6,18 +6,15 @@ import { ApiError } from '../services/api.js'
 import * as adminApi from '../services/adminApi.js'
 
 vi.mock('../services/adminApi.js', () => ({
-  listIngredients: vi.fn(),
+  listEffectiveCatalog: vi.fn(),
   createIngredient: vi.fn(),
 }))
 
 const SAMPLE_ITEM = {
   canonical_id: 'bell_pepper',
   display_name: 'Bell Pepper',
-  default_unit: 'g',
+  source: 'admin',
   status: 'active',
-  created_at: '2026-09-01T00:00:00Z',
-  updated_at: '2026-09-01T00:00:00Z',
-  updated_by: 'founder',
   alias_count: 2,
   has_manual_price: false,
   has_reference_price: true,
@@ -26,7 +23,7 @@ const SAMPLE_ITEM = {
 describe('IngredientList', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    adminApi.listIngredients.mockResolvedValue({ items: [SAMPLE_ITEM], total: 1, page: 1, page_size: 25 })
+    adminApi.listEffectiveCatalog.mockResolvedValue({ items: [SAMPLE_ITEM], total: 1, page: 1, page_size: 25 })
   })
 
   it('renders ingredients returned by the API', async () => {
@@ -43,19 +40,32 @@ describe('IngredientList', () => {
     await user.type(screen.getByLabelText('Search ingredients'), 'capsicum')
 
     await waitFor(() => {
-      const lastCall = adminApi.listIngredients.mock.calls.at(-1)[0]
+      const lastCall = adminApi.listEffectiveCatalog.mock.calls.at(-1)[0]
       expect(lastCall.q).toBe('capsicum')
     })
   })
 
-  it('opens an ingredient when Manage is clicked', async () => {
+  it('opens an ingredient when Manage is clicked, passing its source', async () => {
     const onOpenIngredient = vi.fn()
     const user = userEvent.setup()
     render(<IngredientList onOpenIngredient={onOpenIngredient} />)
     await screen.findByText('Bell Pepper')
 
     await user.click(screen.getByRole('button', { name: 'Manage' }))
-    expect(onOpenIngredient).toHaveBeenCalledWith('bell_pepper')
+    expect(onOpenIngredient).toHaveBeenCalledWith('bell_pepper', 'admin')
+  })
+
+  it('shows the source of each ingredient (built-in vs admin)', async () => {
+    adminApi.listEffectiveCatalog.mockResolvedValue({
+      items: [SAMPLE_ITEM, { ...SAMPLE_ITEM, canonical_id: 'onion', display_name: 'Onion', source: 'built_in' }],
+      total: 2,
+      page: 1,
+      page_size: 25,
+    })
+    render(<IngredientList onOpenIngredient={vi.fn()} />)
+    await screen.findByText('Bell Pepper')
+    expect(screen.getByText('Admin')).toBeInTheDocument()
+    expect(screen.getByText('Built-in')).toBeInTheDocument()
   })
 
   it('shows the create-ingredient form and submits a new ingredient', async () => {
@@ -91,13 +101,13 @@ describe('IngredientList', () => {
   })
 
   it('renders correctly with an empty result set', async () => {
-    adminApi.listIngredients.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 })
+    adminApi.listEffectiveCatalog.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25 })
     render(<IngredientList onOpenIngredient={vi.fn()} />)
     expect(await screen.findByText('No ingredients found.')).toBeInTheDocument()
   })
 
   it('price-focus mode only shows ingredients without a known price', async () => {
-    adminApi.listIngredients.mockResolvedValue({
+    adminApi.listEffectiveCatalog.mockResolvedValue({
       items: [
         SAMPLE_ITEM,
         { ...SAMPLE_ITEM, canonical_id: 'obscure_spice', display_name: 'Obscure Spice', has_reference_price: false, has_manual_price: false },

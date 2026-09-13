@@ -15,18 +15,44 @@ import { ConfirmDialog } from './ConfirmDialog.jsx'
 
 const NORMALIZED_UNITS = ['g', 'ml', 'pcs']
 
-export function IngredientEditor({ canonicalId, onClose }) {
+// Deterministic display-only formatting, mirroring
+// app.domain.ingredient_autocomplete.humanize_canonical_id exactly
+// (underscores -> spaces, title case) -- never invents a new identity,
+// just matches how the backend already presents the same built-in id.
+function humanizeCanonicalId(canonicalId) {
+  return canonicalId
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+}
+
+export function IngredientEditor({ canonicalId, source = 'admin', onClose }) {
+  // 2026-09-13 admin completion ticket: a built-in ingredient (from
+  // app.domain.grocery_taxonomy, reached via the effective-catalog
+  // list) has no admin database row at all -- GET /admin/ingredients/
+  // {id} would 404 for it. Its identity/display-name/aliases are
+  // managed in code and are not admin-editable here (Do NOT copy
+  // built-ins into another table). Pricing, however, works for ANY
+  // canonical id regardless of source -- app.repositories.
+  // admin_price_repository never checks where an id comes from -- so
+  // PricingSection below is unconditionally reused unchanged.
+  const isBuiltIn = source === 'built_in'
   const [ingredient, setIngredient] = useState(null)
   const [error, setError] = useState(null)
 
   const refresh = useCallback(() => {
+    if (isBuiltIn) {
+      setError(null)
+      setIngredient({ canonical_id: canonicalId, display_name: humanizeCanonicalId(canonicalId) })
+      return
+    }
     getIngredient(canonicalId)
       .then((data) => {
         setError(null)
         setIngredient(data)
       })
       .catch((err) => setError(err.message))
-  }, [canonicalId])
+  }, [canonicalId, isBuiltIn])
 
   useEffect(() => {
     refresh()
@@ -45,14 +71,40 @@ export function IngredientEditor({ canonicalId, onClose }) {
 
       {ingredient ? (
         <>
-          <OverviewSection ingredient={ingredient} onUpdated={refresh} />
-          <AliasesSection canonicalId={canonicalId} />
+          {isBuiltIn ? (
+            <BuiltInOverviewSection ingredient={ingredient} />
+          ) : (
+            <>
+              <OverviewSection ingredient={ingredient} onUpdated={refresh} />
+              <AliasesSection canonicalId={canonicalId} />
+            </>
+          )}
           <PricingSection canonicalId={canonicalId} />
         </>
       ) : !error ? (
         <p className="admin-muted">Loading…</p>
       ) : null}
     </div>
+  )
+}
+
+function BuiltInOverviewSection({ ingredient }) {
+  return (
+    <section className="card admin-section">
+      <h2 className="admin-section__title">Overview</h2>
+      <p className="field-help">
+        This is a built-in PantryPilot ingredient. Its identity, display name, and aliases are managed in code and
+        are not editable here. You can still add or update its price below.
+      </p>
+      <div className="admin-form__row">
+        <label className="field-label">Canonical ID</label>
+        <input className="field-input" value={ingredient.canonical_id} disabled />
+      </div>
+      <div className="admin-form__row">
+        <label className="field-label">Display name</label>
+        <input className="field-input" value={ingredient.display_name} disabled />
+      </div>
+    </section>
   )
 }
 

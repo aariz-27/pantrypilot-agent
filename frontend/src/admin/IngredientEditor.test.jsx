@@ -162,4 +162,48 @@ describe('IngredientEditor', () => {
     await user.click(screen.getByRole('button', { name: 'Back to ingredient list' }))
     expect(onClose).toHaveBeenCalled()
   })
+
+  describe('built-in ingredient (2026-09-13 admin completion ticket)', () => {
+    it('shows a read-only overview and full pricing, without fetching an admin-only row or aliases', async () => {
+      render(<IngredientEditor canonicalId="chicken_breast" source="built_in" onClose={vi.fn()} />)
+
+      expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Pricing' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Aliases' })).not.toBeInTheDocument()
+      expect(screen.getByDisplayValue('Chicken Breast')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('Chicken Breast')).toBeDisabled()
+      // A built-in ingredient is not a database row -- these calls
+      // would 404/be meaningless for it, so they are never made.
+      expect(adminApi.getIngredient).not.toHaveBeenCalled()
+      expect(adminApi.listAliases).not.toHaveBeenCalled()
+      // Pricing is unconditionally reused, unchanged, for any canonical
+      // id regardless of source.
+      expect(adminApi.getIngredientPrices).toHaveBeenCalledWith('chicken_breast')
+    })
+
+    it('can still add a manual price for a built-in ingredient', async () => {
+      const user = userEvent.setup()
+      adminApi.createManualPrice.mockResolvedValue({
+        canonical_id: 'chicken_breast', normalized_unit: 'g', display_name: 'Chicken Breast',
+        normalized_price_per_unit: 0.05, provenance_note: 'test', active: true,
+      })
+      render(<IngredientEditor canonicalId="chicken_breast" source="built_in" onClose={vi.fn()} />)
+      await screen.findByRole('heading', { name: 'Pricing' })
+
+      await user.click(screen.getByRole('button', { name: 'Add manual price' }))
+      const formElement = screen.getByRole('button', { name: 'Save manual price' }).closest('form')
+      const priceForm = within(formElement)
+      await user.type(priceForm.getByLabelText('Display name'), 'Chicken Breast')
+      await user.type(priceForm.getByLabelText('Price per unit (AED)'), '0.05')
+      await user.type(priceForm.getByLabelText('Provenance note'), 'test entry')
+      await user.click(screen.getByRole('button', { name: 'Save manual price' }))
+
+      await waitFor(() =>
+        expect(adminApi.createManualPrice).toHaveBeenCalledWith(
+          'chicken_breast',
+          expect.objectContaining({ normalized_price_per_unit: 0.05 })
+        )
+      )
+    })
+  })
 })

@@ -20,8 +20,13 @@ from datetime import datetime, timezone
 
 from app.admin.errors import AdminConflictError, AdminNotFoundError
 from app.db.connection import connection_scope
-from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS
-from app.repositories.runtime_ingredient_repository import alias_conflicts_with_builtin, invalidate_runtime_ingredient_cache
+from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES
+from app.domain.ingredient_autocomplete import humanize_canonical_id
+from app.repositories.runtime_ingredient_repository import (
+    alias_conflicts_with_builtin,
+    get_merged_vocabulary,
+    invalidate_runtime_ingredient_cache,
+)
 
 _CANONICAL_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _MAX_DISPLAY_NAME_LENGTH = 120
@@ -75,9 +80,117 @@ class IngredientAliasRecord:
     updated_by: str | None
 
 
+@dataclass(frozen=True)
+class EffectiveCatalogRecord:
+    canonical_id: str
+    display_name: str
+    source: str  # "built_in" | "admin"
+    status: str
+    alias_count: int
+    has_manual_price: bool
+    has_reference_price: bool
+
+
 class AdminIngredientRepository:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
+
+    # -- effective (built-in + admin merged) catalog ------------------------
+
+    def list_effective_catalog(
+        self, *, q: str | None = None, page: int = 1, page_size: int = 25
+    ) -> tuple[list[EffectiveCatalogRecord], int]:
+        """The SAME merged vocabulary the live app resolves pantry/recipe
+        ingredients against (app.repositories.runtime_ingredient_repository.
+        get_merged_vocabulary), reshaped for admin browsing/search. Built-in
+        and admin-managed ids are always disjoint by construction
+        (create_ingredient rejects a canonical_id already in
+        CANONICAL_GROCERY_INGREDIENTS), so no dedup/precedence logic is
+        needed here beyond what get_merged_vocabulary itself already
+        guarantees -- this never recomputes or duplicates that logic, it
+        only re-presents it. The built-in side is a small (currently
+        ~292-id), pure-Python, in-memory set; merging and paginating in
+        Python rather than SQL is the simplest correct approach at this
+        scale (competition-deployment traffic, not a public high-QPS API)."""
+
+        bounded_page = max(1, page)
+        bounded_page_size = max(1, min(page_size, 100))
+        cleaned_q = normalize_alias_text(q) if q else None
+
+        vocab = get_merged_vocabulary(self._db_path)
+
+        # Reverse-map built-in aliases (canonical_id -> matching alias
+        # texts) once, for alias_count and for search-by-alias below --
+        # never mutates/copies RECIPE_INGREDIENT_ALIASES itself.
+        builtin_aliases_by_canonical: dict[str, list[str]] = {}
+        for alias_text, canonical_id in RECIPE_INGREDIENT_ALIASES.items():
+            builtin_aliases_by_canonical.setdefault(canonical_id, []).append(alias_text)
+
+        with connection_scope(self._db_path, read_only=False) as connection:
+            admin_rows = connection.execute("SELECT * FROM canonical_ingredients").fetchall()
+            manual_priced_ids = {
+                row["canonical_id"]
+                for row in connection.execute(
+                    "SELECT DISTINCT canonical_id FROM manual_price_entries WHERE active = 1"
+                ).fetchall()
+            }
+            reference_priced_ids = {
+                row["canonical_id"] for row in connection.execute("SELECT DISTINCT canonical_id FROM ingredient_prices").fetchall()
+            }
+            admin_aliases_by_canonical: dict[str, list[str]] = {}
+            for row in connection.execute("SELECT canonical_id, alias FROM ingredient_aliases WHERE active = 1").fetchall():
+                admin_aliases_by_canonical.setdefault(row["canonical_id"], []).append(row["alias"])
+
+        records: list[EffectiveCatalogRecord] = []
+        admin_ids_seen: set[str] = set()
+        for row in admin_rows:
+            canonical_id = row["canonical_id"]
+            admin_ids_seen.add(canonical_id)
+            records.append(
+                EffectiveCatalogRecord(
+                    canonical_id=canonical_id,
+                    display_name=row["display_name"],
+                    source="admin",
+                    status=row["status"],
+                    alias_count=len(admin_aliases_by_canonical.get(canonical_id, [])),
+                    has_manual_price=canonical_id in manual_priced_ids,
+                    has_reference_price=canonical_id in reference_priced_ids,
+                )
+            )
+
+        # vocab.canonical_ids already includes every admin-active id
+        # (merged in by get_merged_vocabulary) -- subtracting admin_ids_seen
+        # (every admin row regardless of status) leaves exactly the
+        # built-in ids, without re-deriving CANONICAL_GROCERY_INGREDIENTS
+        # separately or assuming it never changes shape.
+        for canonical_id in vocab.canonical_ids - admin_ids_seen:
+            records.append(
+                EffectiveCatalogRecord(
+                    canonical_id=canonical_id,
+                    display_name=humanize_canonical_id(canonical_id),
+                    source="built_in",
+                    status="active",
+                    alias_count=len(builtin_aliases_by_canonical.get(canonical_id, [])),
+                    has_manual_price=canonical_id in manual_priced_ids,
+                    has_reference_price=canonical_id in reference_priced_ids,
+                )
+            )
+
+        if cleaned_q:
+            def _matches(record: EffectiveCatalogRecord) -> bool:
+                if cleaned_q in record.canonical_id.lower() or cleaned_q in record.display_name.lower():
+                    return True
+                alias_pool = (
+                    builtin_aliases_by_canonical if record.source == "built_in" else admin_aliases_by_canonical
+                ).get(record.canonical_id, [])
+                return any(cleaned_q in alias for alias in alias_pool)
+
+            records = [r for r in records if _matches(r)]
+
+        records.sort(key=lambda r: r.display_name.lower())
+        total = len(records)
+        offset = (bounded_page - 1) * bounded_page_size
+        return records[offset : offset + bounded_page_size], total
 
     # -- canonical ingredients -------------------------------------------------
 

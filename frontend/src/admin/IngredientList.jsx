@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { createIngredient, listIngredients } from '../services/adminApi.js'
+import { createIngredient, listEffectiveCatalog } from '../services/adminApi.js'
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js'
 
 const PAGE_SIZE = 25
 
+// 2026-09-13 admin completion ticket: this list now reads the EFFECTIVE
+// catalog (built-in app.domain.grocery_taxonomy vocabulary + admin-
+// managed ingredients, merged exactly as the live app resolves them --
+// app.repositories.runtime_ingredient_repository.get_merged_vocabulary)
+// rather than only admin-created rows. "Add ingredient" still creates
+// an admin-managed override via the unchanged admin-only endpoint; a
+// built-in row is browsed/priced here but not edited (there is nothing
+// to edit -- it is not a database row).
 export function IngredientList({ onOpenIngredient, priceFocusMode = false }) {
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 250)
-  const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -18,20 +25,20 @@ export function IngredientList({ onOpenIngredient, priceFocusMode = false }) {
   // pattern) rather than via a dedicated effect, so a filter change
   // and the resulting page reset land in the same render pass instead
   // of triggering an extra one.
-  const [appliedFilters, setAppliedFilters] = useState([debouncedQuery, status])
-  if (appliedFilters[0] !== debouncedQuery || appliedFilters[1] !== status) {
-    setAppliedFilters([debouncedQuery, status])
+  const [appliedFilters, setAppliedFilters] = useState([debouncedQuery])
+  if (appliedFilters[0] !== debouncedQuery) {
+    setAppliedFilters([debouncedQuery])
     setPage(1)
   }
 
   const refresh = useCallback(() => {
-    listIngredients({ q: debouncedQuery || undefined, status: status || undefined, page, pageSize: PAGE_SIZE })
+    listEffectiveCatalog({ q: debouncedQuery || undefined, page, pageSize: PAGE_SIZE })
       .then((data) => {
         setError(null)
         setResult(data)
       })
       .catch((err) => setError(err.message))
-  }, [debouncedQuery, status, page])
+  }, [debouncedQuery, page])
 
   useEffect(() => {
     refresh()
@@ -70,13 +77,6 @@ export function IngredientList({ onOpenIngredient, priceFocusMode = false }) {
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search ingredients"
         />
-        {!priceFocusMode ? (
-          <select className="field-select" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="active">Active</option>
-            <option value="archived">Archived</option>
-          </select>
-        ) : null}
       </div>
 
       {error ? <p className="field-error">{error}</p> : null}
@@ -86,7 +86,7 @@ export function IngredientList({ onOpenIngredient, priceFocusMode = false }) {
           <tr>
             <th>Canonical ID</th>
             <th>Display name</th>
-            <th>Status</th>
+            <th>Source</th>
             <th>Aliases</th>
             <th>Price</th>
             <th />
@@ -100,7 +100,9 @@ export function IngredientList({ onOpenIngredient, priceFocusMode = false }) {
               </td>
               <td>{item.display_name}</td>
               <td>
-                <span className={`badge ${item.status === 'active' ? 'badge-success' : 'badge-neutral'}`}>{item.status}</span>
+                <span className={`badge ${item.source === 'admin' ? 'badge-success' : 'badge-neutral'}`}>
+                  {item.source === 'admin' ? 'Admin' : 'Built-in'}
+                </span>
               </td>
               <td>{item.alias_count}</td>
               <td>
@@ -111,7 +113,11 @@ export function IngredientList({ onOpenIngredient, priceFocusMode = false }) {
                 )}
               </td>
               <td>
-                <button type="button" className="btn btn-secondary" onClick={() => onOpenIngredient(item.canonical_id)}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => onOpenIngredient(item.canonical_id, item.source)}
+                >
                   Manage
                 </button>
               </td>

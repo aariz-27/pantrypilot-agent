@@ -39,6 +39,32 @@ class CanonicalIngredientListResponse(BaseModel):
     page_size: int
 
 
+class EffectiveIngredientResponse(BaseModel):
+    """One row of the EFFECTIVE ingredient catalog (2026-09-13 admin
+    completion ticket) -- the built-in app.domain.grocery_taxonomy
+    vocabulary and admin-managed canonical_ingredients rows merged into
+    one view, exactly as app.repositories.runtime_ingredient_repository.
+    get_merged_vocabulary already merges them for the live app. A
+    built-in row has no admin-editable metadata (no created_at/
+    updated_at/updated_by/default_unit -- it is not a database row),
+    so those fields are simply absent here rather than fabricated."""
+
+    canonical_id: str
+    display_name: str
+    source: str  # "built_in" | "admin"
+    status: str
+    alias_count: int
+    has_manual_price: bool
+    has_reference_price: bool
+
+
+class EffectiveIngredientListResponse(BaseModel):
+    items: list[EffectiveIngredientResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class CanonicalIngredientCreateRequest(BaseModel):
     canonical_id: str = Field(min_length=2, max_length=64)
     display_name: str = Field(min_length=1, max_length=120)
@@ -155,6 +181,7 @@ class AdminDashboardSummaryResponse(BaseModel):
     ingredients_without_known_price: int
     mapped_product_count: int
     unmapped_product_count: int
+    effective_ingredient_count: int
 
 
 class GroceryProductResponse(BaseModel):

@@ -235,3 +235,76 @@ def test_reassign_alias_requires_explicit_confirmation(logged_in_admin):
     )
     assert confirmed.status_code == 200
     assert confirmed.json()["canonical_id"] == "chili"
+
+
+# -- 2026-09-13 admin completion ticket: effective (built-in + admin) catalog --
+
+
+def test_effective_catalog_contains_built_in_and_admin_records(logged_in_admin):
+    client, cookies, csrf = logged_in_admin
+    _create_ingredient(client, cookies, csrf, canonical_id="test_bell_pepper", display_name="Bell Pepper")
+
+    # A real built-in id (app.domain.grocery_taxonomy) and the
+    # just-created admin one both appear in ONE effective list, reusing
+    # the same merge get_merged_vocabulary already performs for the
+    # live app -- never a second, parallel taxonomy. Located via search
+    # rather than assuming either lands on page 1 of the unfiltered,
+    # alphabetically-sorted ~293-item list.
+    admin_search = client.get("/api/admin/catalog", params={"q": "test_bell_pepper"}, cookies=cookies)
+    assert admin_search.status_code == 200
+    assert admin_search.json()["items"][0]["source"] == "admin"
+
+    built_in_search = client.get("/api/admin/catalog", params={"q": "onion"}, cookies=cookies)
+    onion = next(item for item in built_in_search.json()["items"] if item["canonical_id"] == "onion")
+    assert onion["source"] == "built_in"
+
+    unfiltered = client.get("/api/admin/catalog", params={"page_size": 100}, cookies=cookies)
+    assert unfiltered.json()["total"] > 250  # the full built-in taxonomy (~292) plus the admin row
+
+
+def test_effective_catalog_search_finds_built_in_and_admin_records_separately(logged_in_admin):
+    client, cookies, csrf = logged_in_admin
+    _create_ingredient(client, cookies, csrf, canonical_id="test_bell_pepper", display_name="Bell Pepper")
+
+    built_in_search = client.get("/api/admin/catalog", params={"q": "onion"}, cookies=cookies)
+    assert built_in_search.status_code == 200
+    built_in_ids = {item["canonical_id"] for item in built_in_search.json()["items"]}
+    assert "onion" in built_in_ids
+
+    admin_search = client.get("/api/admin/catalog", params={"q": "test_bell_pepper"}, cookies=cookies)
+    admin_ids = {item["canonical_id"] for item in admin_search.json()["items"]}
+    assert admin_ids == {"test_bell_pepper"}
+
+    no_match = client.get("/api/admin/catalog", params={"q": "nonexistent-xyz-catalog"}, cookies=cookies)
+    assert no_match.json()["items"] == []
+
+
+def test_effective_catalog_reports_price_status_for_a_built_in_ingredient(logged_in_admin):
+    client, cookies, csrf = logged_in_admin
+    # "onion" is a real built-in canonical id with no manual price
+    # entry yet -- confirms the merged catalog reflects live price
+    # status for built-ins too, not only admin-created ingredients.
+    before = client.get("/api/admin/catalog", params={"q": "onion"}, cookies=cookies).json()
+    onion_before = next(item for item in before["items"] if item["canonical_id"] == "onion")
+
+    client.post(
+        "/api/admin/ingredients/onion/prices",
+        json={
+            "normalized_unit": "g",
+            "display_name": "Onion",
+            "normalized_price_per_unit": 0.01,
+            "provenance_note": "test",
+        },
+        cookies=cookies,
+        headers=admin_headers(csrf),
+    )
+
+    after = client.get("/api/admin/catalog", params={"q": "onion"}, cookies=cookies).json()
+    onion_after = next(item for item in after["items"] if item["canonical_id"] == "onion")
+    assert onion_before["has_manual_price"] is False
+    assert onion_after["has_manual_price"] is True
+
+
+def test_effective_catalog_requires_authentication(admin_client):
+    response = admin_client.get("/api/admin/catalog")
+    assert response.status_code == 401

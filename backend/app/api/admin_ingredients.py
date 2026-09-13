@@ -12,19 +12,38 @@ from fastapi import APIRouter, Depends, Query
 from app.admin.deps import get_admin_audit_repository, get_admin_ingredient_repository, require_admin_session, require_csrf
 from app.admin.errors import AdminConflictError, AdminNotFoundError
 from app.repositories.admin_audit_repository import AdminAuditRepository
-from app.repositories.admin_ingredient_repository import AdminIngredientRepository, CanonicalIngredientRecord, IngredientAliasRecord
+from app.repositories.admin_ingredient_repository import (
+    AdminIngredientRepository,
+    CanonicalIngredientRecord,
+    EffectiveCatalogRecord,
+    IngredientAliasRecord,
+)
 from app.repositories.admin_session_repository import AdminSessionRecord
 from app.schemas.admin import (
     CanonicalIngredientCreateRequest,
     CanonicalIngredientListResponse,
     CanonicalIngredientResponse,
     CanonicalIngredientUpdateRequest,
+    EffectiveIngredientListResponse,
+    EffectiveIngredientResponse,
     IngredientAliasCreateRequest,
     IngredientAliasReassignRequest,
     IngredientAliasResponse,
 )
 
 router = APIRouter()
+
+
+def _to_effective_response(record: EffectiveCatalogRecord) -> EffectiveIngredientResponse:
+    return EffectiveIngredientResponse(
+        canonical_id=record.canonical_id,
+        display_name=record.display_name,
+        source=record.source,
+        status=record.status,
+        alias_count=record.alias_count,
+        has_manual_price=record.has_manual_price,
+        has_reference_price=record.has_reference_price,
+    )
 
 
 def _to_ingredient_response(record: CanonicalIngredientRecord) -> CanonicalIngredientResponse:
@@ -51,6 +70,26 @@ def _to_alias_response(record: IngredientAliasRecord) -> IngredientAliasResponse
         active=record.active,
         updated_at=record.updated_at,
         updated_by=record.updated_by,
+    )
+
+
+@router.get("/admin/catalog", response_model=EffectiveIngredientListResponse)
+def list_effective_catalog(
+    q: str | None = Query(default=None, max_length=120),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    _session: AdminSessionRecord = Depends(require_admin_session),
+    repo: AdminIngredientRepository = Depends(get_admin_ingredient_repository),
+) -> EffectiveIngredientListResponse:
+    # 2026-09-13 admin completion ticket: the EFFECTIVE catalog (built-in
+    # + admin-managed merged), reusing the exact same merge the live app
+    # resolves against (get_merged_vocabulary) -- never a second,
+    # parallel taxonomy. GET /admin/ingredients below remains the
+    # admin-DB-only CRUD surface, unchanged, for the existing
+    # create/edit/alias/price management flows.
+    items, total = repo.list_effective_catalog(q=q, page=page, page_size=page_size)
+    return EffectiveIngredientListResponse(
+        items=[_to_effective_response(i) for i in items], total=total, page=page, page_size=page_size
     )
 
 

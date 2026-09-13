@@ -32,6 +32,7 @@ def get_dashboard_summary(
         ingredients_without_known_price=summary.ingredients_without_known_price,
         mapped_product_count=summary.mapped_product_count,
         unmapped_product_count=summary.unmapped_product_count,
+        effective_ingredient_count=summary.effective_ingredient_count,
     )
 
 
