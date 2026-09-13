@@ -818,21 +818,29 @@ class AgentOrchestrator:
 
     def _closest_alternatives(self, state: AgentState) -> list[CandidateEvaluation]:
         # 2026-09-13 correction (architect review): filter to
-        # FLEXIBLE-ONLY rejections BEFORE truncating to
-        # MAX_FINAL_RECOMMENDATIONS -- previously this truncated first
-        # and let app.api.recommend_mapping's own defense-in-depth
-        # filter (_is_never_relax_violation) remove true hard
-        # violations (excluded ingredient, strict cuisine mismatch,
-        # invalid/unusable data, disallowed Hard difficulty) AFTER the
-        # slots were already spent, so a batch of mostly hard-rejected
-        # candidates could starve out several genuinely valid time/
-        # budget-only alternatives sitting further down the evaluated
-        # list. A candidate is eligible here only when it failed
-        # hard_constraint_pass, has at least one rejection reason, and
-        # EVERY reason belongs to the shared FLEXIBLE_REJECTION_REASONS
-        # set (app.domain.models) -- the same set
-        # app.api.recommend_mapping._is_never_relax_violation checks,
-        # which remains in place unchanged as defense in depth.
+        # FLEXIBLE-ONLY rejections -- previously this truncated to
+        # MAX_FINAL_RECOMMENDATIONS FIRST and let app.api.recommend_mapping's
+        # own defense-in-depth filter (_is_never_relax_violation) remove
+        # true hard violations (excluded ingredient, strict cuisine
+        # mismatch, invalid/unusable data, disallowed Hard difficulty)
+        # AFTER the slots were already spent, so a batch of mostly
+        # hard-rejected candidates could starve out several genuinely
+        # valid time/budget-only alternatives sitting further down the
+        # evaluated list. A candidate is eligible here only when it
+        # failed hard_constraint_pass, has at least one rejection
+        # reason, and EVERY reason belongs to the shared
+        # FLEXIBLE_REJECTION_REASONS set (app.domain.models) -- the
+        # same set app.api.recommend_mapping._is_never_relax_violation
+        # checks, which remains in place unchanged as defense in depth.
+        #
+        # 2026-09-13 time-preference-visibility fix: no longer truncated
+        # to MAX_FINAL_RECOMMENDATIONS at all -- time is a SOFT
+        # preference for visibility (ticket), so a candidate rejected
+        # only for exceeding the selected time must not additionally be
+        # hidden by an arbitrary "top 3 alternatives" slot limit. The
+        # list is naturally bounded by MAX_EVALUATED_CANDIDATES (20,
+        # unchanged) -- the same already-fetched, already-evaluated
+        # pool this run produced, never a new/larger search.
         rejected = [
             c
             for c in state.evaluated_candidates
@@ -841,7 +849,7 @@ class AgentOrchestrator:
             and all(reason in FLEXIBLE_REJECTION_REASONS for reason in c.rejection_reasons)
         ]
         rejected.sort(key=lambda c: (len(c.rejection_reasons), -c.pantry_coverage))
-        return rejected[:MAX_FINAL_RECOMMENDATIONS]
+        return rejected
 
     def _higher_match_time_excluded(
         self, state: AgentState, shown: list[CandidateEvaluation]
@@ -947,11 +955,19 @@ class AgentOrchestrator:
             # still gates final display) now top up the same bounded
             # slate instead of being discarded whenever at least one
             # feasible recipe already exists.
-            closest_alternatives = list(non_anchor_feasible[:MAX_FINAL_RECOMMENDATIONS])
-            if len(closest_alternatives) < MAX_FINAL_RECOMMENDATIONS:
-                already_shown = {c.recipe_id for c in recommendations + additional_options + closest_alternatives}
-                extra = [c for c in self._closest_alternatives(state) if c.recipe_id not in already_shown]
-                closest_alternatives += extra[: MAX_FINAL_RECOMMENDATIONS - len(closest_alternatives)]
+            # 2026-09-13 time-preference-visibility fix: non-anchor
+            # feasible candidates still fill first (unchanged
+            # precedence/ordering), but flexible-only-rejected
+            # candidates (e.g. over the selected time) are no longer
+            # capped to top up only a handful of remaining slots -- ALL
+            # of them are appended, deduped. Selecting a longer time
+            # mostly just moves a candidate from here into
+            # recommendations/additional_options above, rather than
+            # suddenly revealing recipes that were silently hidden here.
+            closest_alternatives = list(non_anchor_feasible)
+            already_shown = {c.recipe_id for c in recommendations + additional_options + closest_alternatives}
+            extra = [c for c in self._closest_alternatives(state) if c.recipe_id not in already_shown]
+            closest_alternatives += extra
         else:
             closest_alternatives = self._closest_alternatives(state)
         higher_match_time_excluded, higher_match_count, higher_match_min_time = self._higher_match_time_excluded(
