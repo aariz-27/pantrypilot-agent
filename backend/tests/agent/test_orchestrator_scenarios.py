@@ -989,10 +989,17 @@ async def test_fully_unresolved_pantry_stops_immediately_without_fabricating_a_c
     app.domain.grocery_taxonomy before writing this test, per the
     ticket's own "if beetroot is now canonical, choose another
     genuinely unknown string" instruction -- beetroot now resolves).
-    A pantry containing only unresolved input must stop immediately,
-    before ever calling the LLM, rather than guessing an unrelated
-    canonical ingredient or letting the loop proceed with an empty
-    canonical pantry."""
+
+    2026-09-13 hotfix update ("generic free-text must always reach
+    recipe search"): a pantry item that resolves to nothing better than
+    PROVIDER_DIRECT is no longer pre-emptively blocked by Python before
+    the LLM ever runs (that was the exact production bug this hotfix
+    fixes) -- it is now a valid, ungrounded search anchor, and it is
+    the LLM's own judgement (DEC-005: the LLM owns search strategy,
+    including whether to stop) that decides the search is not worth
+    attempting with no provider configured. This still proves the
+    important invariant: no canonical id is ever fabricated for
+    "kohlrabi", and no candidate/recipe content is invented."""
 
     from app.domain.grocery_taxonomy import CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES
     from app.domain.ingredient_normalizer import normalize_ingredient_name
@@ -1000,15 +1007,18 @@ async def test_fully_unresolved_pantry_stops_immediately_without_fabricating_a_c
     probe = normalize_ingredient_name("kohlrabi", CANONICAL_GROCERY_INGREDIENTS, GROCERY_INGREDIENT_ALIASES)
     assert probe.canonical_id is None, "test assumption violated: 'kohlrabi' is no longer unresolved -- pick another word"
 
-    llm = FakeLLMProvider([])  # must never be called
+    llm = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
     orch = AgentOrchestrator(llm, {}, PriceRepository(price_db))
 
     result = await orch.run(_base_request(pantry_raw=["kohlrabi"]))
 
     assert result.status == "no_feasible_match"
     assert result.stop_reason == "input_makes_search_impossible"
+    assert result.pantry_unresolved == []  # preserved as a search anchor, not reported as unrecognized
+    assert not result.recommendations
+    assert not result.closest_alternatives
     assert result.search_attempts == 0
-    assert llm.call_count == 0
+    assert llm.call_count == 1  # the LLM itself chose to stop -- Python never fabricated the decision
     assert result.closest_alternatives == []
 
 
@@ -2686,6 +2696,53 @@ async def test_regression_chicken_single_ingredient_no_forced_narrowing(price_db
     assert len(result.recommendations) == 1
 
 
+async def test_focused_3_orchestrator_chicken_with_empty_catalogue_still_reaches_recipe_search(price_db):
+    # 2026-09-13 hotfix follow-up: production confirmed the SAME
+    # symptom recurs when RecipeAPI.io's catalogue returns literally
+    # ZERO candidates for "chicken" (not just narrower ones) and the
+    # LLM declines to correct an already-valid word -- must still
+    # reach /recipes with the user's own term.
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Roast Chicken",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 whole")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={},  # genuinely empty -- no candidates at all
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"]))
+
+    assert result.status == "completed"
+    assert provider.search_calls[0].query_ingredients == ["chicken"]
+    assert len(result.recommendations) == 1
+
+
+async def test_focused_4_orchestrator_fish_with_empty_catalogue_still_reaches_recipe_search(price_db):
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Grilled Fish",
+        ingredients=[RecipeIngredient(raw_name="Fish", raw_measure="1 fillet")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={},
+    )
+    llm = FakeLLMProvider([_search_action(["fish"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["fish"]))
+
+    assert result.status == "completed"
+    assert provider.search_calls[0].query_ingredients == ["fish"]
+    assert len(result.recommendations) == 1
+
+
 async def test_regression_broad_term_with_only_narrower_catalogue_candidates_still_reaches_recipe_search(price_db):
     # 2026-09-13 hotfix (generic-provider-direct-fallback): the
     # confirmed production bug. Live production logs showed
@@ -2772,10 +2829,17 @@ async def test_zero_result_diagnostics_distinguish_resolution_block_from_provide
     # without needing any new state-exposure machinery.
     from app.domain.models import RejectionReason
 
-    # A: ingredient resolution itself prevented recipe search --
-    # "chik" resolves AMBIGUOUS with no catalogue/LLM available, so no
-    # search call is ever made at all.
-    provider_a = FakeRecipeProvider("recipeapi_io", searches=[])
+    # A: ingredient resolution itself prevented recipe search -- "chik"
+    # resolves AMBIGUOUS (a genuine catalogue tie between two equally
+    # plausible candidates), so no search call is ever made at all.
+    # This is deliberately NOT the same as a merely-unresolved term
+    # (2026-09-13 hotfix: those now fall back to PROVIDER_DIRECT and DO
+    # reach search) -- AMBIGUOUS is the one case Python still blocks.
+    provider_a = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[],
+        ingredient_catalogue={"chik": [ProviderIngredient("1", "chik", "poultry"), ProviderIngredient("2", "Chik", "poultry")]},
+    )
     llm_a = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
     result_a = await AgentOrchestrator(llm_a, {"recipeapi_io": provider_a}, PriceRepository(price_db)).run(
         _base_request(pantry_raw=["chik"])
@@ -2842,9 +2906,17 @@ async def test_regression_typo_chiken_brest_is_llm_corrected_and_grounded_before
 
 async def test_regression_ambiguous_typo_chik_is_not_silently_narrowed(price_db):
     # Ticket section 22: "chik" must not silently become one specific
-    # chicken cut -- with no safe local/catalogue/LLM resolution, it
-    # stays fully unresolved and simply cannot be chosen as an anchor.
-    provider = FakeRecipeProvider("recipeapi_io", searches=[])
+    # chicken cut. Genuine ambiguity (two equally plausible catalogue
+    # candidates tied at the same safe-match tier) still fully blocks
+    # search end-to-end through the orchestrator -- distinct from the
+    # 2026-09-13 hotfix's PROVIDER_DIRECT fallback, which only applies
+    # when nothing else grounds the term (zero or non-tied candidates),
+    # never when the catalogue itself reports a genuine tie.
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[],
+        ingredient_catalogue={"chik": [ProviderIngredient("1", "chik", "poultry"), ProviderIngredient("2", "Chik", "poultry")]},
+    )
     llm = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
     orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
 
