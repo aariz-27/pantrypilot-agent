@@ -272,10 +272,29 @@ async def resolve_pantry_ingredient(
                     IngredientResolutionState.LLM_CORRECTED_AND_GROUNDED,
                 )
             # LLM proposal did not ground against anything real -- never
-            # accepted (falls through to UNRESOLVED below), never used
-            # even as free text (an ungrounded LLM guess is exactly the
-            # "fabricated correction" ticket section 35 forbids).
+            # accepted (never used even as free text -- an ungrounded
+            # LLM GUESS is exactly the "fabricated correction" ticket
+            # section 35 forbids). Falls through to step 8 below, which
+            # preserves the user's own ORIGINAL term instead -- a
+            # different thing entirely from trusting the LLM's guess.
 
-    # Step 8: nothing grounded it -- structured unresolved state,
-    # identical to today's behavior for input nothing can explain.
-    return PantryTermResolution(raw_text, None, None, IngredientResolutionState.UNRESOLVED)
+    # Step 8 (2026-09-13 hotfix, "generic free-text must always reach
+    # recipe search"): nothing IMPROVED the term -- no local match, no
+    # safe catalogue mapping, no grounded LLM correction. Previously
+    # this returned fully UNRESOLVED, which silently skipped recipe
+    # search entirely (confirmed in production: /ingredients -> LLM ->
+    # /recommend 200, with NO /recipes call, for both "chicken" and
+    # "fish"). `cleaned` is already confirmed non-empty (checked above)
+    # and this is reached only when the term was not AMBIGUOUS (that
+    # returns separately, earlier, and is NOT overridden here -- an
+    # ambiguous catalogue tie is a different problem: too MANY equally
+    # plausible identities, not zero). A term that survives this far
+    # with no better grounding is preserved AS THE USER TYPED IT
+    # (humanized only) -- never invented, never narrowed to a
+    # candidate name -- and handed to the provider directly. Python no
+    # longer unilaterally decides an ordinary typed word is unsearchable;
+    # RecipeAPI.io and PantryPilot's own deterministic evaluation are
+    # what actually decide whether it produces anything usable.
+    return PantryTermResolution(
+        raw_text, None, provider_resolved.provider_term, IngredientResolutionState.PROVIDER_DIRECT
+    )

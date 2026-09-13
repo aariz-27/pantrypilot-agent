@@ -233,13 +233,50 @@ async def test_ambiguous_catalogue_result_never_silently_narrowed():
     assert resolution.state == IngredientResolutionState.AMBIGUOUS
 
 
-async def test_unresolvable_garbage_stays_unresolved_without_llm():
+# -- 2026-09-13 hotfix: "generic free-text must always reach recipe search" -
+
+
+async def test_focused_1_empty_catalogue_chicken_falls_back_to_provider_direct():
+    # Production evidence: GET /ingredients?search=chicken -> 200 (with
+    # zero candidates this time), Anthropic -> 200, POST /recommend ->
+    # 200, but NO /recipes call. Catalogue queried and genuinely empty
+    # (had_candidates=False) must still preserve "chicken" as a usable
+    # search term, not declare it UNRESOLVED.
+    resolution = await resolve_pantry_ingredient(
+        "chicken", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES, catalogue_lookup=_FakeCatalogue({})
+    )
+    assert resolution.canonical_id is None
+    assert resolution.search_anchor_identity == "chicken"
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
+
+
+async def test_focused_2_llm_declines_to_correct_original_term_still_returned_as_provider_direct():
+    # The LLM is available and IS asked (catalogue was empty), but
+    # correctly declines to "fix" an already-valid word (no confident
+    # correction) -- the ORIGINAL term must still reach the provider.
+    llm = _FakeLLM({})  # no correction for any input
+    resolution = await resolve_pantry_ingredient(
+        "chicken", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES,
+        catalogue_lookup=_FakeCatalogue({}), llm_provider=llm,
+    )
+    assert llm.requests != []  # confirms the LLM really was consulted first
+    assert resolution.canonical_id is None
+    assert resolution.search_anchor_identity == "chicken"
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
+
+
+async def test_unresolvable_text_still_falls_back_to_provider_direct_without_llm():
+    # 2026-09-13 hotfix ("generic free-text must always reach recipe
+    # search"): nothing grounds this term better, but it is still
+    # non-empty user-typed text -- preserved as PROVIDER_DIRECT rather
+    # than declared UNRESOLVED, so recipe search is never silently
+    # skipped. Never fabricated into a canonical id or a candidate name.
     resolution = await resolve_pantry_ingredient(
         "zzznotarealthing", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES, catalogue_lookup=_FakeCatalogue({})
     )
     assert resolution.canonical_id is None
-    assert resolution.search_anchor_identity is None
-    assert resolution.state == IngredientResolutionState.UNRESOLVED
+    assert resolution.search_anchor_identity == "zzznotarealthing"
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
 
 
 async def test_typo_correction_grounds_to_local_canonical_id():
@@ -266,16 +303,20 @@ async def test_typo_correction_grounds_via_catalogue_when_no_local_id():
 
 
 async def test_ungrounded_llm_proposal_is_never_accepted():
-    # Ticket section 35: if grounding fails, do not accept the
-    # fabricated correction -- must fall through to UNRESOLVED.
+    # Ticket section 35: if grounding fails, do not accept the LLM's
+    # fabricated correction ("madeupingredient" must never appear
+    # anywhere in the result). Falls back to the user's own ORIGINAL
+    # text as PROVIDER_DIRECT instead (2026-09-13 hotfix) -- a
+    # different thing entirely from trusting the LLM's guess.
     llm = _FakeLLM({"asdkjhasd": "madeupingredient"})
     resolution = await resolve_pantry_ingredient(
         "asdkjhasd", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES,
         catalogue_lookup=_FakeCatalogue({}), llm_provider=llm,
     )
     assert resolution.canonical_id is None
-    assert resolution.search_anchor_identity is None
-    assert resolution.state == IngredientResolutionState.UNRESOLVED
+    assert resolution.search_anchor_identity == "asdkjhasd"
+    assert resolution.search_anchor_identity != "madeupingredient"
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
 
 
 async def test_llm_not_called_when_catalogue_already_grounded_it():
@@ -298,11 +339,15 @@ async def test_no_llm_provider_still_resolves_via_local_and_catalogue():
     assert resolution.search_anchor_identity == "Chicken"
 
 
-async def test_no_llm_provider_leaves_a_true_typo_unresolved_not_broken():
+async def test_no_llm_provider_still_falls_back_to_provider_direct_for_a_true_typo():
+    # Without an LLM available to correct it, "chiken brest" is still
+    # preserved as PROVIDER_DIRECT (verbatim, uncorrected) rather than
+    # UNRESOLVED -- ticket section 24's fallback-without-LLM guarantee,
+    # extended by the 2026-09-13 hotfix so the pipeline never dead-ends.
     resolution = await resolve_pantry_ingredient(
         "chiken brest", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES,
         catalogue_lookup=_FakeCatalogue({}), llm_provider=None,
     )
     assert resolution.canonical_id is None
-    assert resolution.search_anchor_identity is None
-    assert resolution.state == IngredientResolutionState.UNRESOLVED
+    assert resolution.search_anchor_identity == "chiken brest"
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
