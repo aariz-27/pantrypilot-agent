@@ -271,6 +271,7 @@ def build_decision_payload(state: AgentState) -> dict:
     return {
         "state_summary": {
             "pantry_canonical": sorted(state.pantry_canonical),
+            "pantry_free_text": sorted(state.pantry_free_text.keys()),
             "search_attempts_used": state.search_attempts,
             "search_attempts_remaining": max(0, state.max_search_attempts - state.search_attempts),
             "candidates_evaluated_total": len(state.evaluated_candidates),
