@@ -456,8 +456,13 @@ function ResultsView({
       {hasSeparateClosestAlternatives ? (
         <div className="card other-options-panel">
           <div className="other-options-panel__intro">
-            <h3>Other options</h3>
-            <p>These use a different main ingredient than what you searched for.</p>
+            <h3>Other good options</h3>
+            {/* 2026-09-13 recommendation-behavior fix: this section no
+                longer holds only different-main-ingredient results --
+                it also surfaces grounded, relevant recipes that miss a
+                soft preference like time or budget (each card explains
+                why via its own deviation-reasons line). */}
+            <p>Also worth considering -- these miss one or more of your preferences, shown below each card.</p>
           </div>
           <RecipeGrid cards={closestAlternatives} onOpen={onOpen} isSaved={isSaved} />
         </div>

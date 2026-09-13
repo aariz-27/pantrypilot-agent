@@ -130,15 +130,28 @@ class Settings(BaseSettings):
     # request or unbounded search effort, not a claim about what any
     # specific plan actually supports.
     #
-    # recipeapi_page_size default of 25 is evidence-based, not guessed:
-    # confirmed live against the active RecipeAPI.io trial (2026-09-13,
-    # one bounded GET /recipes call) that per_page=25 is accepted and
-    # actually returns 25 items (meta.per_page echoed back as 25, not
-    # silently capped). Reduce to 10 (the confirmed free-plan ceiling)
-    # after the trial expires -- see docs/admin/ADMIN_DASHBOARD.md's
-    # sibling recommendation-depth doc for the exact rollback steps.
+    # 2026-09-13 recommendation-behavior fix: reduced from 25 back to
+    # 10 (the confirmed free-plan ceiling -- see the superseded comment
+    # this replaces). 25 was live-confirmed accepted by the trial
+    # endpoint, but it silently caused a real product bug: page 1 alone
+    # (25 raw items) already exhausts the ENTIRE MAX_EVALUATED_CANDIDATES
+    # cap (20) in a single search attempt (confirmed by inspection of
+    # AgentOrchestrator._run_attempt: `to_fetch = new_items[:capacity]`
+    # then `remaining_candidate_capacity()` immediately hits 0), so
+    # page 2 was never fetched and the entire candidate pool was
+    # whatever RecipeAPI.io's own default ordering put on page 1 -- a
+    # provider-controlled, not time/relevance-sorted, sample. This is
+    # what produced the confirmed live "15 min -> 3, 30 min -> 1,
+    # 45 min -> 6" non-monotonic pattern for generic "chicken" (a fixed,
+    # small, arbitrary first page filtered by an increasingly narrow
+    # time cutoff) and contributed to "Any cuisine" results skewing
+    # toward whatever cuisine that first page happened to favor. 10
+    # leaves capacity for page 1 + page 2 (20 items) before the cap is
+    # reached, giving the deterministic ranker a broader grounded pool
+    # to work with -- no other caps changed (MAX_EVALUATED_CANDIDATES
+    # stays 20, MAX_SEARCH_ATTEMPTS stays 3).
     recipeapi_page_size: int = Field(
-        default=25, ge=1, le=100, validation_alias="PANTRYPILOT_RECIPEAPI_PAGE_SIZE"
+        default=10, ge=1, le=100, validation_alias="PANTRYPILOT_RECIPEAPI_PAGE_SIZE"
     )
     # How many strong, same-anchor, grounded feasible candidates the
     # agent should make a reasonable effort to find before treating the

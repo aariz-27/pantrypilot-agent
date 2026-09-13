@@ -197,7 +197,10 @@ def test_closest_alternative_reports_time_deviation():
         response = client.post("/api/recommend", json=VALID_REQUEST)
         card = response.json()["closest_alternatives"][0]
         assert card["is_exact_match"] is False
-        assert card["deviation_reasons"] == ["12 min over your target"]
+        # 2026-09-13 recommendation-behavior fix: this fixture's own
+        # scaling (original_servings=2, requested_servings=4) now also
+        # surfaces an honest servings label alongside the time one.
+        assert card["deviation_reasons"] == ["12 min over your target", "Serves 2; can be scaled"]
     finally:
         _clear()
 
