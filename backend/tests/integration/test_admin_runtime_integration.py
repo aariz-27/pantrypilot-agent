@@ -24,7 +24,7 @@ def _settings(db_path: str) -> Settings:
         price_db_path=db_path,
         admin_username="founder",
         admin_password_hash=hash_password("test-password-value"),
-        admin_session_secret="test-session-secret",
+        admin_session_secret="test-session-secret-thats-long-enough-for-validation",
     )
 
 

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
+from app.admin.security import hash_password
+from app.config import Settings, get_settings
+from app.main import app as fastapi_app
 from tests.admin.conftest import ADMIN_PASSWORD, ADMIN_USERNAME, admin_headers
 
 
@@ -13,6 +18,30 @@ def test_login_success_sets_httponly_cookie_and_returns_csrf_token(admin_client)
     set_cookie_header = response.headers.get("set-cookie", "")
     assert "HttpOnly" in set_cookie_header
     assert "samesite=strict" in set_cookie_header.lower()
+
+
+def test_login_in_production_sets_secure_cookie(admin_db_path):
+    # 2026-09-13 security hardening patch: settings.environment ==
+    # "production" is now a validated, closed value (never a silent
+    # typo) -- this proves the Secure flag actually follows it end to
+    # end through a real login response.
+    settings = Settings(
+        _env_file=None,
+        price_db_path=admin_db_path,
+        admin_username=ADMIN_USERNAME,
+        admin_password_hash=hash_password(ADMIN_PASSWORD),
+        admin_session_secret="a-production-test-session-secret-thats-long-enough",
+        environment="production",
+    )
+    fastapi_app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        client = TestClient(fastapi_app)
+        response = client.post("/api/admin/auth/login", json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD})
+        assert response.status_code == 200
+        set_cookie_header = response.headers.get("set-cookie", "")
+        assert "secure" in set_cookie_header.lower()
+    finally:
+        fastapi_app.dependency_overrides.clear()
 
 
 def test_login_invalid_password_returns_generic_401(admin_client):

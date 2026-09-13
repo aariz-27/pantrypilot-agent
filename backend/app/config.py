@@ -23,6 +23,20 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 # out of scope here.
 _ORIGIN_PATTERN = re.compile(r"^https?://[a-zA-Z0-9.\-]+(:\d+)?$")
 
+# 2026-09-13 security hardening patch: the only known, supported
+# deployment environments. app.api.admin_auth's Secure-cookie decision
+# is a plain `settings.environment == "production"` string comparison
+# -- an unconstrained str field meant a typo (e.g. "Production", "prod")
+# would silently and invisibly compare False, disabling Secure on a
+# real production deployment instead of failing loudly. Constraining
+# this at settings-validation time turns that into a startup failure.
+_VALID_ENVIRONMENTS = frozenset({"development", "test", "production"})
+
+# Minimum admin session secret length (ticket: "require at least 32
+# characters"). Short/blank secrets make the session cookie's HMAC
+# signature (app.api.admin_auth) far easier to brute-force/forge.
+_MIN_ADMIN_SESSION_SECRET_LENGTH = 32
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -39,6 +53,17 @@ class Settings(BaseSettings):
     )
 
     environment: str = "development"
+
+    @field_validator("environment")
+    @classmethod
+    def _validate_environment(cls, value: str) -> str:
+        if value not in _VALID_ENVIRONMENTS:
+            raise ValueError(
+                f"ENVIRONMENT must be one of {sorted(_VALID_ENVIRONMENTS)}, got {value!r} -- "
+                "an unrecognized value must never be silently treated as development "
+                "(this previously would have disabled the Secure cookie flag in production)"
+            )
+        return value
 
     anthropic_api_key: SecretStr | None = None
     pantrypilot_llm_model: str | None = None
@@ -119,6 +144,27 @@ class Settings(BaseSettings):
     admin_session_secret: SecretStr | None = Field(default=None, validation_alias="PANTRYPILOT_ADMIN_SESSION_SECRET")
     admin_session_ttl_minutes: int = 60
     rate_limit_admin_login: str = "5/minute"
+
+    @field_validator("admin_session_secret")
+    @classmethod
+    def _validate_admin_session_secret_strength(cls, value: SecretStr | None) -> SecretStr | None:
+        # 2026-09-13 security hardening patch: whenever a session
+        # secret is actually supplied (admin auth is being enabled),
+        # it must be reasonably strong. Never auto-generated here, never
+        # logged, never echoed -- only pass/fail plus a length count,
+        # which reveals nothing about the secret's actual content.
+        if value is None:
+            return value
+        secret = value.get_secret_value().strip()
+        if not secret:
+            raise ValueError("PANTRYPILOT_ADMIN_SESSION_SECRET must not be blank/whitespace-only")
+        if len(secret) < _MIN_ADMIN_SESSION_SECRET_LENGTH:
+            raise ValueError(
+                f"PANTRYPILOT_ADMIN_SESSION_SECRET must be at least {_MIN_ADMIN_SESSION_SECRET_LENGTH} "
+                "characters -- generate one with: "
+                "python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+            )
+        return value
 
     # Quota-aware recommendation depth (2026-09-13 trial-quota ticket).
     # Deliberately NOT hardcoded to the free-plan defaults still baked
