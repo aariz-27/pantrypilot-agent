@@ -12,6 +12,7 @@ independent of every field defined in this module.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 
 from app.agent.state import MAX_FINAL_RECOMMENDATIONS, AgentState
@@ -112,22 +113,31 @@ def candidate_contains_anchor(
        always-correct signal.
 
     2. Grounded relevance fallback (PR #15 sixth correction pass,
-       2026-09-08, live-audited): RecipeAPI.io's own ingredient
-       taxonomy is sometimes coarser than a specific pantry ingredient
-       -- e.g. "Ankara Pan-fried Lamb Cubes" and "Cop Shish Lamb Cubes
-       Grilled" both genuinely are lamb-cube recipes by name, but their
-       own ingredient records use "Lamb" and "Lamb leg" respectively,
-       neither of which is "Lamb cubes". A candidate with no exact
-       canonical match is still counted as anchor-relevant when the
-       recipe's own TITLE contains the anchor's human-readable phrase
-       (canonical id with underscores replaced by spaces, e.g.
-       "lamb_cubes" -> "lamb cubes"), case-insensitively. This is a
-       grounded, deterministic, generic string check against the
-       recipe's own real title -- never free-form LLM semantic scoring,
-       never an ingredient-specific branch, and it cannot make a
-       generic "lamb" recipe count as a lamb_cubes match merely because
-       it contains lamb (the title itself must contain the specific
-       phrase "lamb cubes").
+       2026-09-08, live-audited, broadened 2026-09-13, made boundary-
+       safe the same day): RecipeAPI.io's own ingredient taxonomy is
+       sometimes coarser than a specific pantry ingredient -- e.g.
+       "Ankara Pan-fried Lamb Cubes" and "Cop Shish Lamb Cubes Grilled"
+       both genuinely are lamb-cube recipes by name, but their own
+       ingredient records use "Lamb" and "Lamb leg" respectively,
+       neither of which is "Lamb cubes"; likewise a generic/free-text
+       anchor such as "chicken" legitimately retrieves recipes whose
+       provider INGREDIENT text is more specific, e.g. "chicken
+       breast", "chicken thigh", or "chicken drumstick". A candidate
+       with no exact canonical match is still counted as anchor-
+       relevant when the anchor's human-readable phrase (canonical id
+       with underscores replaced by spaces, e.g. "lamb_cubes" ->
+       "lamb cubes") appears as a whole word/phrase -- never a
+       fragment of a longer word -- in either a recipe INGREDIENT's raw
+       text or the recipe's own TITLE, case-insensitively (see
+       `_phrase_matches_as_whole_words`). This is a grounded,
+       deterministic, generic check -- never free-form LLM semantic
+       scoring, never an ingredient-specific branch -- and it cannot
+       make "eggplant" match "egg", "peanut" match "pea", or
+       "champagne" match "ham" (the phrase must be bounded by word
+       boundaries on both sides, not merely present as a substring),
+       nor can a generic "lamb" recipe count as a lamb_cubes match
+       merely because it contains lamb (the specific phrase "lamb
+       cubes" must itself appear as whole words).
 
     Neither branch ever changes ownership/matched/missing ingredients,
     cost, pantry coverage, or pricing -- those remain governed
@@ -142,8 +152,48 @@ def candidate_contains_anchor(
         return False
     if any(ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients):
         return True
-    anchor_phrase = anchor_canonical_id.replace("_", " ")
-    return anchor_phrase in (recipe.name or "").lower()
+
+    anchor_phrase = anchor_canonical_id.replace("_", " ").lower()
+
+    # Broad-search relevance only (search-relevance classification, not
+    # pantry ownership -- see docstring above): a generic/free-text
+    # anchor such as "chicken" may legitimately retrieve recipes whose
+    # provider ingredient text is more specific, e.g. "chicken breast",
+    # "chicken thigh", or "chicken drumstick". Word/phrase-boundary
+    # aware (2026-09-13 correction) so this can never fire on an
+    # unrelated word that merely CONTAINS the anchor as a substring
+    # (e.g. "egg" inside "eggplant", "pea" inside "peanut", "ham"
+    # inside "champagne"). Count those recipes as relevant without
+    # changing pantry ownership, missing-ingredient logic, coverage,
+    # cost, or pricing.
+    if any(_phrase_matches_as_whole_words(anchor_phrase, ing.raw_name) for ing in recipe.ingredients):
+        return True
+
+    return _phrase_matches_as_whole_words(anchor_phrase, recipe.name)
+
+
+def _phrase_matches_as_whole_words(phrase: str, text: str | None) -> bool:
+    """Deterministic, generic word/token-boundary-aware substring check
+    (2026-09-13 correction to candidate_contains_anchor's raw_name
+    branch above): true only when `phrase` appears in `text` bounded by
+    word boundaries on both sides -- never merely as a fragment inside
+    a longer word. For a multi-word `phrase` (e.g. "ground beef"), the
+    words must appear contiguously and in that order (e.g. "lean
+    ground beef" matches) -- this preserves phrase semantics for
+    multi-word anchors without any fuzzy/semantic matching, word-order
+    permutation, or ingredient-specific special-casing; it is a single
+    generic regex check applied identically to every anchor phrase.
+
+    `phrase` is always produced by candidate_contains_anchor itself
+    (already lowercased, alphanumeric-and-spaces only -- see
+    app.domain.ingredient_normalizer._clean, which every canonical id
+    and free-text anchor identity passes through), so `re.escape` here
+    is defensive rather than strictly load-bearing.
+    """
+
+    if not phrase or not text:
+        return False
+    return re.search(rf"\b{re.escape(phrase)}\b", text.lower()) is not None
 
 
 def compute_anchor_stats(
@@ -271,6 +321,7 @@ def build_decision_payload(state: AgentState) -> dict:
     return {
         "state_summary": {
             "pantry_canonical": sorted(state.pantry_canonical),
+            "pantry_free_text": sorted(state.pantry_free_text.keys()),
             "search_attempts_used": state.search_attempts,
             "search_attempts_remaining": max(0, state.max_search_attempts - state.search_attempts),
             "candidates_evaluated_total": len(state.evaluated_candidates),
