@@ -142,7 +142,18 @@ def candidate_contains_anchor(
         return False
     if any(ing.canonical_id == anchor_canonical_id for ing in recipe.ingredients):
         return True
-    anchor_phrase = anchor_canonical_id.replace("_", " ")
+
+    anchor_phrase = anchor_canonical_id.replace("_", " ").lower()
+
+    # Broad-search relevance only:
+    # a generic/free-text anchor such as "chicken" may legitimately
+    # retrieve recipes whose provider ingredient text is more specific,
+    # e.g. "chicken breast", "chicken thigh", or "chicken drumstick".
+    # Count those recipes as relevant without changing pantry ownership,
+    # missing-ingredient logic, coverage, cost, or pricing.
+    if any(anchor_phrase in (ing.raw_name or "").lower() for ing in recipe.ingredients):
+        return True
+
     return anchor_phrase in (recipe.name or "").lower()
 
 
