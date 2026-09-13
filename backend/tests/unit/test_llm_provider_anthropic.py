@@ -207,7 +207,7 @@ def test_api_key_never_appears_in_settings_repr():
 
 
 async def test_fake_provider_satisfies_the_llm_provider_protocol():
-    from app.integrations.llm_provider import LLMDecisionResponse, LLMProvider
+    from app.integrations.llm_provider import IngredientCorrectionResponse, LLMDecisionResponse, LLMProvider
 
     class FakeLLM:
         provider_name = "fake"
@@ -215,7 +215,91 @@ async def test_fake_provider_satisfies_the_llm_provider_protocol():
         async def decide(self, request: LLMDecisionRequest) -> LLMDecisionResponse:
             return LLMDecisionResponse(raw_action={"action_type": "stop", "stop": {"reason": "attempt_limit_reached"}}, model_name="fake")
 
+        async def propose_ingredient_correction(self, request):
+            return IngredientCorrectionResponse(proposed_name=None, model_name="fake")
+
     fake = FakeLLM()
     assert isinstance(fake, LLMProvider)
     result = await fake.decide(_request())
     assert result.model_name == "fake"
+
+
+# --- propose_ingredient_correction (2026-09-13 unified ingredient --------
+# resolution ticket, sections 10/23) -- a deliberately SEPARATE LLM
+# interaction from decide()/AgentAction, with its own tool schema and
+# system prompt (never SYSTEM_POLICY, never the agent's action schema).
+
+
+def _correction_request(raw_text: str = "chiken brest"):
+    from app.integrations.llm_provider import IngredientCorrectionRequest
+
+    return IngredientCorrectionRequest(raw_text=raw_text)
+
+
+async def test_confident_correction_is_returned_lowercased_and_stripped():
+    client = FakeAnthropicClient(
+        response=FakeResponse(
+            content=[
+                FakeToolUseBlock(
+                    input={"proposed_name": "  Chicken Breast  ", "confident": True},
+                    name="propose_ingredient_correction",
+                )
+            ]
+        )
+    )
+    provider = AnthropicLLMProvider(_settings(), client=client)
+
+    result = await provider.propose_ingredient_correction(_correction_request())
+
+    assert result.proposed_name == "chicken breast"
+    assert result.model_name == "claude-sonnet-5"
+
+
+async def test_unconfident_correction_returns_none_never_a_guess():
+    client = FakeAnthropicClient(
+        response=FakeResponse(
+            content=[
+                FakeToolUseBlock(input={"proposed_name": "anything", "confident": False}, name="propose_ingredient_correction")
+            ]
+        )
+    )
+    provider = AnthropicLLMProvider(_settings(), client=client)
+
+    result = await provider.propose_ingredient_correction(_correction_request())
+
+    assert result.proposed_name is None
+
+
+async def test_correction_uses_its_own_tool_and_prompt_never_the_agent_action_schema():
+    client = FakeAnthropicClient(
+        response=FakeResponse(
+            content=[FakeToolUseBlock(input={"proposed_name": "chicken breast", "confident": True}, name="propose_ingredient_correction")]
+        )
+    )
+    provider = AnthropicLLMProvider(_settings(), client=client)
+
+    await provider.propose_ingredient_correction(_correction_request("chiken brest"))
+
+    [call] = client.messages.calls
+    assert call["tools"][0]["name"] == "propose_ingredient_correction"
+    assert call["tool_choice"] == {"type": "tool", "name": "propose_ingredient_correction"}
+    assert call["system"] != "policy"  # never SYSTEM_POLICY / the request's own system_policy field
+    assert "chiken brest" in call["messages"][0]["content"]
+
+
+async def test_correction_empty_content_raises_malformed_response_error():
+    client = FakeAnthropicClient(response=FakeResponse(content=[]))
+    provider = AnthropicLLMProvider(_settings(), client=client)
+
+    with pytest.raises(LLMProviderMalformedResponseError):
+        await provider.propose_ingredient_correction(_correction_request())
+
+
+async def test_correction_wrong_tool_block_raises_malformed_response_error():
+    client = FakeAnthropicClient(
+        response=FakeResponse(content=[FakeToolUseBlock(input={"foo": "bar"}, name="some_other_tool")])
+    )
+    provider = AnthropicLLMProvider(_settings(), client=client)
+
+    with pytest.raises(LLMProviderMalformedResponseError):
+        await provider.propose_ingredient_correction(_correction_request())

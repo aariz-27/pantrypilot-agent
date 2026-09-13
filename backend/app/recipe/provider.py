@@ -80,6 +80,40 @@ PROVIDER_SEARCH_TERM_OVERRIDES: dict[str, str] = {
     "minced_beef": "ground beef",
 }
 
+# RecipeAPI.io's documented cuisine filter enum (2026-09-13 alignment
+# fix). This is the single canonical source of truth for which cuisine
+# values may be used for STRICT cuisine filtering -- both
+# app.schemas.recommend.RecommendRequest's request-level validation and
+# frontend/src/components/CuisineSelect.jsx's dropdown options must
+# match this set exactly (the frontend cannot import this Python
+# constant directly, so it is kept in sync manually; a test in each
+# stack pins both against this same 11-value list so any future drift
+# is caught immediately rather than silently).
+#
+# Deliberately NOT used to restrict non-strict `cuisine` values: DEC-003
+# approves "indian"/"pakistani"/"desi" as legitimate (non-strict)
+# cuisine_preference values that route a search to the separate
+# LocalCuratedRecipeProvider (app.agent.tools.APPROVED_LOCAL_CURATED_CUISINES)
+# -- a different mechanism this ticket does not touch. This set exists
+# only to stop a STRICT RecipeAPI.io cuisine filter from ever being set
+# to a value RecipeAPI.io cannot match, which previously produced a
+# silent, always-empty result set for cuisines like "Indian" or "Asian".
+SUPPORTED_STRICT_CUISINES: frozenset[str] = frozenset(
+    {
+        "american",
+        "chinese",
+        "french",
+        "greek",
+        "italian",
+        "japanese",
+        "mexican",
+        "portuguese",
+        "spanish",
+        "thai",
+        "turkish",
+    }
+)
+
 
 class SearchStrategy(BaseModel):
     """Provider-neutral search request.

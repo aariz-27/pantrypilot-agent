@@ -66,3 +66,17 @@ def test_dedupe_search_results_distinguishes_by_provider_too():
     b = _item(provider="local_curated", provider_recipe_id="1")
     deduped = dedupe_search_results([a, b])
     assert len(deduped) == 2
+
+
+def test_supported_strict_cuisines_matches_recipeapi_documented_enum():
+    from app.recipe.provider import SUPPORTED_STRICT_CUISINES
+
+    assert SUPPORTED_STRICT_CUISINES == frozenset(
+        {
+            "american", "chinese", "french", "greek", "italian", "japanese",
+            "mexican", "portuguese", "spanish", "thai", "turkish",
+        }
+    )
+    # Explicitly excluded (never silently invented as a supported value).
+    for unsupported in ("indian", "pakistani", "asian", "mediterranean", "desi"):
+        assert unsupported not in SUPPORTED_STRICT_CUISINES

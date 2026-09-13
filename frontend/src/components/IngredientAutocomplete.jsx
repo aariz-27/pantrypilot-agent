@@ -29,6 +29,13 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
     () => new Set(items.filter((item) => item.canonical_id).map((item) => item.canonical_id)),
     [items],
   )
+  // 2026-09-13 unified ingredient resolution ticket (section 4):
+  // normalized-duplicate prevention for free-text entries, mirroring
+  // existingCanonicalIds above for resolved ones.
+  const existingUnresolvedLabels = useMemo(
+    () => new Set(items.filter((item) => item.unresolved).map((item) => item.label.trim().toLowerCase())),
+    [items],
+  )
 
   useEffect(() => {
     const trimmed = debouncedQuery.trim()
@@ -112,9 +119,27 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
     setActiveIndex(-1)
   }
 
+  // 2026-09-13 unified ingredient resolution ticket (section 4):
+  // autocomplete is advisory, not mandatory -- the backend now performs
+  // its own local/provider-catalogue/typo-corrected grounding on
+  // whatever raw text is submitted (app.agent.ingredient_resolution),
+  // so this component's only job is to let the user commit what they
+  // actually typed, whether or not a matching suggestion exists.
+  const MAX_INGREDIENT_LENGTH = 80 // matches RecommendRequest's own per-ingredient bound
+
   function addUnresolved() {
     const trimmed = query.trim()
     if (!trimmed) return
+    if (trimmed.length > MAX_INGREDIENT_LENGTH) return
+    if (existingUnresolvedLabels.has(trimmed.toLowerCase())) {
+      // Already added -- just clear the input rather than silently
+      // duplicating or showing an error for a harmless repeat.
+      setQuery('')
+      setSuggestions([])
+      setOpen(false)
+      setActiveIndex(-1)
+      return
+    }
     onAdd({ id: `unresolved:${trimmed.toLowerCase()}`, label: trimmed, canonical_id: null, unresolved: true })
     setQuery('')
     setSuggestions([])
@@ -133,12 +158,32 @@ export function IngredientAutocomplete({ label, placeholder, items, onAdd, onRem
       movedByKeyboardRef.current = true
       setActiveIndex((prev) => Math.max(prev - 1, 0))
     } else if (event.key === 'Enter') {
+      // This input lives inside SearchForm's <form> -- Enter must
+      // always be prevented here regardless of outcome, or an empty/
+      // pending Enter would fall through to submitting the whole
+      // search form early (pre-existing behavior, preserved exactly).
       event.preventDefault()
+      // A highlighted suggestion always wins (explicit selection).
+      // Otherwise -- whether or not any suggestions are currently
+      // showing -- Enter commits the raw typed text. Previously this
+      // only worked when suggestions.length was exactly 0, so a query
+      // like "chicken" (which DOES have suggestions -- specific cuts
+      // -- but no exact generic match) could never be committed at
+      // all; the user was stuck unable to add it without picking one
+      // of the more specific cuts, which is exactly the silent
+      // over-narrowing ticket section 12 forbids.
       if (activeIndex >= 0 && suggestions[activeIndex]) {
         selectSuggestion(suggestions[activeIndex])
-      } else if (!isPending && suggestions.length === 0 && query.trim()) {
+      } else if (!isPending && query.trim()) {
         addUnresolved()
       }
+    } else if (event.key === ',' && !isPending && query.trim() && activeIndex < 0) {
+      // Comma commits free text too (ticket section 4), but only when
+      // no suggestion is highlighted and there is real text to commit
+      // -- otherwise a comma is just a normal character (e.g. typed
+      // mid-word) and must not be swallowed.
+      event.preventDefault()
+      addUnresolved()
     } else if (event.key === 'Escape') {
       setOpen(false)
     }

@@ -305,7 +305,7 @@ async def test_local_curated_route_rejected_outside_approved_cuisine(price_db):
     assert result.status == "no_feasible_match"
     assert llm.call_count == 2
     assert "local_curated" in llm.requests[1].previous_action_error
-    assert "Allowed pantry canonical anchors" in llm.requests[1].previous_action_error
+    assert "Allowed pantry anchors" in llm.requests[1].previous_action_error
 
 
 async def test_local_curated_route_permitted_for_approved_desi_intent(price_db):
@@ -716,7 +716,9 @@ async def test_llm_can_choose_a_pantry_derived_anchor_and_it_executes_correctly(
 
     result = await orch.run(_base_request(pantry_raw=["tomato", "onion", "basmati rice"]))
 
-    assert provider.search_calls[0].query_ingredients == ["basmati_rice"]
+    # 2026-09-13: grounded provider term (space, not underscore) -- confirmed live
+    # that RecipeAPI.io's own vocabulary does not reliably match snake_case ids.
+    assert provider.search_calls[0].query_ingredients == ["basmati rice"]
     assert result.status == "completed"
 
 
@@ -2616,3 +2618,184 @@ async def test_rate_limit_on_a_later_attempt_preserves_earlier_grounded_results(
     assert len(result.recommendations) == 3
     assert {c.recipe_id for c in result.recommendations} == {"recipeapi_io:1", "recipeapi_io:2", "recipeapi_io:3"}
     assert result.provider_status["recipeapi_io"] == "rate_limited"
+
+
+# --- 2026-09-13 unified ingredient resolution ticket -----------------------
+# Explicit regressions for the confirmed production symptoms (ticket
+# sections 33-35). "lamb_chops" is a real PantryPilot canonical id
+# (app.domain.grocery_taxonomy); "chicken" and typo-correction cases
+# have no generic PantryPilot canonical id at all -- both classes are
+# covered.
+
+
+from app.domain.ingredient_resolution import ProviderIngredient  # noqa: E402
+
+
+async def test_regression_lamb_chops_single_ingredient_uses_grounded_singular_provider_term(price_db):
+    # Before this ticket: the raw canonical id "lamb_chops" (or even a
+    # naive space-converted "lamb chops") was confirmed live to return
+    # ZERO RecipeAPI.io results -- the provider's own catalogue lists
+    # the singular "Lamb chop". After the fix: catalogue grounding
+    # resolves it correctly, and ONE ingredient is sufficient (no
+    # forced second ingredient).
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Grilled Lamb Chops",
+        ingredients=[RecipeIngredient(raw_name="Lamb chop", raw_measure="4 pcs")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={"lamb chops": [ProviderIngredient("1139", "Lamb chop", "meat")]},
+    )
+    llm = FakeLLMProvider([_search_action(["lamb chops"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["lamb chops"]))
+
+    assert result.status == "completed"
+    assert len(result.recommendations) == 1
+    assert provider.search_calls[0].query_ingredients == ["Lamb chop"]
+    assert provider.ingredient_search_calls == ["lamb chops"]
+
+
+async def test_regression_chicken_single_ingredient_no_forced_narrowing(price_db):
+    # "chicken" has no generic PantryPilot canonical id (only specific
+    # cuts do) -- must still be searchable as-is, never forced into
+    # "chicken_breast" or any other specific cut.
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Roast Chicken",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 whole")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={"chicken": [ProviderIngredient("125", "Chicken", "poultry")]},
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"]))
+
+    assert result.status == "completed"
+    assert result.pantry_unresolved == []  # accepted, not reported as "not recognized"
+    assert provider.search_calls[0].query_ingredients == ["Chicken"]
+    # Never silently narrowed to a specific cut.
+    assert "chicken_breast" not in provider.search_calls[0].query_ingredients
+    assert len(result.recommendations) == 1
+
+
+async def test_regression_typo_chiken_brest_is_llm_corrected_and_grounded_before_use(price_db):
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Pan-Seared Chicken Breast",
+        ingredients=[RecipeIngredient(raw_name="chicken breast", raw_measure="2 pcs")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe}
+    )
+    llm = FakeLLMProvider(
+        [_search_action(["chiken brest"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)],
+        ingredient_corrections={"chiken brest": "chicken breast"},
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chiken brest"]))
+
+    assert result.status == "completed"
+    assert result.pantry_unresolved == []
+    # Grounded to the real local canonical id -- proves the LLM's
+    # proposal was independently re-checked, never trusted directly.
+    assert result.recipe_by_id
+    assert provider.search_calls[0].query_ingredients == ["chicken breast"]
+    assert len(result.recommendations) == 1
+
+
+async def test_regression_ambiguous_typo_chik_is_not_silently_narrowed(price_db):
+    # Ticket section 22: "chik" must not silently become one specific
+    # chicken cut -- with no safe local/catalogue/LLM resolution, it
+    # stays fully unresolved and simply cannot be chosen as an anchor.
+    provider = FakeRecipeProvider("recipeapi_io", searches=[])
+    llm = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chik"]))
+
+    assert result.status == "no_feasible_match"
+    assert result.pantry_unresolved == ["chik"]
+    assert provider.search_calls == []
+
+
+async def test_admin_created_alias_participates_in_search_anchor_grounding(price_db, tmp_path):
+    # Ticket section 18: an admin-created canonical ingredient/alias
+    # must remain fully integrated with this pipeline.
+    from app.db.admin_schema import create_admin_schema
+    from app.db.connection import connection_scope
+    from app.db.schema import create_schema
+    from app.repositories.admin_ingredient_repository import AdminIngredientRepository
+    from app.repositories.runtime_ingredient_repository import get_merged_vocabulary, invalidate_runtime_ingredient_cache
+
+    admin_db = str(tmp_path / "admin_runtime.db")
+    with connection_scope(admin_db, read_only=False) as connection:
+        create_schema(connection)
+        create_admin_schema(connection)
+    invalidate_runtime_ingredient_cache()
+    repo = AdminIngredientRepository(admin_db)
+    repo.create_ingredient(canonical_id="mutton", display_name="Mutton", default_unit="g", updated_by="founder")
+    repo.create_alias(canonical_id="mutton", alias_text="goat meat", source="manual", updated_by="founder")
+
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Mutton Curry",
+        ingredients=[RecipeIngredient(raw_name="mutton", raw_measure="500 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe}
+    )
+    llm = FakeLLMProvider([_search_action(["goat meat"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(
+        llm, {"recipeapi_io": provider}, PriceRepository(price_db), ingredient_db_path=admin_db
+    )
+
+    result = await orch.run(_base_request(pantry_raw=["goat meat"]))
+
+    assert result.status == "completed"
+    # "goat meat" -> admin alias -> "mutton" canonical -> humanized "mutton" search term.
+    assert provider.search_calls[0].query_ingredients == ["mutton"]
+    assert len(result.recommendations) == 1
+    invalidate_runtime_ingredient_cache()
+
+
+async def test_pricing_stays_unknown_for_a_provider_grounded_but_locally_unknown_ingredient(price_db):
+    # Ticket section 19/21: RecipeAPI.io's own ingredient identity must
+    # never become a pricing source. "mutton" is grounded for DISCOVERY
+    # via the catalogue but has no PantryPilot canonical id, so its
+    # cost must be explicitly UNKNOWN, never fabricated as zero.
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Mutton Stew",
+        ingredients=[RecipeIngredient(raw_name="Mutton", raw_measure="500 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={"mutton": [ProviderIngredient("3944", "Mutton", "meat")]},
+    )
+    llm = FakeLLMProvider([_search_action(["mutton"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["mutton"]))
+
+    assert result.status == "completed"
+    candidate = result.recommendations[0]
+    # "Mutton" was never assigned a fabricated PantryPilot canonical id
+    # (it has no local canonical entry) -- it is tracked as UNRESOLVED,
+    # completely separate from any priced/missing-ingredient bucket, so
+    # there is no line item to silently cost as zero. This is the
+    # actual, correct shape of "pricing: UNKNOWN, never AED 0" for an
+    # ingredient PantryPilot's local taxonomy has no entry for at all
+    # (ticket section 19's own example) -- verified here end-to-end
+    # through the real orchestrator/cost-engine pipeline, not just the
+    # resolver in isolation.
+    assert candidate.unresolved_ingredients == ["Mutton"]
+    assert all(m.canonical_id != "mutton" for m in candidate.missing_ingredients)
+    assert result.missing_breakdown_by_id[candidate.recipe_id] == []
