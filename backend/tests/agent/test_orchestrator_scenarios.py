@@ -3278,3 +3278,117 @@ async def test_regression_10_closest_alternatives_never_starved_by_hard_violatio
     alt_ids = {c.recipe_id for c in result.closest_alternatives}
     assert alt_ids == {"recipeapi_io:3", "recipeapi_io:4", "recipeapi_io:5"}
     assert len(result.closest_alternatives) == 3  # the two hard violations consumed zero slots
+
+
+# --- 2026-09-13 time-preference-visibility fix -------------------------------
+# Root cause: _closest_alternatives() (and _finalize's "some feasible"
+# branch) truncated flexible-only-rejected candidates to
+# MAX_FINAL_RECOMMENDATIONS (3) regardless of how many genuinely
+# relevant, already-evaluated candidates existed -- so a 30-minute
+# search with only 1 within-time recipe but 9 relevant over-time ones
+# showed just 1 + 3 = 4 total, while relaxing to 60 minutes (making all
+# 9 within-time) suddenly showed all 12. Time is a SOFT preference for
+# VISIBILITY (ticket) -- it must only move a candidate between groups,
+# never hide it outright. Fixed by removing the MAX_FINAL_RECOMMENDATIONS
+# truncation from the flexible-only-rejected path specifically; hard
+# violations, the frozen ranker, and MAX_EVALUATED_CANDIDATES are
+# unchanged.
+
+
+def _timed_chicken_recipe_with_cuisine(item_id: str, total_minutes: int, cuisine: str = "Asian"):
+    recipe = _timed_chicken_recipe(item_id, total_minutes)
+    return recipe.model_copy(update={"cuisine": cuisine})
+
+
+async def test_regression_a_30_min_shows_all_evaluated_relevant_recipes_not_just_3_alternatives(price_db):
+    # 3 recipes <=30 min, 9 relevant recipes >30 min, no hard violations.
+    within_time_ids = ["1", "2", "3"]
+    over_time_ids = [str(i) for i in range(4, 13)]
+    recipes = {i: _timed_chicken_recipe(i, 10) for i in within_time_ids}
+    recipes.update({i: _timed_chicken_recipe(i, 45) for i in over_time_ids})
+    all_ids = within_time_ids + over_time_ids
+
+    async def run(max_total_time_minutes):
+        provider = FakeRecipeProvider(
+            "recipeapi_io", searches=[ScriptedSearch(result=_search_result(*all_ids))], details_by_id=recipes,
+        )
+        llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+        orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+        return await orch.run(_base_request(pantry_raw=["chicken"], max_total_time_minutes=max_total_time_minutes))
+
+    result_30 = await run(30)
+    within_time_shown = {c.recipe_id for c in result_30.recommendations + result_30.additional_options}
+    over_time_shown = {c.recipe_id for c in result_30.closest_alternatives}
+    assert within_time_shown == {f"recipeapi_io:{i}" for i in within_time_ids}
+    # All 9 over-time relevant recipes remain visible as alternatives --
+    # never capped to 3.
+    assert over_time_shown == {f"recipeapi_io:{i}" for i in over_time_ids}
+    assert _total_visible(result_30) == 12
+
+    result_60 = await run(60)
+    # Relaxing time mostly MOVES recipes between groups -- it must not
+    # increase the total count of already-evaluated relevant recipes
+    # shown (they were already all visible at 30 min).
+    assert _total_visible(result_60) == _total_visible(result_30) == 12
+    assert result_60.closest_alternatives == []  # everything now fits within 60 min
+
+
+async def test_regression_b_hard_violations_stay_hidden_even_with_many_flexible_alternatives(price_db):
+    excluded_ingredient_recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Chicken Tomato Bake", cuisine="Italian",
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc"), RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    strict_cuisine_mismatch_recipe = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="French Chicken", cuisine="French",
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+    flexible_ids = [str(i) for i in range(3, 8)]  # 5 flexible-only (time) alternatives -- more than the old cap of 3
+    flexible_recipes = {i: _timed_chicken_recipe_with_cuisine(i, 45, "Italian") for i in flexible_ids}
+    recipes = {"1": excluded_ingredient_recipe, "2": strict_cuisine_mismatch_recipe, **flexible_recipes}
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", *flexible_ids))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(
+        _base_request(
+            pantry_raw=["chicken"], excluded_raw=["tomato"],
+            cuisine_preference="Italian", cuisine_strict=True,
+            max_total_time_minutes=15,
+        )
+    )
+
+    alt_ids = {c.recipe_id for c in result.closest_alternatives}
+    assert alt_ids == {f"recipeapi_io:{i}" for i in flexible_ids}
+    assert "recipeapi_io:1" not in alt_ids  # excluded ingredient
+    assert "recipeapi_io:2" not in alt_ids  # strict cuisine mismatch
+    assert len(result.closest_alternatives) == 5  # not capped to 3
+
+
+async def test_regression_c_time_deviation_label_correct_for_an_uncapped_alternative(price_db):
+    from app.api.recommend_mapping import build_recommend_response
+
+    within_time_ids = ["1"]
+    over_time_ids = [str(i) for i in range(2, 6)]  # 4 over-time alternatives
+    recipes = {i: _timed_chicken_recipe(i, 10) for i in within_time_ids}
+    recipes.update({i: _timed_chicken_recipe(i, 37) for i in over_time_ids})  # 7 min over a 30-min target
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result(*within_time_ids, *over_time_ids))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"], max_total_time_minutes=30))
+    assert len(result.closest_alternatives) == 4  # all 4 visible, not capped to 3
+
+    response = build_recommend_response(result, max_total_time_minutes=30, budget_aed=None)
+    assert len(response.closest_alternatives) == 4
+    for card in response.closest_alternatives:
+        assert card.deviation_reasons == ["7 min over your target"]
