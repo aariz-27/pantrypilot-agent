@@ -96,7 +96,14 @@ def test_health_in_production_returns_only_status(tmp_path):
         client = TestClient(app)
         response = client.get("/api/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "database": None, "providers": None, "build_version": None}
+        # 2026-09-13 correction (architect review): the production body
+        # must be EXACTLY {"status": "ok"} -- database/providers/
+        # build_version keys must not exist at all, not merely be null.
+        assert response.json() == {"status": "ok"}
+        body = response.json()
+        assert "database" not in body
+        assert "providers" not in body
+        assert "build_version" not in body
     finally:
         app.dependency_overrides.clear()
 
