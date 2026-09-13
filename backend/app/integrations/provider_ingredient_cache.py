@@ -45,6 +45,16 @@ _MAX_ENTRIES = 2000  # bounded (ticket section 15) -- evicts oldest on overflow
 @dataclass(frozen=True)
 class CachedProviderMatch:
     match: ProviderIngredient | None  # None means "looked up, no safe match found"
+    # 2026-09-13 hotfix (generic-provider-direct-fallback): whether the
+    # catalogue query returned ANY candidates at all, even when none of
+    # them cleared a safe-match tier. This is what distinguishes an
+    # ordinary broad real word ("chicken" -- the catalogue returns many
+    # "Chicken X" entries) from a genuine typo ("chiken" -- the
+    # catalogue returns nothing) without needing an LLM call to tell
+    # them apart. Cached alongside `match` so a repeated lookup of the
+    # same no-safe-match term does not need to re-query the catalogue
+    # just to recover this signal.
+    had_candidates: bool = False
 
 
 _cache: dict[str, tuple[float, CachedProviderMatch]] = {}
@@ -65,11 +75,11 @@ def get_cached_match(query_key: str, *, ttl_seconds: float = _DEFAULT_TTL_SECOND
     return value
 
 
-def set_cached_match(query_key: str, match: ProviderIngredient | None) -> None:
+def set_cached_match(query_key: str, match: ProviderIngredient | None, *, had_candidates: bool = False) -> None:
     if len(_cache) >= _MAX_ENTRIES:
         oldest_key = min(_cache, key=lambda k: _cache[k][0])
         del _cache[oldest_key]
-    _cache[query_key] = (time.monotonic(), CachedProviderMatch(match=match))
+    _cache[query_key] = (time.monotonic(), CachedProviderMatch(match=match, had_candidates=had_candidates))
 
 
 def clear_provider_ingredient_cache() -> None:

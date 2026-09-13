@@ -140,6 +140,87 @@ async def test_generic_chicken_grounds_via_catalogue_without_local_canonical_id(
     assert resolution.state == IngredientResolutionState.PROVIDER_CATALOG_RESOLVED
 
 
+# -- 2026-09-13 hotfix (generic-provider-direct-fallback) --------------------
+# Confirmed production root cause: "chicken"'s catalogue query returns
+# many candidates (Chicken Breast, Chicken Broth, ...) but none is
+# safely EXACT/singular-plural-equal to "chicken" itself -- previously
+# this fell straight to the LLM, which correctly declined to "correct"
+# an already-valid word, leaving the term fully UNRESOLVED and
+# skipping recipe search entirely (HTTP 200, zero /recipes calls).
+
+
+async def test_broad_term_with_only_narrower_catalogue_candidates_falls_back_to_direct_term():
+    catalogue = _FakeCatalogue(
+        {
+            "chicken": [
+                ProviderIngredient("1", "Chicken Breast", "poultry"),
+                ProviderIngredient("2", "Chicken Broth", "poultry"),
+                ProviderIngredient("3", "Chicken Drumsticks", "poultry"),
+            ]
+        }
+    )
+    resolution = await resolve_pantry_ingredient(
+        "chicken", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES, catalogue_lookup=catalogue
+    )
+    assert resolution.canonical_id is None  # never fabricated -- pricing stays unknown
+    assert resolution.search_anchor_identity == "chicken"  # the user's own term, never narrowed
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
+
+
+async def test_broad_term_fallback_never_calls_the_llm():
+    llm = _FakeLLM({})
+    catalogue = _FakeCatalogue(
+        {"rice": [ProviderIngredient("1", "Arborio rice", "grain"), ProviderIngredient("2", "Basmati rice", "grain")]}
+    )
+    resolution = await resolve_pantry_ingredient(
+        "rice", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES, catalogue_lookup=catalogue, llm_provider=llm
+    )
+    assert resolution.search_anchor_identity == "rice"
+    assert resolution.state == IngredientResolutionState.PROVIDER_DIRECT
+    assert llm.requests == []  # ordinary valid term never needs LLM escalation
+
+
+async def test_broad_term_never_narrowed_to_one_of_the_catalogue_candidates():
+    # Ticket section 3/12: "chicken" must never silently become
+    # "Chicken Breast" merely because that is one of the candidates
+    # returned -- the fallback must preserve the ORIGINAL user term.
+    catalogue = _FakeCatalogue({"chicken": [ProviderIngredient("1", "Chicken Breast", "poultry")]})
+    resolution = await resolve_pantry_ingredient(
+        "chicken", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES, catalogue_lookup=catalogue
+    )
+    assert resolution.search_anchor_identity == "chicken"
+    assert resolution.search_anchor_identity != "Chicken Breast"
+
+
+async def test_catalogue_unavailable_still_escalates_to_llm_unlike_a_confirmed_real_word():
+    # A missing/failed catalogue gives NO evidence either way about the
+    # term -- unlike the had_candidates branch above, which reflects an
+    # actual successful catalogue query returning real vocabulary. So a
+    # typo with no catalogue configured must still reach the LLM,
+    # exactly like before this hotfix (otherwise "chiken brest" with no
+    # catalogue configured would be sent to the provider unchanged).
+    llm = _FakeLLM({"chiken": "chicken"})
+    resolution = await resolve_pantry_ingredient(
+        "chiken", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES, catalogue_lookup=None, llm_provider=llm
+    )
+    assert llm.requests != []
+
+
+async def test_zero_candidate_typo_still_escalates_to_llm_unlike_a_broad_real_word():
+    # The distinguishing signal is candidate presence, not merely "no
+    # exact match": a genuine typo's catalogue query returns nothing at
+    # all, which is exactly when LLM correction remains warranted.
+    llm = _FakeLLM({"chiken": "chicken"})
+    catalogue = _FakeCatalogue({"chicken": [ProviderIngredient("125", "Chicken", "poultry")]})
+    resolution = await resolve_pantry_ingredient(
+        "chiken", CANONICAL_GROCERY_INGREDIENTS, RECIPE_INGREDIENT_ALIASES,
+        catalogue_lookup=catalogue, llm_provider=llm,
+    )
+    assert llm.requests != []
+    assert resolution.search_anchor_identity == "Chicken"
+    assert resolution.state == IngredientResolutionState.LLM_CORRECTED_AND_GROUNDED
+
+
 async def test_ambiguous_catalogue_result_never_silently_narrowed():
     catalogue = _FakeCatalogue(
         {"chik": [ProviderIngredient("1", "chik", "poultry"), ProviderIngredient("2", "Chik", "poultry")]}

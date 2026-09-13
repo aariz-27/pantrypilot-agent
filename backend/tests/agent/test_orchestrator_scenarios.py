@@ -2686,6 +2686,135 @@ async def test_regression_chicken_single_ingredient_no_forced_narrowing(price_db
     assert len(result.recommendations) == 1
 
 
+async def test_regression_broad_term_with_only_narrower_catalogue_candidates_still_reaches_recipe_search(price_db):
+    # 2026-09-13 hotfix (generic-provider-direct-fallback): the
+    # confirmed production bug. Live production logs showed
+    # GET /ingredients?search=chicken -> 200, then an LLM call, then
+    # /api/recommend -> 200 with NO /recipes request ever made -- the
+    # catalogue query succeeded but returned only narrower candidates
+    # ("Chicken Breast", "Chicken Broth", ...), no single one safely
+    # exact/variant-equal to "chicken" itself, and the LLM correctly
+    # declined to "fix" an already-valid word, leaving the term fully
+    # UNRESOLVED and silently skipping search entirely. This proves the
+    # fix end-to-end: recipe search must still occur with "chicken".
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Roast Chicken",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 whole")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={
+            "chicken": [
+                ProviderIngredient("1", "Chicken Breast", "poultry"),
+                ProviderIngredient("2", "Chicken Broth", "poultry"),
+                ProviderIngredient("3", "Chicken Drumsticks", "poultry"),
+            ]
+        },
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"]))
+
+    assert result.status == "completed"
+    assert result.pantry_unresolved == []
+    # The actual /recipes-equivalent search call happened, with the
+    # user's own broad term -- never one of the narrower candidates.
+    assert provider.search_calls[0].query_ingredients == ["chicken"]
+    assert "Chicken Breast" not in provider.search_calls[0].query_ingredients
+    assert len(result.recommendations) == 1
+    # Ticket section 4: an ordinary valid broad term needs no LLM
+    # typo-correction call at all -- only deterministic catalogue
+    # queries (the direct spelling, plus its one singular/plural query
+    # variant, per app.domain.ingredient_resolution.singular_plural_query_variants).
+    assert provider.ingredient_search_calls == ["chicken", "chickens"]
+    assert llm.correction_requests == []
+
+
+async def test_regression_bare_rice_with_only_qualified_catalogue_candidates_still_reaches_recipe_search(price_db):
+    # Same production bug, second confirmed example from the ticket:
+    # RecipeAPI.io's catalogue has no single "Rice" entry, only
+    # qualified varieties (Arborio rice, Basmati rice, ...).
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Steamed Rice",
+        ingredients=[RecipeIngredient(raw_name="Rice", raw_measure="2 cups")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1"))],
+        details_by_id={"1": recipe},
+        ingredient_catalogue={
+            "rice": [
+                ProviderIngredient("1", "Arborio rice", "grain"),
+                ProviderIngredient("2", "Basmati rice", "grain"),
+                ProviderIngredient("3", "Cooked rice", "grain"),
+            ]
+        },
+    )
+    llm = FakeLLMProvider([_search_action(["rice"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["rice"]))
+
+    assert result.status == "completed"
+    assert provider.search_calls[0].query_ingredients == ["rice"]
+    assert "Basmati rice" not in provider.search_calls[0].query_ingredients  # never auto-narrowed
+    assert llm.correction_requests == []
+
+
+async def test_zero_result_diagnostics_distinguish_resolution_block_from_provider_zero_from_rejected(price_db):
+    # Ticket section 9: this production bug was hard to diagnose
+    # because /api/recommend still returned HTTP 200 in all three
+    # cases below -- proves the three are nonetheless distinguishable
+    # from AgentResult/FakeRecipeProvider's own recorded call history,
+    # without needing any new state-exposure machinery.
+    from app.domain.models import RejectionReason
+
+    # A: ingredient resolution itself prevented recipe search --
+    # "chik" resolves AMBIGUOUS with no catalogue/LLM available, so no
+    # search call is ever made at all.
+    provider_a = FakeRecipeProvider("recipeapi_io", searches=[])
+    llm_a = FakeLLMProvider([_stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    result_a = await AgentOrchestrator(llm_a, {"recipeapi_io": provider_a}, PriceRepository(price_db)).run(
+        _base_request(pantry_raw=["chik"])
+    )
+    assert provider_a.search_calls == []
+    assert result_a.status == "no_feasible_match"
+    assert result_a.pantry_unresolved == ["chik"]
+
+    # B: the provider WAS called and genuinely returned zero recipes.
+    provider_b = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result())]
+    )
+    llm_b = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    result_b = await AgentOrchestrator(llm_b, {"recipeapi_io": provider_b}, PriceRepository(price_db)).run(
+        _base_request(pantry_raw=["tomato"])
+    )
+    assert len(provider_b.search_calls) == 1  # the search DID happen, unlike case A
+    assert result_b.status == "no_feasible_match"
+    assert result_b.pantry_unresolved == []  # "tomato" was fully recognized
+
+    # C: the provider returned real recipes, but deterministic
+    # evaluation hard-rejected all of them (budget here).
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1",
+        ingredients=[RecipeIngredient(raw_name="tomato", raw_measure="100 g"), RecipeIngredient(raw_name="onion", raw_measure="500 g")],
+    )
+    provider_c = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe}
+    )
+    llm_c = FakeLLMProvider([_search_action(["tomato"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    result_c = await AgentOrchestrator(llm_c, {"recipeapi_io": provider_c}, PriceRepository(price_db)).run(
+        _base_request(pantry_raw=["tomato"], budget_aed=0.01)
+    )
+    assert len(provider_c.search_calls) == 1  # the search DID happen and DID return items
+    assert result_c.status == "no_feasible_match"
+    [closest] = result_c.closest_alternatives[:1]
+    assert RejectionReason.BUDGET_EXCEEDED in closest.rejection_reasons  # rejected, not merely absent
+
+
 async def test_regression_typo_chiken_brest_is_llm_corrected_and_grounded_before_use(price_db):
     recipe = make_recipe(
         id="recipeapi_io:1", provider_recipe_id="1", name="Pan-Seared Chicken Breast",
