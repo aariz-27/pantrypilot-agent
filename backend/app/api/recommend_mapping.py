@@ -12,19 +12,8 @@ from __future__ import annotations
 from app.agent.orchestrator import AgentResult
 from app.domain.ingredient_autocomplete import humanize_canonical_id
 from app.domain.ingredient_normalizer import normalize_raw_text_identity
-from app.domain.models import CandidateEvaluation, RejectionReason
+from app.domain.models import FLEXIBLE_REJECTION_REASONS, CandidateEvaluation, RejectionReason
 from app.schemas.recommend import MissingIngredientCost, RecipeCard, RecommendResponse, UnresolvedIngredient
-
-# Rejection reasons that represent a flexible target (time/budget) a
-# "closest alternative" may legitimately exceed, per ticket section 18.
-_FLEXIBLE_REJECTION_REASONS = frozenset(
-    {
-        RejectionReason.MAX_TOTAL_TIME_EXCEEDED,
-        RejectionReason.TIME_INCOMPLETE_WITH_CONSTRAINT,
-        RejectionReason.BUDGET_EXCEEDED,
-        RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE,
-    }
-)
 
 
 def _display_name(raw_name: str, canonical_id: str | None) -> str:
@@ -37,10 +26,18 @@ def _is_never_relax_violation(candidate: CandidateEvaluation) -> bool:
     18): excluded ingredient, strict cuisine mismatch, invalid/unusable
     data, or the Hard-difficulty filter."""
 
-    return any(reason not in _FLEXIBLE_REJECTION_REASONS for reason in candidate.rejection_reasons)
+    return any(reason not in FLEXIBLE_REJECTION_REASONS for reason in candidate.rejection_reasons)
 
 
-def _deviation_reasons(candidate: CandidateEvaluation, recipe, max_total_time_minutes: int | None, budget_aed: float | None) -> list[str]:
+def _deviation_reasons(
+    candidate: CandidateEvaluation,
+    recipe,
+    max_total_time_minutes: int | None,
+    budget_aed: float | None,
+    *,
+    cuisine_preference: str | None = None,
+    scaling=None,
+) -> list[str]:
     reasons: list[str] = []
     if RejectionReason.MAX_TOTAL_TIME_EXCEEDED in candidate.rejection_reasons:
         if (
@@ -51,11 +48,38 @@ def _deviation_reasons(candidate: CandidateEvaluation, recipe, max_total_time_mi
             over = (recipe.prep_time_minutes + recipe.cook_time_minutes) - max_total_time_minutes
             if over > 0:
                 reasons.append(f"{over} min over your target")
+    elif RejectionReason.TIME_INCOMPLETE_WITH_CONSTRAINT in candidate.rejection_reasons:
+        # 2026-09-13 recommendation-behavior fix: this candidate is now
+        # shown (previously it was simply hard-rejected and dropped) --
+        # honestly label that its time fit could not be confirmed,
+        # never silently imply it satisfies the selected time.
+        reasons.append("Cook time not confirmed")
+
     if RejectionReason.BUDGET_EXCEEDED in candidate.rejection_reasons:
         if budget_aed is not None and candidate.price_complete and candidate.estimated_purchase_cost_aed is not None:
             over = candidate.estimated_purchase_cost_aed - budget_aed
             if over > 0:
                 reasons.append(f"Est. AED {over:.2f} over budget")
+    elif RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE in candidate.rejection_reasons:
+        # DEC-007: unknown price is never treated as zero -- label it
+        # honestly rather than silently claiming the budget is met.
+        reasons.append("Price unknown")
+
+    # 2026-09-13 recommendation-behavior fix (soft preferences, ticket's
+    # "PRODUCT BEHAVIOR" section): non-strict cuisine and servings never
+    # reject a candidate (unchanged), but a mismatch is worth a plain,
+    # honest label when this candidate is being shown as an alternative
+    # rather than an exact preference match. The card's own `cuisine`
+    # field already shows the actual cuisine, so the label itself stays
+    # generic.
+    if cuisine_preference:
+        recipe_cuisine = (recipe.cuisine or "").strip().lower()
+        if recipe_cuisine and recipe_cuisine != cuisine_preference.strip().lower():
+            reasons.append("Different cuisine")
+
+    if scaling is not None and scaling.original_servings is not None and scaling.original_servings != scaling.requested_servings:
+        reasons.append(f"Serves {scaling.original_servings}; can be scaled")
+
     return reasons
 
 
@@ -89,6 +113,7 @@ def build_recipe_card(
     is_exact_match: bool,
     max_total_time_minutes: int | None,
     budget_aed: float | None,
+    cuisine_preference: str | None = None,
 ) -> RecipeCard | None:
     recipe = result.recipe_by_id.get(candidate.recipe_id)
     if recipe is None:
@@ -128,7 +153,10 @@ def build_recipe_card(
         deviation_reasons=(
             []
             if is_exact_match
-            else _deviation_reasons(candidate, recipe, max_total_time_minutes, budget_aed)
+            else _deviation_reasons(
+                candidate, recipe, max_total_time_minutes, budget_aed,
+                cuisine_preference=cuisine_preference, scaling=scaling,
+            )
         ),
     )
 
@@ -138,6 +166,7 @@ def build_recommend_response(
     *,
     max_total_time_minutes: int | None,
     budget_aed: float | None,
+    cuisine_preference: str | None = None,
 ) -> RecommendResponse:
     recommendations = []
     for c in result.recommendations:
@@ -169,7 +198,8 @@ def build_recommend_response(
             # difficulty) as a "closest alternative" -- ticket section 18.
             continue
         card = build_recipe_card(
-            c, result, is_exact_match=False, max_total_time_minutes=max_total_time_minutes, budget_aed=budget_aed
+            c, result, is_exact_match=False, max_total_time_minutes=max_total_time_minutes, budget_aed=budget_aed,
+            cuisine_preference=cuisine_preference,
         )
         if card is not None:
             closest_alternatives.append(card)

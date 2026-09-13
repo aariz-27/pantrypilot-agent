@@ -976,11 +976,14 @@ async def test_excluded_ingredient_is_deterministically_rejected_even_when_match
     )
     result = await orch.run(request)
 
-    from app.domain.models import RejectionReason
-
     assert result.status == "no_feasible_match"
-    [closest] = result.closest_alternatives[:1]
-    assert RejectionReason.EXCLUDED_INGREDIENT_PRESENT in closest.rejection_reasons
+    # 2026-09-13 correction (architect review): a candidate rejected
+    # ONLY for a true hard violation (here, an excluded ingredient) must
+    # never consume a closest_alternatives slot at all, not merely be
+    # filtered out later at the API mapping layer -- this is the sole
+    # evaluated candidate and it is a pure hard violation, so the
+    # orchestrator's own output is correctly empty.
+    assert result.closest_alternatives == []
 
 
 async def test_fully_unresolved_pantry_stops_immediately_without_fabricating_a_canonical_id(price_db):
@@ -3035,3 +3038,243 @@ async def test_pricing_stays_unknown_for_a_provider_grounded_but_locally_unknown
     assert candidate.unresolved_ingredients == ["Mutton"]
     assert all(m.canonical_id != "mutton" for m in candidate.missing_ingredients)
     assert result.missing_breakdown_by_id[candidate.recipe_id] == []
+
+
+# --- 2026-09-13 fast recommendation-behavior fix -----------------------------
+# Confirmed production bug: generic "chicken" produced a non-monotonic
+# "15 min -> 3, 30 min -> 1, 45 min -> 6" result pattern. Root causes,
+# confirmed by inspection:
+# 1. AgentOrchestrator._finalize surfaced hard-rejected (over-time/over-
+#    budget) candidates as closest_alternatives ONLY when NOTHING at
+#    all was feasible -- a single feasible recipe suppressed every
+#    other already-evaluated, already-fetched grounded recipe that
+#    merely missed a soft preference like time or budget.
+# 2. Settings.recipeapi_page_size (25) exceeded MAX_EVALUATED_CANDIDATES
+#    (20), so a single search page could exhaust the entire evaluation
+#    cap before a second page was ever fetched, freezing the provider's
+#    own first-page ordering/bias into the whole result.
+# 3. Nothing pinned the outbound RecipeAPI cuisine filter to the user's
+#    OWN preference -- the LLM's freely-chosen SearchArgs.cuisine went
+#    straight through even when the user selected Any (None).
+# None of this changes hard_constraint_pass semantics, the frozen
+# ranking formula/weights, pantry ownership, or pricing precedence --
+# see the corresponding code comments in app/agent/orchestrator.py and
+# app/config.py for the exact fix each test below proves.
+
+
+def _timed_chicken_recipe(item_id: str, total_minutes: int):
+    prep = total_minutes // 2
+    cook = total_minutes - prep
+    return make_recipe(
+        id=f"recipeapi_io:{item_id}", provider_recipe_id=item_id, name=f"Chicken Dish {item_id}",
+        prep_time_minutes=prep, cook_time_minutes=cook,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+
+
+async def _run_chicken_time_scenario(price_db, max_total_time_minutes):
+    """Same fixed 4-recipe pool (12/20/35/45 minutes) every time --
+    only the user's time preference changes between calls."""
+
+    recipes = {"1": _timed_chicken_recipe("1", 12), "2": _timed_chicken_recipe("2", 20),
+               "3": _timed_chicken_recipe("3", 35), "4": _timed_chicken_recipe("4", 45)}
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4"))], details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+    return await orch.run(_base_request(pantry_raw=["chicken"], max_total_time_minutes=max_total_time_minutes))
+
+
+def _total_visible(result) -> int:
+    return len(result.recommendations) + len(result.additional_options) + len(result.closest_alternatives)
+
+
+async def test_regression_1_chicken_15_min_shows_short_recipe_and_labels_longer_ones_as_alternatives(price_db):
+    result = await _run_chicken_time_scenario(price_db, 15)
+    assert [c.recipe_id for c in result.recommendations] == ["recipeapi_io:1"]
+    # Longer, relevant recipes remain visible as alternatives -- never
+    # silently dropped merely for missing the soft time preference.
+    alt_ids = {c.recipe_id for c in result.closest_alternatives}
+    assert alt_ids
+
+
+async def test_regression_2_chicken_30_min_does_not_regress_to_fewer_visible_recipes_than_15_min(price_db):
+    # The exact confirmed production pattern this hotfix targets:
+    # "15 min -> 3, 30 min -> 1". Same evaluated pool, raised time
+    # preference -- total visible recipes must never go DOWN.
+    result_15 = await _run_chicken_time_scenario(price_db, 15)
+    result_30 = await _run_chicken_time_scenario(price_db, 30)
+    assert _total_visible(result_30) >= _total_visible(result_15)
+    # The 20-min recipe now genuinely qualifies as a recommendation
+    # (not merely an alternative) once the cutoff is raised to 30.
+    assert "recipeapi_io:2" in {c.recipe_id for c in result_30.recommendations}
+
+
+async def test_regression_3_chicken_45_min_continues_the_monotonic_discovery_principle(price_db):
+    result_30 = await _run_chicken_time_scenario(price_db, 30)
+    result_45 = await _run_chicken_time_scenario(price_db, 45)
+    assert _total_visible(result_45) >= _total_visible(result_30)
+    all_shown_45 = {c.recipe_id for c in result_45.recommendations + result_45.additional_options + result_45.closest_alternatives}
+    assert all_shown_45 == {"recipeapi_io:1", "recipeapi_io:2", "recipeapi_io:3", "recipeapi_io:4"}
+
+
+async def test_regression_4_servings_mismatch_never_discards_an_otherwise_relevant_recipe(price_db):
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Family Chicken Bake", servings=4,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"], servings=1))
+
+    assert result.status == "completed"
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"  # never discarded for servings alone
+    scaling = result.scaling_by_id["recipeapi_io:1"]
+    assert scaling.original_servings == 4  # preserved for an honest "Serves 4" / scalable label
+    assert scaling.requested_servings == 1
+
+
+async def test_regression_5_budget_within_budget_ranks_first_over_budget_visible_and_labeled(price_db):
+    from app.domain.models import RejectionReason
+
+    within_budget = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Chicken with Tomato",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc"), RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    over_budget = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="Chicken with Lots of Tomato",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc"), RecipeIngredient(raw_name="tomato", raw_measure="5000 g")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1", "2"))],
+        details_by_id={"1": within_budget, "2": over_budget},
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"], budget_aed=10))
+
+    assert result.recommendations[0].recipe_id == "recipeapi_io:1"
+    over_card = next(c for c in result.closest_alternatives if c.recipe_id == "recipeapi_io:2")
+    assert RejectionReason.BUDGET_EXCEEDED in over_card.rejection_reasons
+    assert over_card.price_complete is True  # known, confirmed overage -- never fabricated
+
+
+async def test_regression_6_any_cuisine_pins_search_strategy_to_none_even_if_llm_proposes_one(price_db):
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", cuisine="American",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider(
+        [_search_action(["chicken"], cuisine="american"), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"], cuisine_preference=None))
+
+    assert result.status == "completed"
+    assert provider.search_calls[0].cuisine is None
+
+
+async def test_regression_7_explicit_cuisine_preference_always_wins_over_llm_proposed_cuisine(price_db):
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", cuisine="Italian",
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe},
+    )
+    llm = FakeLLMProvider(
+        [_search_action(["chicken"], cuisine="mexican"), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"], cuisine_preference="Italian", cuisine_strict=False))
+
+    assert result.status == "completed"
+    assert provider.search_calls[0].cuisine == "Italian"
+
+
+async def test_regression_9_page_size_10_lets_a_second_page_be_evaluated_before_the_cap(price_db):
+    # MAX_EVALUATED_CANDIDATES stays 20 (untouched); with a 10-item
+    # page, page 1 alone leaves capacity for a genuine page 2 before
+    # the cap is reached -- the actual product-level fix behind the
+    # config default change (app/config.py: recipeapi_page_size 25 -> 10).
+    page1_ids = [str(i) for i in range(1, 11)]
+    page2_ids = [str(i) for i in range(11, 21)]
+    recipes = {i: _timed_chicken_recipe(i, 20) for i in page1_ids + page2_ids}
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[
+            ScriptedSearch(result=_search_result(*page1_ids, has_more=True)),
+            ScriptedSearch(result=_search_result(*page2_ids, has_more=False)),
+        ],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider(
+        [_search_action(["chicken"]), _paginate_action(), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)]
+    )
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db), search_page_size=10)
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"], max_total_time_minutes=60))
+
+    assert provider.search_calls[0].page_size == 10
+    assert provider.search_calls[1].page == 2
+    assert len(result.recommendations) + len(result.additional_options) == 20
+
+
+async def test_regression_10_closest_alternatives_never_starved_by_hard_violations_before_slot_limit(price_db):
+    # Architect review correction to the fix above: filtering to
+    # flexible-only-rejected candidates must happen BEFORE truncating
+    # to MAX_FINAL_RECOMMENDATIONS (3), not after. Previously the first
+    # 3 rejected candidates (by sort order) were taken regardless of
+    # WHY they were rejected, and app.api.recommend_mapping's own
+    # defense-in-depth filter removed any true hard violations among
+    # them AFTER the slots were already spent -- so two hard violations
+    # sorted ahead of three genuinely valid time-only alternatives could
+    # starve the user down to a single (or zero) visible alternative
+    # even though three good ones existed.
+    excluded_ingredient_recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Chicken Tomato Bake", cuisine="Italian",
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc"), RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    strict_cuisine_mismatch_recipe = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="French Chicken", cuisine="French",
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+    flexible_recipes = {}
+    for i, total_minutes in ((3, 30), (4, 35), (5, 40)):
+        recipe = _timed_chicken_recipe(str(i), total_minutes)
+        flexible_recipes[str(i)] = recipe.model_copy(update={"cuisine": "Italian"})
+
+    recipes = {"1": excluded_ingredient_recipe, "2": strict_cuisine_mismatch_recipe, **flexible_recipes}
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4", "5"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(
+        _base_request(
+            pantry_raw=["chicken"], excluded_raw=["tomato"],
+            cuisine_preference="Italian", cuisine_strict=True,
+            max_total_time_minutes=15,
+        )
+    )
+
+    assert result.status == "no_feasible_match"
+    alt_ids = {c.recipe_id for c in result.closest_alternatives}
+    assert alt_ids == {"recipeapi_io:3", "recipeapi_io:4", "recipeapi_io:5"}
+    assert len(result.closest_alternatives) == 3  # the two hard violations consumed zero slots

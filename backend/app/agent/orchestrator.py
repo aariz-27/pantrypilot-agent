@@ -50,7 +50,14 @@ from app.agent.tools import (
 from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
 from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry, normalize_raw_text_identity
 from app.domain.ingredient_resolution import IngredientResolutionState
-from app.domain.models import CandidateEvaluation, NormalizationStatus, Recipe, RejectionReason, UserConstraints
+from app.domain.models import (
+    FLEXIBLE_REJECTION_REASONS,
+    CandidateEvaluation,
+    NormalizationStatus,
+    Recipe,
+    RejectionReason,
+    UserConstraints,
+)
 from app.domain.ranker import rank_candidates
 from app.domain.serving_scaler import ScaledRecipe, scale_recipe_servings
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
@@ -533,6 +540,24 @@ class AgentOrchestrator:
                 "local_curated route requested outside its approved Indian/Pakistani/desi regional scope"
             )
 
+        # 2026-09-13 recommendation-behavior fix: for the RecipeAPI.io
+        # route, the outbound cuisine filter is pinned to the user's
+        # OWN authoritative preference, never the LLM's proposed
+        # args.cuisine -- confirmed by inspection that nothing
+        # previously stopped the LLM from filling in a cuisine (e.g.
+        # "american") even when the user selected Any (cuisine_preference
+        # is None), silently narrowing an unfiltered request into a
+        # provider-side cuisine filter the user never asked for. When
+        # the user selected a specific cuisine, that exact preference is
+        # used -- never a different value the LLM might substitute.
+        # local_curated is deliberately excluded: its own DEC-003
+        # approval gate above already allows the LLM to route there via
+        # a desi cuisine hint even when cuisine_preference is None (an
+        # existing, separate, protected mechanism this ticket does not
+        # touch), and LocalCuratedRecipeProvider filters its curated set
+        # by exactly this value.
+        effective_cuisine = args.cuisine if route == "local_curated" else state.cuisine_preference
+
         strategy = SearchStrategy(
             # 2026-09-13 unified ingredient resolution ticket: the
             # GROUNDED PROVIDER TERMS (e.g. "Lamb chop", "Chicken"),
@@ -546,7 +571,7 @@ class AgentOrchestrator:
             # query) are deliberately different values now -- ticket
             # section 1's core distinction.
             query_ingredients=provider_terms,
-            cuisine=args.cuisine,
+            cuisine=effective_cuisine,
             page=1,
             page_size=self._search_page_size,
             enrich_free_text=args.enrich_free_text,
@@ -566,7 +591,7 @@ class AgentOrchestrator:
         signature = (
             route,
             tuple(sorted(anchor_identities)),
-            (args.cuisine or "").lower(),
+            (effective_cuisine or "").lower(),
             args.enrich_free_text,
             args.broaden_provider_search,
         )
@@ -792,7 +817,29 @@ class AgentOrchestrator:
     # -- finalization ------------------------------------------------------
 
     def _closest_alternatives(self, state: AgentState) -> list[CandidateEvaluation]:
-        rejected = [c for c in state.evaluated_candidates if not c.hard_constraint_pass]
+        # 2026-09-13 correction (architect review): filter to
+        # FLEXIBLE-ONLY rejections BEFORE truncating to
+        # MAX_FINAL_RECOMMENDATIONS -- previously this truncated first
+        # and let app.api.recommend_mapping's own defense-in-depth
+        # filter (_is_never_relax_violation) remove true hard
+        # violations (excluded ingredient, strict cuisine mismatch,
+        # invalid/unusable data, disallowed Hard difficulty) AFTER the
+        # slots were already spent, so a batch of mostly hard-rejected
+        # candidates could starve out several genuinely valid time/
+        # budget-only alternatives sitting further down the evaluated
+        # list. A candidate is eligible here only when it failed
+        # hard_constraint_pass, has at least one rejection reason, and
+        # EVERY reason belongs to the shared FLEXIBLE_REJECTION_REASONS
+        # set (app.domain.models) -- the same set
+        # app.api.recommend_mapping._is_never_relax_violation checks,
+        # which remains in place unchanged as defense in depth.
+        rejected = [
+            c
+            for c in state.evaluated_candidates
+            if not c.hard_constraint_pass
+            and c.rejection_reasons
+            and all(reason in FLEXIBLE_REJECTION_REASONS for reason in c.rejection_reasons)
+        ]
         rejected.sort(key=lambda c: (len(c.rejection_reasons), -c.pantry_coverage))
         return rejected[:MAX_FINAL_RECOMMENDATIONS]
 
@@ -880,11 +927,31 @@ class AgentOrchestrator:
             else {}
         )
         if state.best_feasible:
-            # Some feasible candidates exist (anchor-matching, non-
-            # anchor, or both). Hard-rejected candidates are never
-            # relevant here -- only surfaced via _closest_alternatives
-            # in the "nothing feasible at all" branch below.
+            # 2026-09-13 recommendation-behavior fix: previously,
+            # hard-rejected candidates were surfaced as alternatives
+            # ONLY when NOTHING at all was feasible -- confirmed by
+            # inspection to be the direct cause of the reported "30 min
+            # -> 1 recipe" pattern. A single anchor-matching feasible
+            # recipe (e.g. one <=30-min "chicken" recipe) suppressed
+            # every other grounded, relevant recipe this run had
+            # already evaluated and fetched full details for, purely
+            # because they were hard-rejected for a SOFT preference miss
+            # (time/budget) -- even though _closest_alternatives() and
+            # its deviation-reason labels ("7 min over your target",
+            # "Est. AED X over budget") already existed and were ready
+            # to display them. Non-anchor feasible candidates still fill
+            # first (unchanged ordering/precedence); only-flexible-
+            # rejected candidates (never an excluded-ingredient/strict-
+            # cuisine/invalid-data/hard-difficulty violation -- see
+            # app.api.recommend_mapping._is_never_relax_violation, which
+            # still gates final display) now top up the same bounded
+            # slate instead of being discarded whenever at least one
+            # feasible recipe already exists.
             closest_alternatives = list(non_anchor_feasible[:MAX_FINAL_RECOMMENDATIONS])
+            if len(closest_alternatives) < MAX_FINAL_RECOMMENDATIONS:
+                already_shown = {c.recipe_id for c in recommendations + additional_options + closest_alternatives}
+                extra = [c for c in self._closest_alternatives(state) if c.recipe_id not in already_shown]
+                closest_alternatives += extra[: MAX_FINAL_RECOMMENDATIONS - len(closest_alternatives)]
         else:
             closest_alternatives = self._closest_alternatives(state)
         higher_match_time_excluded, higher_match_count, higher_match_min_time = self._higher_match_time_excluded(

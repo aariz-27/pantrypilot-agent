@@ -562,7 +562,7 @@ describe('additional_options anchor discipline end-to-end (PR #15 second correct
     await addRecognizedIngredientAndSubmit()
     await waitFor(() => screen.getByText('Fallback Dish'))
 
-    expect(screen.getByText('Other options')).toBeInTheDocument()
+    expect(screen.getByText('Other good options')).toBeInTheDocument()
     expect(screen.getByText('Chicken Fried Rice')).toBeInTheDocument() // the real recommendation, still shown
     expect(screen.getAllByText('Alternative pick')).toHaveLength(1)
     const fallbackCardEl = screen.getByText('Fallback Dish').closest('button')

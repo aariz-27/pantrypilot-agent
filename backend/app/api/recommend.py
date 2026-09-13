@@ -130,4 +130,5 @@ async def post_recommend(
         result,
         max_total_time_minutes=body.max_total_time_minutes,
         budget_aed=body.budget_aed,
+        cuisine_preference=body.cuisine,
     )

@@ -87,10 +87,10 @@ def test_case_d_incomplete_price_never_inferred_as_within_budget():
     candidate = _over_budget_candidate(cost_aed=0, price_complete=False)
     result = _deviation_reasons(candidate, recipe=None, max_total_time_minutes=None, budget_aed=50)
     # Never a fabricated "over budget" claim from an unknown cost, and
-    # never silently treated as safely affordable either -- no reason at
-    # all is the correct, conservative outcome (the card's own
-    # price_complete=False already signals the uncertainty separately).
-    assert result == []
+    # never silently treated as safely affordable either -- an honest
+    # "Price unknown" label (2026-09-13 recommendation-behavior fix),
+    # never "over budget" and never silent (DEC-007: unknown != zero).
+    assert result == ["Price unknown"]
 
 
 def test_exactly_at_budget_is_not_over_budget():
