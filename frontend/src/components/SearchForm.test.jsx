@@ -27,12 +27,15 @@ function StatefulSearchForm({ initial = BASE_STATE }) {
 describe('SearchForm', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('disables Find meals when there is no recognized pantry ingredient', () => {
+  it('disables Find meals when the pantry is empty', () => {
     render(<SearchForm formState={BASE_STATE} onChange={vi.fn()} onSubmit={vi.fn()} submitting={false} />)
     expect(screen.getByRole('button', { name: 'Find meals' })).toBeDisabled()
   })
 
-  it('disables Find meals when only unresolved ingredients are present', () => {
+  it('enables Find meals when only an unresolved (raw free-text) ingredient is present', () => {
+    // 2026-09-13 hotfix: a committed free-text chip is a valid
+    // ingredient for submission -- provider/backend grounding resolves
+    // it, so the form must not require canonical_id != null.
     render(
       <SearchForm
         formState={{ ...BASE_STATE, pantryItems: [{ id: 'unresolved:kohlrabi', label: 'kohlrabi', canonical_id: null, unresolved: true }] }}
@@ -41,7 +44,7 @@ describe('SearchForm', () => {
         submitting={false}
       />,
     )
-    expect(screen.getByRole('button', { name: 'Find meals' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Find meals' })).toBeEnabled()
   })
 
   it('enables Find meals once a recognized ingredient and total time are set', () => {

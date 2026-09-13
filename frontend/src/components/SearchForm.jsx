@@ -11,8 +11,12 @@ export function SearchForm({ formState, onChange, onSubmit, submitting }) {
   const budgetId = useId()
   const strictId = useId()
 
-  const hasRecognizedIngredient = formState.pantryItems.some((item) => !item.unresolved)
-  const canSubmit = hasRecognizedIngredient && Boolean(formState.totalTimeMinutes) && !submitting
+  // 2026-09-13 hotfix: a committed raw free-text chip (unresolved:
+  // true) is a valid ingredient for submission -- backend/provider
+  // grounding resolves it, so the form must not require
+  // canonical_id != null or "recognized" before enabling Find meals.
+  const hasAnyIngredient = formState.pantryItems.length > 0
+  const canSubmit = hasAnyIngredient && Boolean(formState.totalTimeMinutes) && !submitting
 
   function update(patch) {
     onChange({ ...formState, ...patch })
@@ -31,7 +35,7 @@ export function SearchForm({ formState, onChange, onSubmit, submitting }) {
         items={formState.pantryItems}
         onAdd={(item) => update({ pantryItems: [...formState.pantryItems, item] })}
         onRemove={(id) => update({ pantryItems: formState.pantryItems.filter((i) => i.id !== id) })}
-        helpText="At least one recognized ingredient is required."
+        helpText="At least one ingredient is required."
         variant="primary"
       />
 
