@@ -976,11 +976,14 @@ async def test_excluded_ingredient_is_deterministically_rejected_even_when_match
     )
     result = await orch.run(request)
 
-    from app.domain.models import RejectionReason
-
     assert result.status == "no_feasible_match"
-    [closest] = result.closest_alternatives[:1]
-    assert RejectionReason.EXCLUDED_INGREDIENT_PRESENT in closest.rejection_reasons
+    # 2026-09-13 correction (architect review): a candidate rejected
+    # ONLY for a true hard violation (here, an excluded ingredient) must
+    # never consume a closest_alternatives slot at all, not merely be
+    # filtered out later at the API mapping layer -- this is the sole
+    # evaluated candidate and it is a pure hard violation, so the
+    # orchestrator's own output is correctly empty.
+    assert result.closest_alternatives == []
 
 
 async def test_fully_unresolved_pantry_stops_immediately_without_fabricating_a_canonical_id(price_db):
@@ -3226,3 +3229,52 @@ async def test_regression_9_page_size_10_lets_a_second_page_be_evaluated_before_
     assert provider.search_calls[0].page_size == 10
     assert provider.search_calls[1].page == 2
     assert len(result.recommendations) + len(result.additional_options) == 20
+
+
+async def test_regression_10_closest_alternatives_never_starved_by_hard_violations_before_slot_limit(price_db):
+    # Architect review correction to the fix above: filtering to
+    # flexible-only-rejected candidates must happen BEFORE truncating
+    # to MAX_FINAL_RECOMMENDATIONS (3), not after. Previously the first
+    # 3 rejected candidates (by sort order) were taken regardless of
+    # WHY they were rejected, and app.api.recommend_mapping's own
+    # defense-in-depth filter removed any true hard violations among
+    # them AFTER the slots were already spent -- so two hard violations
+    # sorted ahead of three genuinely valid time-only alternatives could
+    # starve the user down to a single (or zero) visible alternative
+    # even though three good ones existed.
+    excluded_ingredient_recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Chicken Tomato Bake", cuisine="Italian",
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc"), RecipeIngredient(raw_name="tomato", raw_measure="100 g")],
+    )
+    strict_cuisine_mismatch_recipe = make_recipe(
+        id="recipeapi_io:2", provider_recipe_id="2", name="French Chicken", cuisine="French",
+        prep_time_minutes=5, cook_time_minutes=5,
+        ingredients=[RecipeIngredient(raw_name="Chicken", raw_measure="1 pc")],
+    )
+    flexible_recipes = {}
+    for i, total_minutes in ((3, 30), (4, 35), (5, 40)):
+        recipe = _timed_chicken_recipe(str(i), total_minutes)
+        flexible_recipes[str(i)] = recipe.model_copy(update={"cuisine": "Italian"})
+
+    recipes = {"1": excluded_ingredient_recipe, "2": strict_cuisine_mismatch_recipe, **flexible_recipes}
+    provider = FakeRecipeProvider(
+        "recipeapi_io",
+        searches=[ScriptedSearch(result=_search_result("1", "2", "3", "4", "5"))],
+        details_by_id=recipes,
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.INPUT_MAKES_SEARCH_IMPOSSIBLE)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(
+        _base_request(
+            pantry_raw=["chicken"], excluded_raw=["tomato"],
+            cuisine_preference="Italian", cuisine_strict=True,
+            max_total_time_minutes=15,
+        )
+    )
+
+    assert result.status == "no_feasible_match"
+    alt_ids = {c.recipe_id for c in result.closest_alternatives}
+    assert alt_ids == {"recipeapi_io:3", "recipeapi_io:4", "recipeapi_io:5"}
+    assert len(result.closest_alternatives) == 3  # the two hard violations consumed zero slots

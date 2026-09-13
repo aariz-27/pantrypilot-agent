@@ -50,7 +50,14 @@ from app.agent.tools import (
 from app.domain.cost_engine import MissingIngredientBreakdown, estimate_missing_ingredient_breakdown
 from app.domain.ingredient_normalizer import normalize_ingredient_name, normalize_pantry, normalize_raw_text_identity
 from app.domain.ingredient_resolution import IngredientResolutionState
-from app.domain.models import CandidateEvaluation, NormalizationStatus, Recipe, RejectionReason, UserConstraints
+from app.domain.models import (
+    FLEXIBLE_REJECTION_REASONS,
+    CandidateEvaluation,
+    NormalizationStatus,
+    Recipe,
+    RejectionReason,
+    UserConstraints,
+)
 from app.domain.ranker import rank_candidates
 from app.domain.serving_scaler import ScaledRecipe, scale_recipe_servings
 from app.integrations.llm_provider import LLMDecisionRequest, LLMProvider, LLMProviderMalformedResponseError
@@ -810,7 +817,29 @@ class AgentOrchestrator:
     # -- finalization ------------------------------------------------------
 
     def _closest_alternatives(self, state: AgentState) -> list[CandidateEvaluation]:
-        rejected = [c for c in state.evaluated_candidates if not c.hard_constraint_pass]
+        # 2026-09-13 correction (architect review): filter to
+        # FLEXIBLE-ONLY rejections BEFORE truncating to
+        # MAX_FINAL_RECOMMENDATIONS -- previously this truncated first
+        # and let app.api.recommend_mapping's own defense-in-depth
+        # filter (_is_never_relax_violation) remove true hard
+        # violations (excluded ingredient, strict cuisine mismatch,
+        # invalid/unusable data, disallowed Hard difficulty) AFTER the
+        # slots were already spent, so a batch of mostly hard-rejected
+        # candidates could starve out several genuinely valid time/
+        # budget-only alternatives sitting further down the evaluated
+        # list. A candidate is eligible here only when it failed
+        # hard_constraint_pass, has at least one rejection reason, and
+        # EVERY reason belongs to the shared FLEXIBLE_REJECTION_REASONS
+        # set (app.domain.models) -- the same set
+        # app.api.recommend_mapping._is_never_relax_violation checks,
+        # which remains in place unchanged as defense in depth.
+        rejected = [
+            c
+            for c in state.evaluated_candidates
+            if not c.hard_constraint_pass
+            and c.rejection_reasons
+            and all(reason in FLEXIBLE_REJECTION_REASONS for reason in c.rejection_reasons)
+        ]
         rejected.sort(key=lambda c: (len(c.rejection_reasons), -c.pantry_coverage))
         return rejected[:MAX_FINAL_RECOMMENDATIONS]
 

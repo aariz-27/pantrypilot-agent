@@ -12,19 +12,8 @@ from __future__ import annotations
 from app.agent.orchestrator import AgentResult
 from app.domain.ingredient_autocomplete import humanize_canonical_id
 from app.domain.ingredient_normalizer import normalize_raw_text_identity
-from app.domain.models import CandidateEvaluation, RejectionReason
+from app.domain.models import FLEXIBLE_REJECTION_REASONS, CandidateEvaluation, RejectionReason
 from app.schemas.recommend import MissingIngredientCost, RecipeCard, RecommendResponse, UnresolvedIngredient
-
-# Rejection reasons that represent a flexible target (time/budget) a
-# "closest alternative" may legitimately exceed, per ticket section 18.
-_FLEXIBLE_REJECTION_REASONS = frozenset(
-    {
-        RejectionReason.MAX_TOTAL_TIME_EXCEEDED,
-        RejectionReason.TIME_INCOMPLETE_WITH_CONSTRAINT,
-        RejectionReason.BUDGET_EXCEEDED,
-        RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE,
-    }
-)
 
 
 def _display_name(raw_name: str, canonical_id: str | None) -> str:
@@ -37,7 +26,7 @@ def _is_never_relax_violation(candidate: CandidateEvaluation) -> bool:
     18): excluded ingredient, strict cuisine mismatch, invalid/unusable
     data, or the Hard-difficulty filter."""
 
-    return any(reason not in _FLEXIBLE_REJECTION_REASONS for reason in candidate.rejection_reasons)
+    return any(reason not in FLEXIBLE_REJECTION_REASONS for reason in candidate.rejection_reasons)
 
 
 def _deviation_reasons(

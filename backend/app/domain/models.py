@@ -149,6 +149,26 @@ class RejectionReason(str, Enum):
     HARD_DIFFICULTY_EXCLUDED = "hard_difficulty_excluded"
 
 
+# Rejection reasons that represent a flexible (soft-preference) target --
+# time/budget -- a "closest alternative" may legitimately miss (ticket
+# section 18 / the 2026-09-13 recommendation-behavior fix). Shared, one
+# deterministic place, between app.agent.orchestrator (which decides
+# which candidates are ELIGIBLE to consume a closest_alternatives slot
+# in the first place) and app.api.recommend_mapping (which independently
+# re-checks the same rule as defense in depth before a candidate ever
+# reaches the public response). Every other rejection reason (excluded
+# ingredient, strict cuisine mismatch, invalid/unusable data, disallowed
+# Hard difficulty) is a true hard violation and must never be relaxed.
+FLEXIBLE_REJECTION_REASONS = frozenset(
+    {
+        RejectionReason.MAX_TOTAL_TIME_EXCEEDED,
+        RejectionReason.TIME_INCOMPLETE_WITH_CONSTRAINT,
+        RejectionReason.BUDGET_EXCEEDED,
+        RejectionReason.BUDGET_INDETERMINATE_COST_INCOMPLETE,
+    }
+)
+
+
 class UserConstraints(BaseModel):
     """Normalized user constraints shared by the constraint evaluator
     and the ranker (budget, exclusions, cuisine, timing)."""
