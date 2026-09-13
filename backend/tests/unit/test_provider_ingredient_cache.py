@@ -45,3 +45,19 @@ def test_clear_removes_everything():
     set_cached_match("chicken", ProviderIngredient("125", "Chicken", "poultry"))
     clear_provider_ingredient_cache()
     assert get_cached_match("chicken") is None
+
+
+def test_had_candidates_defaults_to_false():
+    set_cached_match("zzznotreal", None)
+    assert get_cached_match("zzznotreal").had_candidates is False
+
+
+def test_had_candidates_is_cached_for_a_no_safe_match_result():
+    # 2026-09-13 hotfix: a broad real word ("chicken") whose catalogue
+    # query returns candidates but no single safe exact/variant match
+    # must be distinguishable, even from cache, from a genuine typo
+    # whose catalogue query returns nothing at all.
+    set_cached_match("chicken", None, had_candidates=True)
+    cached = get_cached_match("chicken")
+    assert cached.match is None
+    assert cached.had_candidates is True

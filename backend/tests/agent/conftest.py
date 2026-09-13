@@ -23,7 +23,24 @@ from app.integrations.llm_provider import (
     LLMDecisionRequest,
     LLMDecisionResponse,
 )
+from app.integrations.provider_ingredient_cache import clear_provider_ingredient_cache
 from app.recipe.provider import SearchResult, SearchStrategy
+
+
+@pytest.fixture(autouse=True)
+def _clear_provider_ingredient_cache_between_tests():
+    # 2026-09-13 hotfix (generic-provider-direct-fallback): the cache is
+    # process-global (app.integrations.provider_ingredient_cache), so
+    # without this, one test resolving e.g. "chicken" to an exact
+    # catalogue match would leak that cached result into a LATER test
+    # that deliberately sets up a DIFFERENT catalogue response for the
+    # same literal query text -- confirmed live: a new regression test
+    # in test_orchestrator_scenarios.py passed in isolation but failed
+    # only when run as part of the full suite, because an earlier test
+    # had already cached an exact "chicken" -> "Chicken" match.
+    clear_provider_ingredient_cache()
+    yield
+    clear_provider_ingredient_cache()
 
 
 class FakeLLMProvider:

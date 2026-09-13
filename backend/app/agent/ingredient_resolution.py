@@ -1,12 +1,23 @@
 """Unified ingredient resolution pipeline (2026-09-13 ticket).
 
-Implements the preferred resolution order (ticket section 9):
+Implements the preferred resolution order (ticket section 9), amended
+2026-09-13 (hotfix: generic-provider-direct-fallback) with an explicit
+safe direct-term fallback (new step 4a) so an ordinary, correctly
+spelled, broad term ("chicken", "rice") is never escalated to the LLM
+or declared UNRESOLVED just because no SINGLE catalogue entry is
+safely exact/singular-plural-equal to it:
 
     1. local canonical / alias match
     2. known cached provider mapping
     3. direct natural-language provider term
     4. RecipeAPI /ingredients lookup if needed
-    5. controlled LLM intent interpretation if spelling/intent unresolved
+    4a. if the catalogue returned candidates but none safely matched,
+        that non-empty result is itself evidence the term is real
+        vocabulary -- preserve the term directly (PROVIDER_DIRECT)
+        instead of escalating to the LLM
+    5. controlled LLM intent interpretation, reached only when the
+       catalogue returned NO candidates at all (genuine suspicion of a
+       typo, e.g. "chiken")
     6. ground the LLM candidate against local/provider vocabulary
     7. if a safe match exists, proceed
     8. if ambiguous, return a structured unresolved/ambiguous state
@@ -58,6 +69,15 @@ class ResolvedProviderTerm:
     provider_term: str
     state: IngredientResolutionState
     matched_provider_id: str | None = None
+    # 2026-09-13 hotfix (generic-provider-direct-fallback): whether the
+    # catalogue query returned ANY candidates at all, even when `state`
+    # is UNRESOLVED (none of them cleared a safe-match tier). This is
+    # the deterministic signal resolve_pantry_ingredient uses to tell
+    # an ordinary broad real word ("chicken") apart from a genuine typo
+    # ("chiken") without an LLM call: a real word's catalogue query
+    # returns plenty of related candidates even with no single exact
+    # match; a typo's query returns nothing at all.
+    had_candidates: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,13 +122,16 @@ async def resolve_provider_search_term(
                 return ResolvedProviderTerm(
                     cached.match.name, IngredientResolutionState.PROVIDER_CATALOG_RESOLVED, cached.match.provider_id
                 )
-            return ResolvedProviderTerm(humanized, IngredientResolutionState.UNRESOLVED)
+            return ResolvedProviderTerm(
+                humanized, IngredientResolutionState.UNRESOLVED, had_candidates=cached.had_candidates
+            )
 
     if catalogue_lookup is None:
         return ResolvedProviderTerm(humanized, IngredientResolutionState.PROVIDER_DIRECT)
 
     match: ProviderIngredient | None = None
     state = IngredientResolutionState.UNRESOLVED
+    had_candidates = False
     # Try the direct spelling first, and -- only if that returns no
     # safe match -- a bounded number of deterministic singular/plural
     # QUERY variants (confirmed live gap, 2026-09-13: RecipeAPI.io does
@@ -127,19 +150,20 @@ async def resolve_provider_search_term(
             # best-effort humanized text and let the actual /recipes
             # search proceed.
             return ResolvedProviderTerm(humanized, IngredientResolutionState.PROVIDER_DIRECT)
+        had_candidates = had_candidates or bool(candidates)
         match, state = select_safe_provider_match(humanized, candidates)
         if match is not None or state == IngredientResolutionState.AMBIGUOUS:
             break
 
     if use_cache:
-        set_cached_match(cache_key, match)
+        set_cached_match(cache_key, match, had_candidates=had_candidates)
     if match is not None:
         return ResolvedProviderTerm(match.name, state, match.provider_id)
     # UNRESOLVED or AMBIGUOUS at the catalogue level still returns a
     # usable term (ticket section 11's own alternative: "preserve the
     # raw user term if provider search can safely use it") -- this
     # function never blocks a search, it only tries to IMPROVE the term.
-    return ResolvedProviderTerm(humanized, state)
+    return ResolvedProviderTerm(humanized, state, had_candidates=had_candidates)
 
 
 async def resolve_pantry_ingredient(
@@ -182,12 +206,42 @@ async def resolve_pantry_ingredient(
         # Ticket section 11: do not silently narrow -- an ambiguous
         # catalogue result is not, by itself, usable as a search anchor.
         return PantryTermResolution(raw_text, None, None, IngredientResolutionState.AMBIGUOUS)
+    # Note: PROVIDER_DIRECT here (catalogue unavailable, or its lookup
+    # failed entirely) deliberately falls through to the LLM step
+    # below, exactly like before this hotfix -- an absent/failed
+    # catalogue is NOT evidence the term is valid vocabulary (unlike
+    # the had_candidates branch just below, which reflects an actual
+    # successful catalogue query), so it must not skip typo correction.
+    # A real typo ("chiken brest") with no catalogue configured must
+    # still reach the LLM here, not be sent to the provider unchanged.
+    if provider_resolved.state == IngredientResolutionState.UNRESOLVED and provider_resolved.had_candidates:
+        # 2026-09-13 hotfix (generic-provider-direct-fallback): the
+        # confirmed production root cause. A broad, ordinary, correctly
+        # spelled term ("chicken", "rice") legitimately has no single
+        # catalogue entry that is safely EXACT/singular-plural-equal to
+        # it -- the catalogue instead returns many narrower entries
+        # ("Chicken Breast", "Chicken Broth", ...). That non-empty
+        # candidate list is itself strong deterministic evidence the
+        # term is real vocabulary, not a typo -- so it must not be
+        # escalated to the LLM (an ordinary word needs no "correction",
+        # and per ticket section 3/12 of the prior tickets, PantryPilot
+        # must never silently narrow "chicken" into one of those
+        # candidates either). Preserve the user's own broad term as a
+        # direct, ungrounded-but-safe search anchor instead of
+        # declaring it fully UNRESOLVED and silently skipping recipe
+        # search altogether (the exact previous production bug: /api/
+        # recommend still returned 200 with no /recipes call ever made).
+        return PantryTermResolution(
+            raw_text, None, provider_resolved.provider_term, IngredientResolutionState.PROVIDER_DIRECT
+        )
 
-    # Steps 5-7: controlled LLM intent interpretation, only reached when
-    # local AND direct catalogue grounding both failed -- an optional
-    # enhancement (ticket section 24), never the only route to an
-    # ordinary correctly-spelled ingredient (those already returned
-    # above via steps 1-4).
+    # Steps 5-7: controlled LLM intent interpretation, reached only when
+    # local resolution AND catalogue grounding both failed AND the
+    # catalogue gave no evidence the term is real vocabulary (zero
+    # candidates at all) -- an optional enhancement (ticket section 24)
+    # for actual suspicious/unresolved spellings, never required for an
+    # ordinary correctly-spelled ingredient (those are now handled
+    # above without ever reaching the LLM).
     if llm_provider is not None:
         try:
             correction = await llm_provider.propose_ingredient_correction(IngredientCorrectionRequest(cleaned))
