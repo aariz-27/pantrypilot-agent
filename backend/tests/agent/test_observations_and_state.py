@@ -206,8 +206,46 @@ def test_candidate_contains_anchor_exact_canonical_match_still_works():
 
 
 def test_candidate_contains_anchor_title_fallback_still_works():
-    # Unchanged, pre-existing branch (PR #15 sixth correction pass) --
-    # this hotfix touches only the ingredient raw_name branch above.
+    # Pre-existing branch (PR #15 sixth correction pass), now routed
+    # through the same _phrase_matches_as_whole_words helper as the
+    # ingredient raw_name branch (2026-09-13 follow-up correction) --
+    # a valid multi-word title match must still be recognized.
     recipe = _recipe("Ankara Pan-fried Lamb Cubes", "Lamb")
     recipe_by_id = {"recipeapi_io:1": recipe}
     assert candidate_contains_anchor(_candidate(), recipe_by_id, "lamb_cubes") is True
+
+
+def test_candidate_contains_anchor_title_fallback_matches_ground_beef_phrase():
+    recipe = _recipe("Easy Ground Beef Tacos", "Beef")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "ground_beef") is True
+
+
+def test_candidate_contains_anchor_title_fallback_matches_generic_chicken():
+    recipe = _recipe("Roast Chicken", "Whole Chicken")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "chicken") is True
+
+
+# --- 2026-09-13 follow-up correction: title fallback was still using --------
+# unrestricted substring matching after the raw_name branch was fixed
+# (architect review finding) -- both branches must reject the same
+# substring-fragment false positives.
+
+
+def test_candidate_contains_anchor_title_fallback_rejects_egg_eggplant():
+    recipe = _recipe("Eggplant Curry", "Aubergine")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "egg") is False
+
+
+def test_candidate_contains_anchor_title_fallback_rejects_pea_peanut():
+    recipe = _recipe("Peanut Noodles", "Peanut Butter")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "pea") is False
+
+
+def test_candidate_contains_anchor_title_fallback_rejects_ham_champagne():
+    recipe = _recipe("Champagne Chicken", "Chicken Breast")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "ham") is False

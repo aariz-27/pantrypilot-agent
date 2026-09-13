@@ -169,7 +169,7 @@ def candidate_contains_anchor(
     if any(_phrase_matches_as_whole_words(anchor_phrase, ing.raw_name) for ing in recipe.ingredients):
         return True
 
-    return anchor_phrase in (recipe.name or "").lower()
+    return _phrase_matches_as_whole_words(anchor_phrase, recipe.name)
 
 
 def _phrase_matches_as_whole_words(phrase: str, text: str | None) -> bool:
