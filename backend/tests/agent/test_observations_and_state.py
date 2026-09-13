@@ -3,9 +3,16 @@ independent of the full orchestrator loop."""
 
 from __future__ import annotations
 
-from app.agent.observations import ObservationCandidate, SearchObservation, build_decision_payload
+from app.agent.observations import (
+    ObservationCandidate,
+    SearchObservation,
+    _phrase_matches_as_whole_words,
+    build_decision_payload,
+    candidate_contains_anchor,
+)
 from app.agent.policy import SYSTEM_POLICY
 from app.agent.state import MAX_EVALUATED_CANDIDATES, MAX_SEARCH_ATTEMPTS, AgentState
+from app.domain.models import CandidateEvaluation, Recipe, RecipeIngredient
 
 
 def _state(**overrides) -> AgentState:
@@ -114,3 +121,93 @@ def test_state_capacity_and_exhaustion_helpers():
     ]
     assert state.candidate_cap_reached()
     assert state.remaining_candidate_capacity() == 0
+
+
+# --- 2026-09-13 correction: boundary-safe generic anchor relevance ----------
+# candidate_contains_anchor's raw_name branch (added by an earlier
+# broadening commit) previously used unrestricted substring matching
+# ("anchor_phrase in raw_name"), which could false-positive on an
+# unrelated word that merely CONTAINS the anchor as a fragment (egg ->
+# eggplant, pea -> peanut, ham -> champagne). It now uses
+# _phrase_matches_as_whole_words, a generic word/token-boundary-aware
+# check with no ingredient-specific special-casing.
+
+
+def test_phrase_matches_as_whole_words_single_word_anchor_examples():
+    assert _phrase_matches_as_whole_words("chicken", "Chicken Breast") is True
+    assert _phrase_matches_as_whole_words("chicken", "Boneless Chicken Thigh") is True
+    assert _phrase_matches_as_whole_words("chicken", "Chicken Drumstick") is True
+    assert _phrase_matches_as_whole_words("fish", "White Fish Fillet") is True
+
+
+def test_phrase_matches_as_whole_words_multi_word_anchor_preserves_phrase_semantics():
+    assert _phrase_matches_as_whole_words("ground beef", "Lean Ground Beef") is True
+
+
+def test_phrase_matches_as_whole_words_rejects_substring_fragment_false_positives():
+    assert _phrase_matches_as_whole_words("egg", "Eggplant") is False
+    assert _phrase_matches_as_whole_words("pea", "Peanut") is False
+    assert _phrase_matches_as_whole_words("ham", "Champagne") is False
+
+
+def test_phrase_matches_as_whole_words_multi_word_anchor_does_not_match_a_bare_substring():
+    # "beef" alone appearing is not enough for the two-word anchor
+    # "ground beef" -- the whole phrase must appear, preserving
+    # multi-word phrase semantics rather than degrading to per-word OR.
+    assert _phrase_matches_as_whole_words("ground beef", "Beef Stew") is False
+
+
+def test_phrase_matches_as_whole_words_handles_empty_inputs():
+    assert _phrase_matches_as_whole_words("", "Chicken Breast") is False
+    assert _phrase_matches_as_whole_words("chicken", "") is False
+    assert _phrase_matches_as_whole_words("chicken", None) is False
+
+
+def _recipe(name: str, *raw_names: str) -> Recipe:
+    return Recipe(
+        id="recipeapi_io:1",
+        provider="recipeapi_io",
+        provider_recipe_id="1",
+        name=name,
+        ingredients=[RecipeIngredient(raw_name=raw_name) for raw_name in raw_names],
+    )
+
+
+def _candidate(recipe_id: str = "recipeapi_io:1") -> CandidateEvaluation:
+    return CandidateEvaluation(
+        recipe_id=recipe_id, provider="recipeapi_io", pantry_coverage=0.0,
+        matched_ingredients=[], missing_ingredients=[], missing_count=0,
+    )
+
+
+def test_candidate_contains_anchor_generic_chicken_matches_specific_cut_ingredient():
+    recipe = _recipe("Roast Chicken", "Chicken Breast")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "chicken") is True
+
+
+def test_candidate_contains_anchor_generic_egg_does_not_match_eggplant_ingredient():
+    # Title deliberately avoids the word "eggplant" too, so this
+    # isolates the ingredient raw_name branch this hotfix corrects --
+    # the separate, unchanged title-fallback branch's own substring
+    # behavior is exercised by test_candidate_contains_anchor_title_fallback_still_works.
+    recipe = _recipe("Vegetable Curry", "Eggplant")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "egg") is False
+
+
+def test_candidate_contains_anchor_exact_canonical_match_still_works():
+    recipe = Recipe(
+        id="recipeapi_io:1", provider="recipeapi_io", provider_recipe_id="1", name="Chicken Breast Stir Fry",
+        ingredients=[RecipeIngredient(raw_name="Chicken Breast", canonical_id="chicken_breast")],
+    )
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "chicken_breast") is True
+
+
+def test_candidate_contains_anchor_title_fallback_still_works():
+    # Unchanged, pre-existing branch (PR #15 sixth correction pass) --
+    # this hotfix touches only the ingredient raw_name branch above.
+    recipe = _recipe("Ankara Pan-fried Lamb Cubes", "Lamb")
+    recipe_by_id = {"recipeapi_io:1": recipe}
+    assert candidate_contains_anchor(_candidate(), recipe_by_id, "lamb_cubes") is True

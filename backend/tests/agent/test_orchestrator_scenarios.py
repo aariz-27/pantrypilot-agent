@@ -2511,6 +2511,41 @@ async def test_grounded_relevance_never_affects_pantry_matching_missing_ingredie
     assert stored_recipe.ingredients[0].canonical_id is None
 
 
+async def test_generic_free_text_anchor_relevance_never_implies_pantry_ownership_of_specific_cut(price_db):
+    # 2026-09-13 correction's own central concern: "chicken" (a generic,
+    # free-text pantry anchor with NO canonical id at all) is
+    # search-RELEVANT to a recipe whose ingredient is the specific cut
+    # "Chicken Breast" (via candidate_contains_anchor's boundary-safe
+    # raw_name branch) -- but that must never be read as "the user owns
+    # chicken_breast". Pantry matching normalizes "Chicken Breast" to
+    # the real canonical id chicken_breast independently, and since the
+    # user's pantry only ever contained the free-text "chicken" (never
+    # promoted into pantry_canonical), chicken_breast correctly remains
+    # unmatched/missing -- completely unaffected by anchor relevance.
+    recipe = make_recipe(
+        id="recipeapi_io:1", provider_recipe_id="1", name="Pan-Seared Chicken Breast",
+        ingredients=[RecipeIngredient(raw_name="Chicken Breast", raw_measure="1 pc")],
+    )
+    provider = FakeRecipeProvider(
+        "recipeapi_io", searches=[ScriptedSearch(result=_search_result("1"))], details_by_id={"1": recipe}
+    )
+    llm = FakeLLMProvider([_search_action(["chicken"]), _stop_action(StopReason.SUFFICIENT_FEASIBLE_CANDIDATES)])
+    orch = AgentOrchestrator(llm, {"recipeapi_io": provider}, PriceRepository(price_db))
+
+    result = await orch.run(_base_request(pantry_raw=["chicken"]))
+
+    # Search relevance: recognized via the new boundary-safe raw_name match.
+    assert result.anchor_match_by_id["recipeapi_io:1"] is True
+    candidate = result.recommendations[0]
+    # Pantry ownership: chicken_breast was never in the user's pantry
+    # (only free-text "chicken" was) -- normalization still assigns it
+    # the real canonical id independently of anchor relevance, but it
+    # is correctly reported as missing, never matched/owned.
+    assert "chicken_breast" not in candidate.matched_ingredients
+    stored_recipe = result.recipe_by_id["recipeapi_io:1"]
+    assert stored_recipe.ingredients[0].canonical_id == "chicken_breast"
+
+
 # --- Module F 4.8: prompt/tool injection boundary regression -----------------
 
 
